@@ -1,6 +1,8 @@
 // SPDX-License-Identifier: GPL-3.0-or-later
 #include <cullfinch/testsupport/AssetBuilder.h>
 
+#include <utility>
+
 namespace cullfinch::testsupport {
 
 AssetBuilder::AssetBuilder(QString stem) {

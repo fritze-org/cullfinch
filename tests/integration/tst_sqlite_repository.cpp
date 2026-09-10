@@ -6,6 +6,8 @@
 #include <QTemporaryDir>
 #include <QTest>
 
+#include <memory>
+
 using namespace cullfinch;
 using cullfinch::testsupport::AssetBuilder;
 

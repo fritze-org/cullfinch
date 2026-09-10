@@ -9,6 +9,8 @@
 #include <QApplication>
 #include <QComboBox>
 #include <QFileDialog>
+#include <QItemSelectionModel>
+#include <QJsonObject>
 #include <QKeySequence>
 #include <QMenu>
 #include <QMenuBar>

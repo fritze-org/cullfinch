@@ -7,6 +7,7 @@
 #include <cullfinch/testsupport/AssetBuilder.h>
 #include <cullfinch/testsupport/FakeRepository.h>
 
+#include <QJsonObject>
 #include <QSignalSpy>
 #include <QTest>
 

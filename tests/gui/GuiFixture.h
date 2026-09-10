@@ -7,6 +7,10 @@
 #include <cullfinch/testsupport/FakeTrashAdapter.h>
 #include <cullfinch/testsupport/TempCollection.h>
 
+#include <QCoreApplication>
+#include <QElapsedTimer>
+#include <QEventLoop>
+#include <QGuiApplication>
 #include <QSignalSpy>
 #include <QTemporaryDir>
 #include <QTest>

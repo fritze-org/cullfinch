@@ -6,6 +6,7 @@
 
 #include <QAction>
 #include <QCheckBox>
+#include <QJsonObject>
 #include <QKeyEvent>
 #include <QLabel>
 #include <QPushButton>

@@ -4,6 +4,9 @@
 #include <cullfinch/ui/ReviewDialog.h>
 
 #include <QAction>
+#include <QItemSelectionModel>
+#include <QJsonObject>
+#include <QKeySequence>
 #include <QLabel>
 #include <QListView>
 #include <QTest>

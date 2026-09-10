@@ -6,6 +6,7 @@
 
 #include <QAction>
 #include <QLabel>
+#include <QPointF>
 #include <QPushButton>
 #include <QTest>
 
