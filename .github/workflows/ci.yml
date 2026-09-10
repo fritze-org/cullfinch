@@ -120,12 +120,21 @@ jobs:
       # Cache keys cover the OS, architecture, compiler identity, the manifest
       # and baseline, and the triplets. vcpkg still validates ABI compatibility
       # internally; a complete CMake build tree is never restored.
+      #
+      # buildtrees, packages and downloads are excluded: they are intermediate
+      # output, and on this project buildtrees alone is 9.8 GB against 68 MB for
+      # the checkout itself. Caching them wholesale blew past GitHub's 10 GB
+      # per-repository limit and made the entries evict each other. The binary
+      # cache is the part worth keeping.
       - name: Restore the vcpkg dependency cache
         id: vcpkg-cache
         uses: actions/cache/restore@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
         with:
           path: |
             .vcpkg
+            !.vcpkg/*/buildtrees
+            !.vcpkg/*/packages
+            !.vcpkg/*/downloads
             .vcpkg-binary-cache
           key: >-
             vcpkg-${{ matrix.runner }}-${{ matrix.preset }}-${{
@@ -203,6 +212,9 @@ jobs:
         with:
           path: |
             .vcpkg
+            !.vcpkg/*/buildtrees
+            !.vcpkg/*/packages
+            !.vcpkg/*/downloads
             .vcpkg-binary-cache
           key: ${{ steps.vcpkg-cache.outputs.cache-primary-key }}
 
@@ -254,6 +266,9 @@ jobs:
         with:
           path: |
             .vcpkg
+            !.vcpkg/*/buildtrees
+            !.vcpkg/*/packages
+            !.vcpkg/*/downloads
             .vcpkg-binary-cache
           key: >-
             vcpkg-${{ matrix.runner }}-${{ matrix.preset }}-${{
@@ -297,6 +312,9 @@ jobs:
         with:
           path: |
             .vcpkg
+            !.vcpkg/*/buildtrees
+            !.vcpkg/*/packages
+            !.vcpkg/*/downloads
             .vcpkg-binary-cache
           key: ${{ steps.vcpkg-cache.outputs.cache-primary-key }}
 
@@ -333,6 +351,9 @@ jobs:
         with:
           path: |
             .vcpkg
+            !.vcpkg/*/buildtrees
+            !.vcpkg/*/packages
+            !.vcpkg/*/downloads
             .vcpkg-binary-cache
           key: >-
             vcpkg-ubuntu-24.04-coverage-${{
@@ -414,6 +435,9 @@ jobs:
         with:
           path: |
             .vcpkg
+            !.vcpkg/*/buildtrees
+            !.vcpkg/*/packages
+            !.vcpkg/*/downloads
             .vcpkg-binary-cache
           key: ${{ steps.vcpkg-cache.outputs.cache-primary-key }}
 
