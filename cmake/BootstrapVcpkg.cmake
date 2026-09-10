@@ -122,44 +122,73 @@ set(VCPKG_OVERLAY_TRIPLETS
     "${_cullfinch_source_dir}/cmake/triplets"
     CACHE STRING "cullfinch overlay triplets" FORCE)
 
-if(NOT DEFINED VCPKG_TARGET_TRIPLET)
-  if(CMAKE_HOST_SYSTEM_NAME STREQUAL "Darwin")
-    if(CMAKE_OSX_ARCHITECTURES MATCHES "x86_64")
-      set(_triplet "x64-osx-cullfinch")
-    elseif(CMAKE_OSX_ARCHITECTURES MATCHES "arm64")
-      set(_triplet "arm64-osx-cullfinch")
-    elseif(CMAKE_HOST_SYSTEM_PROCESSOR STREQUAL "arm64")
-      set(_triplet "arm64-osx-cullfinch")
-    else()
-      set(_triplet "x64-osx-cullfinch")
-    endif()
-  elseif(CMAKE_HOST_SYSTEM_NAME STREQUAL "Linux")
-    set(_triplet "x64-linux-cullfinch")
+# CMAKE_HOST_SYSTEM_PROCESSOR is not populated until project() runs, and every vcpkg variable has to
+# be set before that. Querying the machine directly is what makes this correct: relying on that
+# empty variable silently selected the x86_64 triplet on Apple Silicon, cross-built an x86_64 Qt,
+# and then failed at link time against arm64 application objects.
+cmake_host_system_information(RESULT _cullfinch_host_arch QUERY OS_PLATFORM)
+
+if(CMAKE_HOST_SYSTEM_NAME STREQUAL "Darwin")
+  # An explicit CMAKE_OSX_ARCHITECTURES wins; otherwise build for the machine doing the building.
+  if(CMAKE_OSX_ARCHITECTURES MATCHES "arm64")
+    set(_cullfinch_arch "arm64")
+  elseif(CMAKE_OSX_ARCHITECTURES MATCHES "x86_64")
+    set(_cullfinch_arch "x86_64")
+  elseif(_cullfinch_host_arch STREQUAL "arm64")
+    set(_cullfinch_arch "arm64")
   else()
-    message(FATAL_ERROR "cullfinch supports Linux and macOS only "
-                        "(host is '${CMAKE_HOST_SYSTEM_NAME}').")
+    set(_cullfinch_arch "x86_64")
   endif()
+
+  if(_cullfinch_arch STREQUAL "arm64")
+    set(_cullfinch_triplet "arm64-osx-cullfinch")
+  else()
+    set(_cullfinch_triplet "x64-osx-cullfinch")
+  endif()
+
+  # The application must be built for the same architecture and deployment target as its
+  # dependencies, or the two cannot be linked together.
+  if(NOT CMAKE_OSX_ARCHITECTURES)
+    set(CMAKE_OSX_ARCHITECTURES
+        "${_cullfinch_arch}"
+        CACHE STRING "cullfinch target architecture")
+  endif()
+  if(NOT CMAKE_OSX_DEPLOYMENT_TARGET)
+    set(CMAKE_OSX_DEPLOYMENT_TARGET
+        "13.0"
+        CACHE STRING "cullfinch macOS deployment target")
+  endif()
+
+  if(_cullfinch_host_arch STREQUAL "arm64")
+    set(_cullfinch_host_triplet "arm64-osx-cullfinch")
+  else()
+    set(_cullfinch_host_triplet "x64-osx-cullfinch")
+  endif()
+elseif(CMAKE_HOST_SYSTEM_NAME STREQUAL "Linux")
+  if(NOT _cullfinch_host_arch MATCHES "^(x86_64|amd64|AMD64)$")
+    message(
+      FATAL_ERROR
+        "cullfinch ships an x86-64 Linux triplet only; this machine reports "
+        "'${_cullfinch_host_arch}'. Add a triplet under cmake/triplets and "
+        "extend this selection to build here.")
+  endif()
+  set(_cullfinch_triplet "x64-linux-cullfinch")
+  set(_cullfinch_host_triplet "x64-linux-cullfinch")
+else()
+  message(FATAL_ERROR "cullfinch supports Linux and macOS only (host is "
+                      "'${CMAKE_HOST_SYSTEM_NAME}').")
+endif()
+
+if(NOT DEFINED VCPKG_TARGET_TRIPLET)
   set(VCPKG_TARGET_TRIPLET
-      "${_triplet}"
+      "${_cullfinch_triplet}"
       CACHE STRING "vcpkg target triplet" FORCE)
 endif()
 
 if(NOT DEFINED VCPKG_HOST_TRIPLET)
-  if(CMAKE_HOST_SYSTEM_NAME STREQUAL "Darwin")
-    if(CMAKE_HOST_SYSTEM_PROCESSOR STREQUAL "arm64")
-      set(VCPKG_HOST_TRIPLET
-          "arm64-osx-cullfinch"
-          CACHE STRING "vcpkg host triplet" FORCE)
-    else()
-      set(VCPKG_HOST_TRIPLET
-          "x64-osx-cullfinch"
-          CACHE STRING "vcpkg host triplet" FORCE)
-    endif()
-  else()
-    set(VCPKG_HOST_TRIPLET
-        "x64-linux-cullfinch"
-        CACHE STRING "vcpkg host triplet" FORCE)
-  endif()
+  set(VCPKG_HOST_TRIPLET
+      "${_cullfinch_host_triplet}"
+      CACHE STRING "vcpkg host triplet" FORCE)
 endif()
 
 # ---------------------------------------------------------------------------
@@ -368,5 +397,6 @@ set(CULLFINCH_BOOTSTRAP_VCPKG_DONE
     CACHE INTERNAL "bootstrap completed")
 
 message(STATUS "cullfinch: vcpkg baseline ${_cullfinch_baseline}")
+message(STATUS "cullfinch: host machine  ${_cullfinch_host_arch}")
 message(STATUS "cullfinch: vcpkg triplet  ${VCPKG_TARGET_TRIPLET} (host ${VCPKG_HOST_TRIPLET})")
 message(STATUS "cullfinch: vcpkg features ${VCPKG_MANIFEST_FEATURES}")
