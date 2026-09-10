@@ -28,6 +28,11 @@ __pycache__/
 *.AppImage
 *.dmg
 
+# Specification revisions and their diffs are inputs to the work, dropped in
+# the working tree; docs/design.md is the copy the project keeps.
+/image-culling-design-spec.md
+/cullfinch-v*.diff
+
 # Editor and OS noise
 .cache/
 .idea/
