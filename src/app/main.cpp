@@ -113,14 +113,73 @@ void reportPlatformBackend() {
     }
 }
 
-} // namespace
+/// Options shared by the console and GUI startup paths.
+struct CommandLine {
+    QCommandLineParser parser;
+    QCommandLineOption dataDirectory{
+        QStringLiteral("data-dir"),
+        QCoreApplication::translate("cullfinch",
+                                    "Use an alternative directory for the cullfinch database."),
+        QStringLiteral("path")};
+    QCommandLineOption cacheDirectory{
+        QStringLiteral("cache-dir"),
+        QCoreApplication::translate("cullfinch", "Use an alternative thumbnail cache directory."),
+        QStringLiteral("path")};
+    QCommandLineOption smoke{
+        QStringLiteral("smoke"),
+        QCoreApplication::translate("cullfinch",
+                                    "Run a non-interactive package verification and exit.")};
 
-int main(int argc, char* argv[]) {
-    QApplication application(argc, argv);
+    CommandLine() {
+        parser.setApplicationDescription(
+            QCoreApplication::translate("cullfinch", "Cull a directory of photos."));
+        parser.addHelpOption();
+        parser.addVersionOption();
+        parser.addPositionalArgument(
+            QStringLiteral("directory"),
+            QCoreApplication::translate("cullfinch", "Directory of photos to open."));
+        parser.addOption(dataDirectory);
+        parser.addOption(cacheDirectory);
+        parser.addOption(smoke);
+    }
+};
+
+/// True when the arguments only ask something that needs no display.
+bool wantsConsoleOnly(int argc, char* argv[]) {
+    for (int index = 1; index < argc; ++index) {
+        const QString argument = QString::fromLocal8Bit(argv[index]);
+        if (argument == QLatin1String("--version") || argument == QLatin1String("-v") ||
+            argument == QLatin1String("--help") || argument == QLatin1String("-h")) {
+            return true;
+        }
+    }
+    return false;
+}
+
+void setApplicationIdentity() {
     QCoreApplication::setOrganizationName(QStringLiteral("cullfinch"));
     QCoreApplication::setOrganizationDomain(QStringLiteral("cullfinch.invalid"));
     QCoreApplication::setApplicationName(QStringLiteral("cullfinch"));
     QCoreApplication::setApplicationVersion(QStringLiteral(CULLFINCH_VERSION));
+}
+
+} // namespace
+
+int main(int argc, char* argv[]) {
+    // --version and --help must answer without a display. Building a
+    // QApplication first would make them depend on a usable GUI platform
+    // plugin, so a packaging check could not even ask which build it is
+    // holding -- which is exactly how this was found.
+    if (wantsConsoleOnly(argc, argv)) {
+        QCoreApplication console(argc, argv);
+        setApplicationIdentity();
+        CommandLine commandLine;
+        commandLine.parser.process(console);
+        return 0;
+    }
+
+    QApplication application(argc, argv);
+    setApplicationIdentity();
 
     // Matches the installed .desktop basename so the desktop can identify
     // Cullfinch for window grouping, the task switcher and its icon. Wayland
@@ -128,46 +187,20 @@ int main(int argc, char* argv[]) {
     // up unnamed and ungrouped.
     QGuiApplication::setDesktopFileName(QStringLiteral(CULLFINCH_DESKTOP_ID));
 
-    QCommandLineParser parser;
-    parser.setApplicationDescription(
-        QCoreApplication::translate("cullfinch", "Cull a directory of photos."));
-    parser.addHelpOption();
-    parser.addVersionOption();
-    parser.addPositionalArgument(
-        QStringLiteral("directory"),
-        QCoreApplication::translate("cullfinch", "Directory of photos to open."));
-
-    const QCommandLineOption dataDirectoryOption(
-        QStringLiteral("data-dir"),
-        QCoreApplication::translate("cullfinch",
-                                    "Use an alternative directory for the cullfinch database."),
-        QStringLiteral("path"));
-    parser.addOption(dataDirectoryOption);
-
-    const QCommandLineOption cacheDirectoryOption(
-        QStringLiteral("cache-dir"),
-        QCoreApplication::translate("cullfinch", "Use an alternative thumbnail cache directory."),
-        QStringLiteral("path"));
-    parser.addOption(cacheDirectoryOption);
-
-    const QCommandLineOption smokeOption(
-        QStringLiteral("smoke"),
-        QCoreApplication::translate("cullfinch",
-                                    "Run a non-interactive package verification and exit."));
-    parser.addOption(smokeOption);
-
+    CommandLine commandLine;
+    QCommandLineParser& parser = commandLine.parser;
     parser.process(application);
 
     reportPlatformBackend();
 
     cullfinch::app::CompositionRoot::Options options;
-    options.dataDirectory = parser.value(dataDirectoryOption);
-    options.cacheDirectory = parser.value(cacheDirectoryOption);
+    options.dataDirectory = parser.value(commandLine.dataDirectory);
+    options.cacheDirectory = parser.value(commandLine.cacheDirectory);
 
     cullfinch::app::CompositionRoot root(options);
     QString error;
     if (!root.initialise(&error)) {
-        if (parser.isSet(smokeOption)) {
+        if (parser.isSet(commandLine.smoke)) {
             QTextStream(stderr) << "smoke: failed - " << error << Qt::endl;
             return 2;
         }
@@ -212,7 +245,7 @@ int main(int argc, char* argv[]) {
 
     const QStringList arguments = parser.positionalArguments();
 
-    if (parser.isSet(smokeOption)) {
+    if (parser.isSet(commandLine.smoke)) {
         if (arguments.isEmpty()) {
             QTextStream(stderr) << "smoke: failed - no directory argument" << Qt::endl;
             delete window;

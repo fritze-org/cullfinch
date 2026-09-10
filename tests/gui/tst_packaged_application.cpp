@@ -6,6 +6,7 @@
 #include <QProcessEnvironment>
 #include <QTemporaryDir>
 #include <QTest>
+#include <QtGlobal>
 
 using cullfinch::testsupport::TempCollection;
 
@@ -49,10 +50,17 @@ QProcessEnvironment TestPackagedApplication::cleanEnvironment(const QString& dat
     environment.insert(QStringLiteral("CULLFINCH_SMOKE_DATA_DIR"), dataDirectory);
     environment.insert(QStringLiteral("CULLFINCH_SMOKE_CACHE_DIR"), cacheDirectory);
 
-    // Inherit the session's backend when there is one; only a genuinely
-    // headless machine falls back to offscreen.
-    if (!qEnvironmentVariableIsSet("DISPLAY") && !qEnvironmentVariableIsSet("WAYLAND_DISPLAY")) {
-        environment.insert(QStringLiteral("QT_QPA_PLATFORM"), QStringLiteral("offscreen"));
+    // Whatever backend the caller selected is the one under test, so it is
+    // left alone. Only a genuinely displayless Unix session falls back to
+    // offscreen -- and never on macOS, where Cocoa is always available and the
+    // deployed bundle rightly ships no offscreen plugin.
+    if (!qEnvironmentVariableIsSet("QT_QPA_PLATFORM")) {
+#if !defined(Q_OS_MACOS)
+        if (!qEnvironmentVariableIsSet("DISPLAY") &&
+            !qEnvironmentVariableIsSet("WAYLAND_DISPLAY")) {
+            environment.insert(QStringLiteral("QT_QPA_PLATFORM"), QStringLiteral("offscreen"));
+        }
+#endif
     }
     return environment;
 }
