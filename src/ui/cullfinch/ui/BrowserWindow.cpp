@@ -14,7 +14,6 @@
 #include <QKeySequence>
 #include <QMenu>
 #include <QMenuBar>
-#include <QMessageBox>
 #include <QStatusBar>
 #include <QToolBar>
 #include <QVBoxLayout>
@@ -370,9 +369,8 @@ bool BrowserWindow::startFlow(const QString& flowId) {
         presentations.insert(asset.id, AssetPresentation::from(asset));
     }
 
-    shell_ = new ComparisonShell(context_.session, std::move(view), this);
+    shell_ = new ComparisonShell(context_.session, std::move(view), presentations, this);
     shell_->setAttribute(Qt::WA_DeleteOnClose, true);
-    shell_->setPresentations(presentations);
     connect(shell_.data(), &ComparisonShell::errorOccurred, this,
             [this](const QString& message) { statusBar()->showMessage(message, 6000); });
     connect(shell_.data(), &ComparisonShell::closed, this, [this](bool) { refreshStatus(); });
@@ -477,9 +475,8 @@ bool BrowserWindow::resumeSession(const application::StoredSession& stored, QStr
         presentations.insert(asset.id, AssetPresentation::from(asset));
     }
 
-    shell_ = new ComparisonShell(context_.session, std::move(view), this);
+    shell_ = new ComparisonShell(context_.session, std::move(view), presentations, this);
     shell_->setAttribute(Qt::WA_DeleteOnClose, true);
-    shell_->setPresentations(presentations);
     connect(shell_.data(), &ComparisonShell::errorOccurred, this,
             [this](const QString& message) { statusBar()->showMessage(message, 6000); });
     connect(shell_.data(), &ComparisonShell::closed, this, [this](bool) { refreshStatus(); });
@@ -488,6 +485,10 @@ bool BrowserWindow::resumeSession(const application::StoredSession& stored, QStr
 }
 
 void BrowserWindow::offerResume() {
+    if (!resumePrompt_) {
+        return; // Nobody to ask; the draft stays saved and untouched.
+    }
+
     QString error;
     const QList<application::StoredSession> saved =
         context_.repository.resumableSessions(context_.collection.collectionId(), &error);
@@ -496,25 +497,24 @@ void BrowserWindow::offerResume() {
     }
 
     const application::StoredSession& latest = saved.first();
-    const int answer = QMessageBox::question(
-        this, tr("Unfinished comparison"),
-        tr("A saved comparison for this directory has %1 elimination(s) that were never applied."
-           "\n\nResume it, or discard the draft? Your existing deletion marks are unaffected "
-           "either way.")
-            .arg(latest.draftRejected.size()),
-        QMessageBox::Open | QMessageBox::Discard | QMessageBox::Cancel, QMessageBox::Open);
-
-    if (answer == QMessageBox::Open) {
+    switch (resumePrompt_(latest)) {
+    case ResumeChoice::Resume: {
         QString resumeError;
         if (!resumeSession(latest, &resumeError)) {
             // An unknown or newer state version is reported, never reinterpreted.
             reportError(resumeError);
         }
-    } else if (answer == QMessageBox::Discard) {
+        break;
+    }
+    case ResumeChoice::Discard: {
         QString deleteError;
         if (!context_.repository.deleteSession(latest.id, &deleteError)) {
             reportError(deleteError);
         }
+        break;
+    }
+    case ResumeChoice::Leave:
+        break;
     }
 }
 
@@ -522,7 +522,9 @@ void BrowserWindow::reportError(const QString& message) {
     if (message.isEmpty()) {
         return;
     }
-    QMessageBox::warning(this, tr("cullfinch"), message);
+    statusBar()->showMessage(message, 8000);
+    statusBar()->setToolTip(message);
+    Q_EMIT errorOccurred(message);
 }
 
 void BrowserWindow::changeEvent(QEvent* event) {

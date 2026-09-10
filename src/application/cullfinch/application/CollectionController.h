@@ -78,6 +78,10 @@ public:
 
 signals:
     void collectionOpened(const QString& rootPath);
+    /// The stored collection revision advanced. Anything holding an
+    /// expected revision for optimistic concurrency has to follow it, or
+    /// its next write is refused as a phantom conflict.
+    void revisionChanged(quint64 revision);
     void assetsChanged();
     void scanStateChanged(bool scanning);
     void errorOccurred(const QString& message);

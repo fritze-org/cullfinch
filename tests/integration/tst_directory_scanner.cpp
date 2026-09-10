@@ -6,6 +6,8 @@
 #include <QSignalSpy>
 #include <QTest>
 
+#include <tuple>
+
 using namespace cullfinch;
 using cullfinch::testsupport::TempCollection;
 
@@ -97,7 +99,7 @@ void TestDirectoryScanner::preservesRawBytesExactly() {
     const QString rawPath = collection.addRaw(QStringLiteral("A.RAF"), payload);
 
     QString error;
-    infrastructure::DirectoryScanner::enumerate(collection.path(), false, &error);
+    std::ignore = infrastructure::DirectoryScanner::enumerate(collection.path(), false, &error);
 
     // cullfinch never decodes RAW bytes, and browsing opens files read-only.
     QFile file(rawPath);

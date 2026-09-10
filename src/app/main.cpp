@@ -136,6 +136,37 @@ int main(int argc, char* argv[]) {
     }
 
     cullfinch::ui::BrowserWindow* window = root.createBrowserWindow();
+
+    // Dialogs belong to the composition root: the browser reports, the
+    // application decides how loudly. Automated runs install neither and so
+    // never block on a prompt nobody can dismiss.
+    QObject::connect(window, &cullfinch::ui::BrowserWindow::errorOccurred, window,
+                     [window](const QString& message) {
+                         QMessageBox::warning(window,
+                                              QCoreApplication::translate("cullfinch", "cullfinch"),
+                                              message);
+                     });
+
+    window->setResumePrompt([window](const cullfinch::application::StoredSession& session) {
+        const int answer = QMessageBox::question(
+            window, QCoreApplication::translate("cullfinch", "Unfinished comparison"),
+            QCoreApplication::translate(
+                "cullfinch",
+                "A saved comparison for this directory has %1 elimination(s) that were never "
+                "applied.\n\nResume it, or discard the draft? Your existing deletion marks are "
+                "unaffected either way.")
+                .arg(session.draftRejected.size()),
+            QMessageBox::Open | QMessageBox::Discard | QMessageBox::Cancel, QMessageBox::Open);
+
+        if (answer == QMessageBox::Open) {
+            return cullfinch::ui::BrowserWindow::ResumeChoice::Resume;
+        }
+        if (answer == QMessageBox::Discard) {
+            return cullfinch::ui::BrowserWindow::ResumeChoice::Discard;
+        }
+        return cullfinch::ui::BrowserWindow::ResumeChoice::Leave;
+    });
+
     window->show();
 
     const QStringList arguments = parser.positionalArguments();

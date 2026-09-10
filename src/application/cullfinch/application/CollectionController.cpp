@@ -35,7 +35,10 @@ CollectionController::CollectionController(IAssetRepository& repository, IScanSe
                     assets_ = result.assets;
                 } else {
                     assets_ = merged;
-                    revision_ = newRevision;
+                    if (revision_ != newRevision) {
+                        revision_ = newRevision;
+                        Q_EMIT revisionChanged(revision_);
+                    }
                 }
 
                 Q_EMIT diagnosticsChanged(result.diagnostics);
@@ -77,6 +80,7 @@ bool CollectionController::open(const QString& rootPath, bool recursive, QString
     assets_ = repository_.loadAssets(collectionId_, &storageError);
 
     Q_EMIT collectionOpened(rootPath_);
+    Q_EMIT revisionChanged(revision_);
     Q_EMIT assetsChanged();
     startScan();
     scanner_.setWatchEnabled(true);
@@ -173,7 +177,10 @@ void CollectionController::applyDispositionChange(const QList<domain::AssetId>& 
     }
     Q_UNUSED(affected)
     assets_ = stored;
-    revision_ = revision;
+    if (revision_ != revision) {
+        revision_ = revision;
+        Q_EMIT revisionChanged(revision_);
+    }
     Q_EMIT assetsChanged();
 }
 

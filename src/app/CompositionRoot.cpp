@@ -43,12 +43,18 @@ bool CompositionRoot::initialise(QString* error) {
         std::make_unique<application::SessionController>(flows_, *repository_, *dispositions_);
     operations_ = std::make_unique<application::OperationController>(*repository_, *executor_);
 
-    // The disposition controller follows whichever collection is open.
+    // The disposition controller follows whichever collection is open...
     QObject::connect(collection_.get(), &application::CollectionController::collectionOpened,
                      dispositions_.get(), [this](const QString&) {
                          dispositions_->setCollection(collection_->collectionId(),
                                                       collection_->revision());
                      });
+
+    // ...and keeps following its revision. A scan of our own making advances
+    // the stored revision; without this the first mark after opening a
+    // directory is refused as a conflict that never happened.
+    QObject::connect(collection_.get(), &application::CollectionController::revisionChanged,
+                     dispositions_.get(), &application::DispositionController::setRevision);
 
     registerFlows();
     return true;

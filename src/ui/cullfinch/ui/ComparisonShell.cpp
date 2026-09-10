@@ -11,7 +11,8 @@
 namespace cullfinch::ui {
 
 ComparisonShell::ComparisonShell(application::SessionController& session,
-                                 std::unique_ptr<IFlowView> view, QWidget* parent)
+                                 std::unique_ptr<IFlowView> view,
+                                 const AssetPresentationMap& presentations, QWidget* parent)
     : QWidget(parent, Qt::Window), session_(session), view_(std::move(view)) {
     setObjectName(QStringLiteral("comparisonShell"));
     setAttribute(Qt::WA_DeleteOnClose, false);
@@ -25,6 +26,7 @@ ComparisonShell::ComparisonShell(application::SessionController& session,
     layout->addWidget(strip_);
 
     if (view_ != nullptr) {
+        view_->setPresentations(presentations);
         QWidget* inner = view_->widget();
         inner->setParent(this);
         layout->addWidget(inner, 1);

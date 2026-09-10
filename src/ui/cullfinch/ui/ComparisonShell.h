@@ -24,8 +24,12 @@ class ComparisonShell : public QWidget {
     Q_OBJECT
 
 public:
+    /// Presentations are a constructor argument on purpose: the shell renders
+    /// the flow's current state as soon as it is built, and a view handed an
+    /// empty map at that moment would latch onto empty panes and never refill
+    /// them.
     ComparisonShell(application::SessionController& session, std::unique_ptr<IFlowView> view,
-                    QWidget* parent = nullptr);
+                    const AssetPresentationMap& presentations, QWidget* parent = nullptr);
     ~ComparisonShell() override;
 
     ComparisonShell(const ComparisonShell&) = delete;

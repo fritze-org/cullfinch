@@ -27,10 +27,14 @@ class WallSurface : public QWidget {
 public:
     explicit WallSurface(application::IImageService& images, QWidget* parent = nullptr);
 
-    void setCandidates(const QList<domain::AssetId>& order,
+    /// @param positions one entry per wall position, in display order. An
+    ///        invalid identifier is a placeholder left by fixed-position mode:
+    ///        it occupies a cell so the survivors around it do not move.
+    void setCandidates(const QList<domain::AssetId>& positions,
                        const ui::AssetPresentationMap& presentations, quint64 revision);
     [[nodiscard]] ui::ImageCanvas* tileFor(const domain::AssetId& id) const;
-    [[nodiscard]] QList<domain::AssetId> order() const { return order_; }
+    /// The candidates actually on the wall, without placeholders.
+    [[nodiscard]] QList<domain::AssetId> order() const;
     [[nodiscard]] quint64 layoutRevision() const { return revision_; }
 
 signals:
@@ -46,7 +50,8 @@ private:
     [[nodiscard]] bool acceptGesture(const domain::AssetId& id);
 
     application::IImageService& images_;
-    QList<domain::AssetId> order_;
+    /// Every wall position, placeholders included.
+    QList<domain::AssetId> positions_;
     ui::AssetPresentationMap presentations_;
     QHash<domain::AssetId, ui::ImageCanvas*> tiles_;
     /// Oriented image size per candidate, learned once its preview decodes.

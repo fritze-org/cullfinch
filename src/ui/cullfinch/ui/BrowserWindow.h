@@ -19,6 +19,9 @@
 #include <QPointer>
 #include <QSortFilterProxyModel>
 
+#include <functional>
+#include <utility>
+
 namespace cullfinch::ui {
 
 /// Everything the browser needs, wired by the composition root.
@@ -84,6 +87,16 @@ public:
     /// and by the restart flow.
     bool resumeSession(const application::StoredSession& stored, QString* error);
 
+    /// What to do about a draft found when a collection is opened.
+    enum class ResumeChoice { Resume, Discard, Leave };
+
+    /// Supplies the answer when a saved draft is found. Asking the user is a
+    /// composition concern, not the browser's: with no prompt installed the
+    /// draft is simply left alone, which is the safe default and keeps
+    /// automated runs from blocking on a dialog nobody can dismiss.
+    using ResumePrompt = std::function<ResumeChoice(const application::StoredSession&)>;
+    void setResumePrompt(ResumePrompt prompt) { resumePrompt_ = std::move(prompt); }
+
     [[nodiscard]] QList<domain::AssetId> selectedAssetIds() const;
     void selectAssets(const QList<domain::AssetId>& ids);
 
@@ -93,6 +106,11 @@ public:
 
 signals:
     void statusMessage(const QString& message);
+    /// A recoverable failure worth telling the user about. The browser puts
+    /// it in the status bar; whether it also warrants a modal dialog is the
+    /// composition root's decision, which is what keeps automated runs from
+    /// blocking on a dialog nobody can dismiss.
+    void errorOccurred(const QString& message);
 
 protected:
     void changeEvent(QEvent* event) override;
@@ -121,6 +139,7 @@ private:
     QAction* unmarkAction_ = nullptr;
     QPointer<ComparisonShell> shell_;
     QString stagingRoot_;
+    ResumePrompt resumePrompt_;
     QMetaObject::Connection sessionEndedConnection_;
     quint64 presentationGeneration_ = 0;
 };

@@ -92,6 +92,10 @@ QList<QWidget*> VersusView::auxiliaryControls() {
 
 void VersusView::setPresentations(const ui::AssetPresentationMap& presentations) {
     presentations_ = presentations;
+    // Drop the "already showing this candidate" guard: presentations that
+    // arrive after a state update must still reach the panes.
+    leftId_ = domain::AssetId();
+    rightId_ = domain::AssetId();
 }
 
 void VersusView::applyLinkedView(const QPointF& centre, qreal zoom, ui::ImageCanvas* source) {

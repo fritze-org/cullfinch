@@ -28,6 +28,11 @@ public:
     explicit DispositionController(IAssetRepository& repository, QObject* parent = nullptr);
 
     void setCollection(const domain::CollectionId& id, quint64 revision);
+
+    /// Follow the collection revision without discarding the undo history.
+    /// A rescan of our own making advances the revision legitimately; only
+    /// a change we did not make is a real conflict.
+    void setRevision(quint64 revision) { revision_ = revision; }
     [[nodiscard]] domain::CollectionId collectionId() const { return collectionId_; }
     [[nodiscard]] quint64 revision() const { return revision_; }
 

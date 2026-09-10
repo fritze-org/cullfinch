@@ -24,14 +24,24 @@ WallSurface::WallSurface(application::IImageService& images, QWidget* parent)
     sinceStart_.start();
 }
 
-void WallSurface::setCandidates(const QList<domain::AssetId>& order,
+QList<domain::AssetId> WallSurface::order() const {
+    QList<domain::AssetId> candidates;
+    for (const domain::AssetId& id : positions_) {
+        if (id.isValid()) {
+            candidates.append(id);
+        }
+    }
+    return candidates;
+}
+
+void WallSurface::setCandidates(const QList<domain::AssetId>& positions,
                                 const ui::AssetPresentationMap& presentations, quint64 revision) {
     presentations_ = presentations;
 
     // Record where departing tiles used to be, so a second click at the same
     // coordinates does not immediately hit whatever moved in.
-    for (const domain::AssetId& id : order_) {
-        if (!order.contains(id)) {
+    for (const domain::AssetId& id : positions_) {
+        if (id.isValid() && !positions.contains(id)) {
             ui::ImageCanvas* tile = tiles_.value(id, nullptr);
             if (tile != nullptr) {
                 vanished_.append(VanishedTile{tile->geometry(), sinceStart_.elapsed()});
@@ -39,20 +49,31 @@ void WallSurface::setCandidates(const QList<domain::AssetId>& order,
         }
     }
 
-    order_ = order;
+    positions_ = positions;
     revision_ = revision;
 
     // Remove tiles that are gone.
     const QList<domain::AssetId> existing = tiles_.keys();
     for (const domain::AssetId& id : existing) {
-        if (!order_.contains(id)) {
+        if (!positions_.contains(id)) {
             tiles_.take(id)->deleteLater();
         }
     }
 
-    // Add tiles that are new.
-    for (const domain::AssetId& id : order_) {
+    // Add tiles that are new, and fill in any created before its presentation
+    // was known.
+    for (const domain::AssetId& id : positions_) {
+        if (!id.isValid()) {
+            continue; // A placeholder holds a cell but has no tile.
+        }
         if (tiles_.contains(id)) {
+            ui::ImageCanvas* placed = tiles_.value(id);
+            const ui::AssetPresentation& known = presentations_[id];
+            if (!placed->presentation().previewMemberId.isValid() &&
+                known.previewMemberId.isValid()) {
+                placed->setPresentation(known, revision_);
+                placed->setCaption(known.displayName);
+            }
             continue;
         }
         auto* tile = new ui::ImageCanvas(images_, this);
@@ -127,9 +148,12 @@ void WallSurface::relayout() {
         return now - gone.elapsedAtRemoval > interval;
     });
 
+    // Placeholders take part in the layout. That is what makes fixed-position
+    // mode work: the grid keeps the same shape, so every survivor stays exactly
+    // where the user last saw it until they ask to compact.
     QList<flows::wall::LayoutItem> items;
-    items.reserve(order_.size());
-    for (const domain::AssetId& id : order_) {
+    items.reserve(positions_.size());
+    for (const domain::AssetId& id : positions_) {
         flows::wall::LayoutItem item;
         item.id = id;
         // A placeholder aspect until the preview decodes, so tiles do not jump
@@ -221,15 +245,17 @@ void WallView::setState(const domain::FlowState& state, const domain::FlowSummar
     // Placeholders are represented by absence here: the surface lays out the
     // real candidates, and fixed-position mode simply keeps their indices
     // stable because the flow does not remove the slot.
-    const QList<flows::wall::WallSlot> positions = flows::wall::WallFlow::positions(state);
-    QList<domain::AssetId> order;
-    order.reserve(positions.size());
-    for (const flows::wall::WallSlot& slot : positions) {
-        if (!slot.isPlaceholder()) {
-            order.append(slot.id);
-        }
+    // Placeholders are forwarded as invalid identifiers rather than filtered
+    // out: dropping them here would shrink the grid on every elimination and
+    // move the survivors, which is precisely what fixed-position mode exists to
+    // prevent.
+    QList<domain::AssetId> positions;
+    const QList<flows::wall::WallSlot> wallPositions = flows::wall::WallFlow::positions(state);
+    positions.reserve(wallPositions.size());
+    for (const flows::wall::WallSlot& slot : wallPositions) {
+        positions.append(slot.id);
     }
-    surface_->setCandidates(order, presentations_, revision_);
+    surface_->setCandidates(positions, presentations_, revision_);
 
     updatingControls_ = true;
     fixedPositions_->setChecked(flows::wall::WallFlow::layoutMode(state) ==

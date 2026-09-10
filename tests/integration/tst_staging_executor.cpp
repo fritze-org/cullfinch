@@ -12,6 +12,8 @@
 #include <QFileInfo>
 #include <QTest>
 
+#include <tuple>
+
 using namespace cullfinch;
 using cullfinch::testsupport::FakeTrashAdapter;
 using cullfinch::testsupport::TempCollection;
@@ -317,7 +319,7 @@ void TestStagingExecutor::refusesAnUnwritableStagingRoot() {
     FakeTrashAdapter trash;
     const infrastructure::StagingExecutor executor(trash);
     QString error;
-    executor.preflight(planning.plan, assets, &error);
+    std::ignore = executor.preflight(planning.plan, assets, &error);
     // This deletion policy needs a writable location on the source filesystem,
     // and says so instead of falling back to something else.
     QVERIFY(!error.isEmpty());
