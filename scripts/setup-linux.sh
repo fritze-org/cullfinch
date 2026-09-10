@@ -25,6 +25,15 @@ $SUDO apt-get install --no-install-recommends -y \
     unzip \
     zip
 
+# Autotools. Several vcpkg ports in the dependency graph -- gperf, which
+# fontconfig needs -- run autoreconf and fail without these.
+$SUDO apt-get install --no-install-recommends -y \
+    autoconf \
+    autoconf-archive \
+    automake \
+    libtool \
+    m4
+
 # Qt's XCB platform plugin and its font/input stack.
 $SUDO apt-get install --no-install-recommends -y \
     libdbus-1-dev \

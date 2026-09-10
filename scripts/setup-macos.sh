@@ -10,7 +10,9 @@ if ! command -v brew >/dev/null 2>&1; then
     exit 1
 fi
 
-brew install ninja pkg-config autoconf automake libtool
+# Autotools. Several vcpkg ports in the dependency graph -- gperf, which
+# fontconfig needs -- run autoreconf and fail without these.
+brew install ninja pkg-config autoconf autoconf-archive automake libtool
 
 if ! command -v uv >/dev/null 2>&1; then
     brew install uv
