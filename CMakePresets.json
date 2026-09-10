@@ -1,0 +1,221 @@
+{
+  "version": 6,
+  "cmakeMinimumRequired": {
+    "major": 3,
+    "minor": 28,
+    "patch": 0
+  },
+  "configurePresets": [
+    {
+      "name": "base",
+      "hidden": true,
+      "generator": "Ninja",
+      "binaryDir": "${sourceDir}/build/${presetName}",
+      "cacheVariables": {
+        "CMAKE_EXPORT_COMPILE_COMMANDS": "ON",
+        "CULLFINCH_BUILD_TESTING": "ON"
+      }
+    },
+    {
+      "name": "dev",
+      "inherits": "base",
+      "displayName": "Developer build with clang-tidy",
+      "description": "Default developer configuration: tests and static analysis enabled",
+      "cacheVariables": {
+        "CMAKE_BUILD_TYPE": "RelWithDebInfo",
+        "CULLFINCH_ENABLE_CLANG_TIDY": "ON",
+        "CULLFINCH_WARNINGS_AS_ERRORS": "ON"
+      }
+    },
+    {
+      "name": "dev-fast",
+      "inherits": "base",
+      "displayName": "Developer build without static analysis",
+      "description": "Rapid iteration: clang-tidy explicitly disabled",
+      "cacheVariables": {
+        "CMAKE_BUILD_TYPE": "Debug",
+        "CULLFINCH_ENABLE_CLANG_TIDY": "OFF",
+        "CULLFINCH_WARNINGS_AS_ERRORS": "OFF"
+      }
+    },
+    {
+      "name": "ci-linux-gcc",
+      "inherits": "base",
+      "displayName": "CI: Linux GCC",
+      "cacheVariables": {
+        "CMAKE_BUILD_TYPE": "RelWithDebInfo",
+        "CMAKE_C_COMPILER": "gcc",
+        "CMAKE_CXX_COMPILER": "g++",
+        "CULLFINCH_WARNINGS_AS_ERRORS": "ON",
+        "CULLFINCH_ENABLE_CLANG_TIDY": "OFF"
+      },
+      "condition": {
+        "type": "equals",
+        "lhs": "${hostSystemName}",
+        "rhs": "Linux"
+      }
+    },
+    {
+      "name": "ci-linux-asan",
+      "inherits": "base",
+      "displayName": "CI: Linux Clang with ASan and UBSan",
+      "cacheVariables": {
+        "CMAKE_BUILD_TYPE": "RelWithDebInfo",
+        "CMAKE_C_COMPILER": "clang",
+        "CMAKE_CXX_COMPILER": "clang++",
+        "CULLFINCH_ENABLE_SANITIZERS": "ON",
+        "CULLFINCH_WARNINGS_AS_ERRORS": "ON",
+        "CULLFINCH_ENABLE_CLANG_TIDY": "OFF"
+      },
+      "condition": {
+        "type": "equals",
+        "lhs": "${hostSystemName}",
+        "rhs": "Linux"
+      }
+    },
+    {
+      "name": "ci-macos",
+      "inherits": "base",
+      "displayName": "CI: macOS AppleClang",
+      "cacheVariables": {
+        "CMAKE_BUILD_TYPE": "RelWithDebInfo",
+        "CULLFINCH_WARNINGS_AS_ERRORS": "ON",
+        "CULLFINCH_ENABLE_CLANG_TIDY": "OFF"
+      },
+      "condition": {
+        "type": "equals",
+        "lhs": "${hostSystemName}",
+        "rhs": "Darwin"
+      }
+    },
+    {
+      "name": "ci-tidy-linux",
+      "inherits": "base",
+      "displayName": "CI: clang-tidy analysis on Linux",
+      "description": "Fresh analysis build; unity builds and PCH are off so every owned translation unit is analysed",
+      "cacheVariables": {
+        "CMAKE_BUILD_TYPE": "Debug",
+        "CMAKE_C_COMPILER": "clang",
+        "CMAKE_CXX_COMPILER": "clang++",
+        "CULLFINCH_ENABLE_CLANG_TIDY": "ON",
+        "CULLFINCH_WARNINGS_AS_ERRORS": "ON",
+        "CMAKE_UNITY_BUILD": "OFF",
+        "CMAKE_DISABLE_PRECOMPILE_HEADERS": "ON"
+      },
+      "condition": {
+        "type": "equals",
+        "lhs": "${hostSystemName}",
+        "rhs": "Linux"
+      }
+    },
+    {
+      "name": "ci-tidy-macos",
+      "inherits": "base",
+      "displayName": "CI: clang-tidy analysis on macOS",
+      "cacheVariables": {
+        "CMAKE_BUILD_TYPE": "Debug",
+        "CULLFINCH_ENABLE_CLANG_TIDY": "ON",
+        "CULLFINCH_WARNINGS_AS_ERRORS": "ON",
+        "CMAKE_UNITY_BUILD": "OFF",
+        "CMAKE_DISABLE_PRECOMPILE_HEADERS": "ON"
+      },
+      "condition": {
+        "type": "equals",
+        "lhs": "${hostSystemName}",
+        "rhs": "Darwin"
+      }
+    },
+    {
+      "name": "coverage",
+      "inherits": "base",
+      "displayName": "GCC coverage build",
+      "description": "Separate build directory from normal, sanitizer and tidy builds",
+      "cacheVariables": {
+        "CMAKE_BUILD_TYPE": "Debug",
+        "CMAKE_C_COMPILER": "gcc",
+        "CMAKE_CXX_COMPILER": "g++",
+        "CULLFINCH_ENABLE_COVERAGE": "ON",
+        "CULLFINCH_ENABLE_CLANG_TIDY": "OFF",
+        "CULLFINCH_WARNINGS_AS_ERRORS": "OFF"
+      },
+      "condition": {
+        "type": "equals",
+        "lhs": "${hostSystemName}",
+        "rhs": "Linux"
+      }
+    },
+    {
+      "name": "release",
+      "inherits": "base",
+      "displayName": "Optimised release build",
+      "cacheVariables": {
+        "CMAKE_BUILD_TYPE": "Release",
+        "CULLFINCH_ENABLE_CLANG_TIDY": "OFF",
+        "CULLFINCH_WARNINGS_AS_ERRORS": "ON"
+      }
+    }
+  ],
+  "buildPresets": [
+    { "name": "dev", "configurePreset": "dev" },
+    { "name": "dev-fast", "configurePreset": "dev-fast" },
+    { "name": "ci-linux-gcc", "configurePreset": "ci-linux-gcc" },
+    { "name": "ci-linux-asan", "configurePreset": "ci-linux-asan" },
+    { "name": "ci-macos", "configurePreset": "ci-macos" },
+    { "name": "ci-tidy-linux", "configurePreset": "ci-tidy-linux" },
+    { "name": "ci-tidy-macos", "configurePreset": "ci-tidy-macos" },
+    { "name": "coverage", "configurePreset": "coverage" },
+    { "name": "release", "configurePreset": "release" }
+  ],
+  "testPresets": [
+    {
+      "name": "base",
+      "hidden": true,
+      "output": {
+        "outputOnFailure": true,
+        "verbosity": "default"
+      },
+      "execution": {
+        "noTestsAction": "error",
+        "stopOnFailure": false,
+        "timeout": 300
+      }
+    },
+    { "name": "dev", "inherits": "base", "configurePreset": "dev" },
+    { "name": "dev-fast", "inherits": "base", "configurePreset": "dev-fast" },
+    {
+      "name": "unit",
+      "inherits": "base",
+      "configurePreset": "dev",
+      "filter": { "include": { "label": "unit" } }
+    },
+    {
+      "name": "ci-linux-gcc",
+      "inherits": "base",
+      "configurePreset": "ci-linux-gcc"
+    },
+    {
+      "name": "ci-linux-asan",
+      "inherits": "base",
+      "configurePreset": "ci-linux-asan",
+      "filter": { "include": { "label": "unit|integration|gui" } }
+    },
+    { "name": "ci-macos", "inherits": "base", "configurePreset": "ci-macos" },
+    {
+      "name": "coverage",
+      "inherits": "base",
+      "configurePreset": "coverage",
+      "filter": { "include": { "label": "unit|integration|gui" } },
+      "execution": { "jobs": 1, "noTestsAction": "error", "timeout": 600 }
+    }
+  ],
+  "workflowPresets": [
+    {
+      "name": "dev",
+      "steps": [
+        { "type": "configure", "name": "dev" },
+        { "type": "build", "name": "dev" },
+        { "type": "test", "name": "dev" }
+      ]
+    }
+  ]
+}

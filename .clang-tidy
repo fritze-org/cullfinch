@@ -1,0 +1,39 @@
+---
+# Reviewed check selection. Enabled diagnostics are errors in the tidy presets;
+# see cmake/StaticAnalysis.cmake. Expand deliberately, not indiscriminately.
+Checks: >
+  -*,
+  clang-analyzer-*,
+  bugprone-*,
+  performance-*,
+  portability-*,
+  modernize-use-nullptr,
+  modernize-use-override,
+  modernize-use-using,
+  modernize-use-equals-default,
+  modernize-use-equals-delete,
+  modernize-loop-convert,
+  modernize-make-unique,
+  modernize-redundant-void-arg,
+  misc-unused-using-decls,
+  misc-misplaced-const,
+  readability-redundant-member-init,
+  -bugprone-easily-swappable-parameters,
+  -bugprone-exception-escape,
+  -performance-enum-size
+
+# Analyse owned headers through their translation units. Dependency headers are
+# treated as system headers by the compile command and are excluded here too.
+HeaderFilterRegex: '.*/(src|tests)/.*\.(h|hpp)$'
+
+# Analysis builds never apply fixes; reviewed local fix runs are a separate step.
+FormatStyle: file
+WarningsAsErrors: ''
+
+CheckOptions:
+  - key: bugprone-argument-comment.StrictMode
+    value: '0'
+  - key: performance-unnecessary-value-param.AllowedTypes
+    value: 'QString;QStringList;QByteArray;QVariant;QImage;QPixmap'
+  - key: modernize-use-override.IgnoreDestructors
+    value: '0'

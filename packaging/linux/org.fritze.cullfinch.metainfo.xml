@@ -1,0 +1,39 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<component type="desktop-application">
+  <id>org.fritze.cullfinch</id>
+  <metadata_license>CC0-1.0</metadata_license>
+  <project_license>GPL-3.0-or-later</project_license>
+  <name>cullfinch</name>
+  <summary>Cull a directory of photos</summary>
+
+  <description>
+    <p>
+      cullfinch opens a directory of photos, shows one thumbnail per photo even when a JPG
+      and one or more RAW files belong together, and runs comparison flows over a selection.
+      The versus tree shows two candidates at a time until one remains; the image wall shows
+      everything at once and removes what you click.
+    </p>
+    <p>
+      Eliminating a photo only marks it. Files are never touched until you review the exact
+      list and choose to move it to Trash, and every RAW file always travels with its JPG.
+    </p>
+  </description>
+
+  <launchable type="desktop-id">org.fritze.cullfinch.desktop</launchable>
+  <url type="homepage">https://github.com/fritze-org/cullfinch</url>
+  <url type="bugtracker">https://github.com/fritze-org/cullfinch/issues</url>
+
+  <provides>
+    <binary>cullfinch</binary>
+  </provides>
+
+  <releases>
+    <release version="0.1.0" date="2026-09-10">
+      <description>
+        <p>Initial development release.</p>
+      </description>
+    </release>
+  </releases>
+
+  <content_rating type="oars-1.1"/>
+</component>

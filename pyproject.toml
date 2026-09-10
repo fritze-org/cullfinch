@@ -1,0 +1,34 @@
+# Development tooling only. cullfinch is a C++ application and has no Python
+# runtime dependency; vcpkg owns every application library. This project exists
+# so that pre-commit, gcovr and the shared command-line tools are pinned and
+# reproducible via `uv sync --locked --group tooling`.
+[project]
+name = "cullfinch-tooling"
+version = "0.0.0"
+description = "Pinned development tooling for the cullfinch repository"
+requires-python = ">=3.13,<3.14"
+dependencies = []
+
+[dependency-groups]
+tooling = [
+  "pre-commit==4.6.0",
+  "gcovr==8.5",
+  "shellcheck-py==0.11.0.1",
+  "actionlint-py==1.7.7.23",
+  "cmakelang==0.6.13",
+  "ruff==0.16.6",
+]
+
+[tool.uv]
+package = false
+
+[tool.ruff]
+line-length = 100
+target-version = "py313"
+
+[tool.ruff.lint]
+select = ["E", "F", "I", "UP", "B", "SIM", "RUF"]
+
+[tool.codespell]
+ignore-words = ".codespell-ignore-words.txt"
+skip = "./.git,./build*,./.vcpkg,./vcpkg_installed,./uv.lock,./tests/fixtures,./docs/design.md"

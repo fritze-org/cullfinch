@@ -1,0 +1,181 @@
+# Scheduled checks that are too slow or too environment-specific for every pull
+# request, but which the required matrix alone does not establish.
+name: Extended checks
+
+on:
+  schedule:
+    # Nightly, after most working days in Europe have ended.
+    - cron: '17 2 * * *'
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: extended-${{ github.ref }}
+  cancel-in-progress: true
+
+env:
+  VCPKG_DISABLE_METRICS: '1'
+  CULLFINCH_VCPKG_CACHE: '${{ github.workspace }}/.vcpkg'
+
+jobs:
+  cold-cache-bootstrap:
+    name: Cold-cache bootstrap (${{ matrix.runner }})
+    runs-on: ${{ matrix.runner }}
+    timeout-minutes: 360
+    strategy:
+      fail-fast: false
+      matrix:
+        runner: [ubuntu-24.04, macos-15]
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+
+      - name: Install platform prerequisites (Linux)
+        if: runner.os == 'Linux'
+        run: ./scripts/setup-linux.sh
+
+      - name: Install platform prerequisites (macOS)
+        if: runner.os == 'macOS'
+        run: ./scripts/setup-macos.sh
+
+      - uses: lukka/get-cmake@fffaaafeea488556c2c12dad60690008bc1caacb # v4.4.2
+
+      # No cache is restored on purpose: a warm cache passing establishes
+      # nothing about whether the bootstrap and the sources still work.
+      - name: Configure from an empty cache
+        run: cmake --preset dev-fast
+
+      - name: Build
+        run: cmake --build --preset dev-fast
+
+      - name: Run the non-GUI suites
+        run: ctest --preset dev-fast --label-regex 'unit|integration'
+
+  bootstrap-failure-modes:
+    name: Bootstrap failure modes
+    runs-on: ubuntu-24.04
+    timeout-minutes: 60
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+      - uses: lukka/get-cmake@fffaaafeea488556c2c12dad60690008bc1caacb # v4.4.2
+
+      # Offline must be a real network-disabled acquisition policy, not a
+      # "skip git pull" flag: with nothing provisioned it has to fail loudly.
+      - name: Offline configure with nothing provisioned must fail
+        run: |
+          if cmake -S . -B build/offline -G Ninja -DCULLFINCH_OFFLINE=ON \
+              -DCULLFINCH_VCPKG_CACHE="${{ github.workspace }}/.empty-cache" \
+              > offline.log 2>&1; then
+            echo "offline configure unexpectedly succeeded" >&2
+            cat offline.log
+            exit 1
+          fi
+          grep -q "CULLFINCH_OFFLINE" offline.log || {
+            echo "the offline failure was not reported precisely" >&2
+            cat offline.log
+            exit 1
+          }
+
+      - name: A wrong vcpkg revision must be rejected
+        run: |
+          python3 -c 'import json,pathlib; p=pathlib.Path("vcpkg.json"); d=json.loads(p.read_text()); d["builtin-baseline"]="not-a-commit"; p.write_text(json.dumps(d, indent=2))'
+          if cmake -S . -B build/badbaseline -G Ninja > badbaseline.log 2>&1; then
+            echo "an invalid baseline was accepted" >&2
+            exit 1
+          fi
+          grep -q "builtin-baseline" badbaseline.log
+          git checkout -- vcpkg.json
+
+      - name: An interrupted checkout must not be reused
+        run: |
+          mkdir -p .vcpkg/vcpkg-9e593bb18ea6/.git
+          if cmake -S . -B build/partial -G Ninja -DCULLFINCH_OFFLINE=ON \
+              > partial.log 2>&1; then
+            echo "an incomplete checkout was mistaken for a valid cache" >&2
+            exit 1
+          fi
+          cat partial.log
+
+  wayland-gui:
+    name: Wayland GUI smoke
+    runs-on: ubuntu-24.04
+    timeout-minutes: 240
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+
+      - name: Install platform prerequisites
+        run: ./scripts/setup-linux.sh
+
+      - name: Install a controlled Wayland compositor
+        run: sudo apt-get install --no-install-recommends -y weston
+
+      - uses: lukka/get-cmake@fffaaafeea488556c2c12dad60690008bc1caacb # v4.4.2
+
+      - name: Configure and build
+        run: |
+          cmake --preset ci-linux-gcc
+          cmake --build --preset ci-linux-gcc
+
+      # The X11 suite alone does not establish native Wayland compatibility, so
+      # this runs the same GUI binaries against a real compositor.
+      - name: Run the GUI suite under Weston
+        env:
+          XDG_RUNTIME_DIR: /tmp/cullfinch-wayland
+          QT_QPA_PLATFORM: wayland
+          CULLFINCH_EXPECTED_PLATFORM: wayland
+        run: |
+          mkdir -p "${XDG_RUNTIME_DIR}"
+          chmod 700 "${XDG_RUNTIME_DIR}"
+          weston --backend=headless --socket=wayland-1 --idle-time=0 &
+          for _ in $(seq 1 100); do
+            if [ -S "${XDG_RUNTIME_DIR}/wayland-1" ]; then break; fi
+            sleep 0.2
+          done
+          test -S "${XDG_RUNTIME_DIR}/wayland-1" || {
+            echo "the compositor never came up" >&2
+            exit 1
+          }
+          WAYLAND_DISPLAY=wayland-1 ctest --preset ci-linux-gcc --label-regex gui \
+            --output-on-failure
+
+      - name: Upload failure artifacts
+        if: always()
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
+        with:
+          name: wayland-gui-results
+          path: build/ci-linux-gcc/Testing/**
+          if-no-files-found: ignore
+
+  native-trash:
+    name: Native Trash integration (${{ matrix.runner }})
+    runs-on: ${{ matrix.runner }}
+    timeout-minutes: 240
+    strategy:
+      fail-fast: false
+      matrix:
+        runner: [ubuntu-24.04, macos-15]
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+
+      - name: Install platform prerequisites (Linux)
+        if: runner.os == 'Linux'
+        run: ./scripts/setup-linux.sh
+
+      - name: Install platform prerequisites (macOS)
+        if: runner.os == 'macOS'
+        run: ./scripts/setup-macos.sh
+
+      - uses: lukka/get-cmake@fffaaafeea488556c2c12dad60690008bc1caacb # v4.4.2
+
+      - name: Configure and build
+        run: |
+          cmake --preset dev-fast
+          cmake --build --preset dev-fast
+
+      # These operate only on disposable fixtures and never enumerate or empty
+      # unrelated Trash contents.
+      - name: Run the Trash-adjacent suites
+        env:
+          QT_QPA_PLATFORM: offscreen
+        run: ctest --preset dev-fast --label-regex 'native-trash-adjacent' --output-on-failure

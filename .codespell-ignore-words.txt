@@ -1,0 +1,6 @@
+# Words codespell would otherwise flag. Keep this list small and justified.
+nd
+ans
+te
+inout
+ba

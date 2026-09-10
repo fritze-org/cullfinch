@@ -1,0 +1,12 @@
+[Desktop Entry]
+Type=Application
+Name=cullfinch
+GenericName=Photo culling utility
+Comment=Compare photos side by side or on a wall and mark the rejects for deletion
+Exec=cullfinch %f
+Terminal=false
+Categories=Graphics;Photography;Viewer;
+MimeType=inode/directory;
+Keywords=photo;cull;compare;raw;jpeg;
+StartupNotify=true
+StartupWMClass=cullfinch

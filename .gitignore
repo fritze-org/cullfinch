@@ -1,0 +1,36 @@
+# Build and configure trees
+/build/
+/build-*/
+/out/
+cmake-build-*/
+compile_commands.json
+CMakeUserPresets.json
+
+# vcpkg managed checkout, downloads and installed trees
+/.vcpkg/
+/vcpkg_installed/
+/vcpkg-downloads/
+
+# Coverage output
+/coverage/
+*.gcda
+*.gcno
+*.gcov
+
+# Tooling caches
+.venv/
+__pycache__/
+.mypy_cache/
+.ruff_cache/
+
+# Packaging output
+/dist/
+*.AppImage
+*.dmg
+
+# Editor and OS noise
+.cache/
+.idea/
+.vscode/
+*.swp
+.DS_Store

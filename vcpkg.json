@@ -1,0 +1,72 @@
+{
+  "$schema": "https://raw.githubusercontent.com/microsoft/vcpkg-tool/main/docs/vcpkg.schema.json",
+  "name": "cullfinch",
+  "version-string": "0.1.0",
+  "description": "Image collection culling utility",
+  "homepage": "https://github.com/fritze-org/cullfinch",
+  "license": "GPL-3.0-or-later",
+  "builtin-baseline": "9e593bb18ea69cc5095e012465dcd675a822ed0d",
+  "dependencies": [
+    {
+      "name": "qtbase",
+      "default-features": false,
+      "features": [
+        "concurrent",
+        "doubleconversion",
+        "freetype",
+        "gui",
+        "harfbuzz",
+        "jpeg",
+        "pcre2",
+        "png",
+        "sql",
+        "sql-sqlite",
+        "thread",
+        "widgets",
+        "zstd"
+      ]
+    }
+  ],
+  "features": {
+    "tests": {
+      "description": "Qt Test support; enabled by the testing presets before project()",
+      "dependencies": [
+        {
+          "name": "qtbase",
+          "default-features": false,
+          "features": ["testlib"]
+        }
+      ]
+    },
+    "linux-desktop": {
+      "description": "X11 and Wayland platform support for the Linux desktop build",
+      "dependencies": [
+        {
+          "name": "qtbase",
+          "default-features": false,
+          "features": [
+            "egl",
+            "fontconfig",
+            "wayland",
+            "xcb",
+            "xcb-sm",
+            "xcb-xlib",
+            "xkb",
+            "xkbcommon-x11",
+            "xrender"
+          ]
+        }
+      ]
+    },
+    "macos-desktop": {
+      "description": "Cocoa platform support through the selected Qt build",
+      "dependencies": [
+        {
+          "name": "qtbase",
+          "default-features": false,
+          "features": ["gui", "widgets"]
+        }
+      ]
+    }
+  }
+}

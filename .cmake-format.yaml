@@ -1,0 +1,43 @@
+# Matches .editorconfig: two-space indentation for CMake, 100 column limit.
+format:
+  line_width: 100
+  tab_size: 2
+  use_tabchars: false
+  separate_ctrl_name_with_space: false
+  separate_fn_name_with_space: false
+  dangle_parens: false
+  max_subgroups_hwrap: 2
+  max_pargs_hwrap: 4
+  keyword_case: unchanged
+  command_case: lower
+
+lint:
+  disabled_codes:
+    # C0111: missing docstring on a function/macro. Comments above the
+    # definition are the convention in this repository.
+    - C0111
+  max_arguments: 8
+  max_localvars: 20
+  max_statements: 80
+
+parse:
+  # Project-defined commands, so the formatter and linter understand them.
+  additional_commands:
+    cullfinch_add_library:
+      pargs: 1
+      kwargs:
+        SOURCES: '*'
+        HEADERS: '*'
+        PUBLIC_DEPS: '*'
+        PRIVATE_DEPS: '*'
+    cullfinch_add_test:
+      pargs: 1
+      kwargs:
+        SOURCES: '*'
+        DEPS: '*'
+        LABELS: '*'
+        TIMEOUT: 1
+    cullfinch_enable_static_analysis:
+      pargs: 1
+    cullfinch_enable_coverage:
+      pargs: 1

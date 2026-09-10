@@ -1,0 +1,77 @@
+// SPDX-License-Identifier: GPL-3.0-or-later
+#pragma once
+
+#include <cullfinch/application/Services.h>
+
+#include <QSqlDatabase>
+#include <QString>
+
+namespace cullfinch::infrastructure {
+
+/// Application metadata in a local SQLite database.
+///
+/// The database lives under the platform application-data location, never in
+/// the collection: marking and comparing must not require write access to the
+/// photos, and the live database must not sit on a network share.
+///
+/// The connection is owned and used on the thread that opened it. Operation
+/// work is serialised independently of thumbnail work by using separate
+/// repository instances with their own connections.
+class SqliteRepository final : public application::IAssetRepository {
+public:
+    explicit SqliteRepository(QString databaseFile, QString connectionName = QString());
+    ~SqliteRepository() override;
+
+    SqliteRepository(const SqliteRepository&) = delete;
+    SqliteRepository& operator=(const SqliteRepository&) = delete;
+    SqliteRepository(SqliteRepository&&) = delete;
+    SqliteRepository& operator=(SqliteRepository&&) = delete;
+
+    bool open(QString* error) override;
+    void close() override;
+
+    std::optional<domain::CollectionId> ensureCollection(const QString& rootPath, bool recursive,
+                                                         QString* error) override;
+    [[nodiscard]] quint64 collectionRevision(const domain::CollectionId& id,
+                                             QString* error) const override;
+
+    bool reconcileAssets(const domain::CollectionId& id, const domain::PhotoAssetList& scanned,
+                         domain::PhotoAssetList* merged, quint64* newRevision,
+                         QString* error) override;
+
+    [[nodiscard]] domain::PhotoAssetList loadAssets(const domain::CollectionId& id,
+                                                    QString* error) const override;
+
+    bool applyDispositions(const domain::CollectionId& id, quint64 expectedRevision,
+                           const QList<domain::AssetId>& reject,
+                           const QList<domain::AssetId>& neutral, quint64* newRevision,
+                           QString* error) override;
+
+    bool saveSession(const application::StoredSession& session, QString* error) override;
+    [[nodiscard]] std::optional<application::StoredSession>
+    loadSession(const domain::SessionId& id, QString* error) const override;
+    [[nodiscard]] QList<application::StoredSession>
+    resumableSessions(const domain::CollectionId& id, QString* error) const override;
+    bool deleteSession(const domain::SessionId& id, QString* error) override;
+
+    bool saveOperation(const application::OperationRecord& record, QString* error) override;
+    [[nodiscard]] std::optional<application::OperationRecord>
+    loadOperation(const domain::OperationId& id, QString* error) const override;
+    [[nodiscard]] QList<application::OperationRecord>
+    unfinishedOperations(const domain::CollectionId& id, QString* error) const override;
+
+    /// The schema version this build expects.
+    [[nodiscard]] static int targetSchemaVersion();
+
+private:
+    bool migrate(QString* error);
+    [[nodiscard]] bool bumpRevision(const domain::CollectionId& id, quint64* newRevision,
+                                    QString* error);
+
+    QString databaseFile_;
+    QString connectionName_;
+    QSqlDatabase database_;
+    bool open_ = false;
+};
+
+} // namespace cullfinch::infrastructure

@@ -1,0 +1,33 @@
+# Default: let Git detect text and normalise to LF in the repository.
+* text=auto eol=lf
+
+# Explicit text files.
+*.c        text eol=lf
+*.cpp      text eol=lf
+*.h        text eol=lf
+*.hpp      text eol=lf
+*.cmake    text eol=lf
+*.json     text eol=lf
+*.md       text eol=lf
+*.sh       text eol=lf
+*.toml     text eol=lf
+*.yaml     text eol=lf
+*.yml      text eol=lf
+Makefile   text eol=lf
+CMakeLists.txt text eol=lf
+
+# Binary fixtures: preserve exact bytes, never diff or filter them.
+*.jpg      binary
+*.jpeg     binary
+*.png      binary
+*.raf      binary
+*.cr2      binary
+*.cr3      binary
+*.nef      binary
+*.arw      binary
+*.dng      binary
+*.icc      binary
+tests/fixtures/** -text -diff
+
+# Generated lockfiles are text but not worth reviewing line by line.
+uv.lock    text eol=lf linguist-generated=true

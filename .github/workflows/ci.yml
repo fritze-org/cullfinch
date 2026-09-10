@@ -1,0 +1,399 @@
+# Required verification for pull requests and pushes to main.
+#
+# Every platform job runs the same CMake bootstrap developers run: there is no
+# separate CI-only dependency path, and no preinstalled Qt or vcpkg is used.
+name: CI
+
+on:
+  pull_request:
+  push:
+    branches: [main]
+  # Included when a merge queue is enabled.
+  merge_group:
+  # The release workflow runs this same matrix as its gate.
+  workflow_call:
+
+# Ordinary test jobs need read-only access. The coverage job asks for the one
+# extra identity-token permission its upload needs, and nothing else.
+permissions:
+  contents: read
+
+concurrency:
+  group: ci-${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
+env:
+  # File-backed vcpkg binary cache, restored and saved through actions/cache.
+  VCPKG_BINARY_SOURCES: 'clear;files,${{ github.workspace }}/.vcpkg-binary-cache,readwrite'
+  VCPKG_DISABLE_METRICS: '1'
+  CULLFINCH_VCPKG_CACHE: '${{ github.workspace }}/.vcpkg'
+
+jobs:
+  pre-commit:
+    name: Pre-commit checks (${{ matrix.os }})
+    runs-on: ${{ matrix.os }}
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [ubuntu-24.04, macos-15]
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+
+      - name: Install uv
+        uses: astral-sh/setup-uv@20cfd1bf945f4377ade1205e4dbc17946fc9a30d # v10.0.1
+        with:
+          enable-cache: true
+          cache-dependency-glob: uv.lock
+
+      - name: Sync the locked tooling environment
+        run: uv sync --locked --group tooling
+
+      - name: Cache pre-commit hook environments
+        uses: actions/cache@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
+        with:
+          path: ~/.cache/pre-commit
+          key: pre-commit-${{ matrix.os }}-${{ hashFiles('.pre-commit-config.yaml') }}
+
+      - name: Validate the hook configuration
+        run: uv run --frozen --group tooling -- pre-commit validate-config
+
+      # The same configuration developers commit with, against every tracked file.
+      - name: Run all hooks on all files
+        id: hooks
+        run: uv run --frozen --group tooling -- pre-commit run --all-files --show-diff-on-failure
+
+      # A formatting change is a failure with a downloadable diff. CI never
+      # commits the fix itself.
+      - name: Capture the formatting diff
+        if: ${{ failure() && steps.hooks.outcome == 'failure' }}
+        run: git diff > pre-commit.diff || true
+
+      - name: Upload the formatting diff
+        if: ${{ failure() && steps.hooks.outcome == 'failure' }}
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
+        with:
+          name: pre-commit-diff-${{ matrix.os }}
+          path: pre-commit.diff
+          if-no-files-found: ignore
+
+  build-and-test:
+    name: ${{ matrix.name }}
+    runs-on: ${{ matrix.runner }}
+    timeout-minutes: 240
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - name: Linux GCC
+            runner: ubuntu-24.04
+            preset: ci-linux-gcc
+            display: xcb
+          - name: Linux Clang sanitizers
+            runner: ubuntu-24.04
+            preset: ci-linux-asan
+            display: xcb
+          - name: macOS Apple Silicon
+            runner: macos-15
+            preset: ci-macos
+            display: cocoa
+          - name: macOS Intel
+            runner: macos-15-intel
+            preset: ci-macos
+            display: cocoa
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+
+      - name: Install platform prerequisites (Linux)
+        if: runner.os == 'Linux'
+        run: ./scripts/setup-linux.sh
+
+      - name: Install platform prerequisites (macOS)
+        if: runner.os == 'macOS'
+        run: ./scripts/setup-macos.sh
+
+      - name: Install Clang (Linux sanitizers job)
+        if: matrix.preset == 'ci-linux-asan'
+        run: sudo apt-get install --no-install-recommends -y clang lld
+
+      - uses: lukka/get-cmake@fffaaafeea488556c2c12dad60690008bc1caacb # v4.4.2
+
+      # Cache keys cover the OS, architecture, compiler identity, the manifest
+      # and baseline, and the triplets. vcpkg still validates ABI compatibility
+      # internally; a complete CMake build tree is never restored.
+      - name: Restore the vcpkg dependency cache
+        uses: actions/cache@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
+        with:
+          path: |
+            .vcpkg
+            .vcpkg-binary-cache
+          key: >-
+            vcpkg-${{ matrix.runner }}-${{ matrix.preset }}-${{
+            hashFiles('vcpkg.json', 'cmake/triplets/*.cmake', 'cmake/BootstrapVcpkg.cmake') }}
+          restore-keys: |
+            vcpkg-${{ matrix.runner }}-${{ matrix.preset }}-
+
+      - name: Configure
+        run: cmake --preset ${{ matrix.preset }}
+
+      - name: Build
+        run: cmake --build --preset ${{ matrix.preset }}
+
+      - name: Record the resolved dependency inventory
+        run: |
+          find vcpkg_installed -name 'CONTROL' -o -name '*.list' | head -50 > deps-inventory.txt || true
+          ls vcpkg_installed >> deps-inventory.txt || true
+
+      - name: Run unit and integration tests
+        run: ctest --preset ${{ matrix.preset }} --label-regex 'unit|integration' --output-junit
+          "${{ github.workspace }}/ctest-nogui.xml"
+
+      - name: Start Xvfb and a window manager (Linux)
+        if: runner.os == 'Linux'
+        run: |
+          ./scripts/start-xvfb.sh :99 1920x1080x24
+          echo "DISPLAY=:99" >> "$GITHUB_ENV"
+
+      # The real platform plugin, not offscreen. CULLFINCH_EXPECTED_PLATFORM
+      # makes an accidental offscreen fallback fail rather than pass quietly.
+      - name: Run GUI tests on the desktop backend
+        env:
+          QT_QPA_PLATFORM: ${{ matrix.display }}
+          CULLFINCH_EXPECTED_PLATFORM: ${{ matrix.display }}
+        run: ctest --preset ${{ matrix.preset }} --label-regex gui --output-junit
+          "${{ github.workspace }}/ctest-gui.xml"
+
+      - name: Install into a staging prefix
+        run: cmake --install build/${{ matrix.preset }} --prefix "${{ github.workspace }}/stage"
+
+      # Linked unit tests cannot catch a missing runtime dependency; launching
+      # the deployed package can.
+      - name: Packaged application smoke test
+        env:
+          QT_QPA_PLATFORM: ${{ matrix.display }}
+        run: |
+          if [ "${{ runner.os }}" = "macOS" ]; then
+            binary="${{ github.workspace }}/stage/cullfinch.app/Contents/MacOS/cullfinch"
+          else
+            binary="${{ github.workspace }}/stage/bin/cullfinch"
+          fi
+          echo "CULLFINCH_PACKAGED_BINARY=${binary}" >> "$GITHUB_ENV"
+          CULLFINCH_PACKAGED_BINARY="${binary}" ctest --preset ${{ matrix.preset }} \
+            --label-regex package --output-junit "${{ github.workspace }}/ctest-package.xml"
+
+      - name: Upload test results and failure artifacts
+        if: always()
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
+        with:
+          name: results-${{ matrix.preset }}-${{ matrix.runner }}
+          path: |
+            ctest-*.xml
+            deps-inventory.txt
+            build/${{ matrix.preset }}/Testing/**
+            build/${{ matrix.preset }}/clang-tidy-enabled-checks.txt
+          if-no-files-found: ignore
+          retention-days: 14
+
+  clang-tidy:
+    name: CMake clang-tidy (${{ matrix.runner }})
+    runs-on: ${{ matrix.runner }}
+    timeout-minutes: 240
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - runner: ubuntu-24.04
+            preset: ci-tidy-linux
+          - runner: macos-15
+            preset: ci-tidy-macos
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+
+      - name: Install platform prerequisites (Linux)
+        if: runner.os == 'Linux'
+        run: ./scripts/setup-linux.sh
+
+      - name: Install platform prerequisites (macOS)
+        if: runner.os == 'macOS'
+        run: ./scripts/setup-macos.sh
+
+      # A matched upstream Clang/clang-tidy toolchain: the Apple toolchain does
+      # not ship clang-tidy, and mixing versions changes the diagnostics.
+      - name: Install the pinned LLVM (Linux)
+        if: runner.os == 'Linux'
+        run: |
+          sudo apt-get install --no-install-recommends -y clang clang-tidy lld
+          echo "CULLFINCH_CLANG_TIDY_EXECUTABLE=$(command -v clang-tidy)" >> "$GITHUB_ENV"
+
+      - name: Locate the pinned LLVM (macOS)
+        if: runner.os == 'macOS'
+        run: |
+          prefix="$(brew --prefix llvm@23 2>/dev/null || brew --prefix llvm)"
+          echo "CULLFINCH_CLANG_TIDY_EXECUTABLE=${prefix}/bin/clang-tidy" >> "$GITHUB_ENV"
+          echo "SDKROOT=$(xcrun --show-sdk-path)" >> "$GITHUB_ENV"
+
+      - uses: lukka/get-cmake@fffaaafeea488556c2c12dad60690008bc1caacb # v4.4.2
+
+      # Dependency binaries are reused; a precompiled application build tree is
+      # not, because an up-to-date build would perform no analysis at all.
+      - name: Restore the vcpkg dependency cache
+        uses: actions/cache@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
+        with:
+          path: |
+            .vcpkg
+            .vcpkg-binary-cache
+          key: >-
+            vcpkg-${{ matrix.runner }}-${{ matrix.preset }}-${{
+            hashFiles('vcpkg.json', 'cmake/triplets/*.cmake', 'cmake/BootstrapVcpkg.cmake') }}
+          restore-keys: |
+            vcpkg-${{ matrix.runner }}-
+
+      - name: Configure a fresh analysis build
+        run: |
+          rm -rf "build/${{ matrix.preset }}"
+          cmake --preset ${{ matrix.preset }} \
+            -DCULLFINCH_CLANG_TIDY_EXECUTABLE="${CULLFINCH_CLANG_TIDY_EXECUTABLE}"
+
+      # Enabled diagnostics are errors, so a finding fails the build.
+      - name: Analyse every owned translation unit
+        run: cmake --build --preset ${{ matrix.preset }}
+
+      - name: Verify the analysis actually ran
+        run: |
+          checks="build/${{ matrix.preset }}/clang-tidy-enabled-checks.txt"
+          test -s "${checks}" || {
+            echo "clang-tidy produced no enabled-check list; the analysis did not run" >&2
+            exit 1
+          }
+          wc -l "${checks}"
+
+      - name: Upload the enabled-check inventory
+        if: always()
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
+        with:
+          name: clang-tidy-checks-${{ matrix.runner }}
+          path: build/${{ matrix.preset }}/clang-tidy-enabled-checks.txt
+          if-no-files-found: warn
+
+  coverage:
+    name: Coverage and Codecov
+    runs-on: ubuntu-24.04
+    timeout-minutes: 240
+    permissions:
+      contents: read
+      # Only this job gets the identity token its upload authentication needs.
+      id-token: write
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          fetch-depth: 0
+
+      - name: Install platform prerequisites
+        run: ./scripts/setup-linux.sh
+
+      - name: Install uv
+        uses: astral-sh/setup-uv@20cfd1bf945f4377ade1205e4dbc17946fc9a30d # v10.0.1
+        with:
+          enable-cache: true
+          cache-dependency-glob: uv.lock
+
+      - name: Sync the locked tooling environment
+        run: uv sync --locked --group tooling
+
+      - uses: lukka/get-cmake@fffaaafeea488556c2c12dad60690008bc1caacb # v4.4.2
+
+      - name: Restore the vcpkg dependency cache
+        uses: actions/cache@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
+        with:
+          path: |
+            .vcpkg
+            .vcpkg-binary-cache
+          key: >-
+            vcpkg-ubuntu-24.04-coverage-${{
+            hashFiles('vcpkg.json', 'cmake/triplets/*.cmake', 'cmake/BootstrapVcpkg.cmake') }}
+          restore-keys: |
+            vcpkg-ubuntu-24.04-
+
+      # A clean application coverage directory, while compatible dependency
+      # binaries are still reused.
+      - name: Configure the coverage build
+        run: |
+          rm -rf build/coverage
+          cmake --preset coverage
+
+      - name: Build with coverage instrumentation
+        run: cmake --build --preset coverage
+
+      - name: Start Xvfb and a window manager
+        run: |
+          ./scripts/start-xvfb.sh :99 1920x1080x24
+          echo "DISPLAY=:99" >> "$GITHUB_ENV"
+
+      # Serial execution: concurrent processes writing counters for the same
+      # instrumented libraries would corrupt the measurement.
+      - name: Run the unit, integration and GUI suites
+        env:
+          QT_QPA_PLATFORM: xcb
+          CULLFINCH_EXPECTED_PLATFORM: xcb
+        run: ctest --preset coverage --output-junit "${{ github.workspace }}/ctest-coverage.xml"
+
+      - name: Require all three suites to have executed
+        run: |
+          for label in unit integration gui; do
+            count=$(ctest --preset coverage --label-regex "${label}" --show-only=json-v1 \
+              | python3 -c 'import json,sys; print(len(json.load(sys.stdin)["tests"]))')
+            if [ "${count}" -eq 0 ]; then
+              echo "the ${label} suite discovered no tests" >&2
+              exit 1
+            fi
+            echo "${label}: ${count} tests"
+          done
+
+      - name: Generate the Cobertura and HTML reports
+        run: cmake --build --preset coverage --target coverage-report
+
+      # A report that does not actually contain owned source is not a report.
+      - name: Validate the coverage report
+        run: python3 scripts/validate_coverage_report.py build/coverage/coverage/coverage.xml
+
+      - name: Upload to Codecov
+        uses: codecov/codecov-action@fb8b3582c8e4def4969c97caa2f19720cb33a72f # v7.0.0
+        with:
+          files: build/coverage/coverage/coverage.xml
+          disable_search: true
+          # One combined report for all three suites under a single stable flag.
+          flags: linux-gcc
+          name: linux-gcc-combined
+          use_oidc: true
+          fail_ci_if_error: true
+
+      - name: Upload the coverage artifacts
+        if: always()
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
+        with:
+          name: coverage-linux-gcc
+          path: |
+            build/coverage/coverage/coverage.xml
+            build/coverage/coverage/html/**
+            ctest-coverage.xml
+          if-no-files-found: warn
+          retention-days: 14
+
+  required:
+    name: Required checks
+    if: always()
+    needs: [pre-commit, build-and-test, clang-tidy, coverage]
+    runs-on: ubuntu-24.04
+    steps:
+      # A single stable status for branch protection: it fails unless every
+      # required job succeeded, including when one was skipped or cancelled.
+      - name: Verify every required job succeeded
+        run: |
+          results='${{ join(needs.*.result, ' ') }}'
+          echo "job results: ${results}"
+          for result in ${results}; do
+            if [ "${result}" != "success" ]; then
+              echo "a required job did not succeed" >&2
+              exit 1
+            fi
+          done
+          echo "all required jobs succeeded"

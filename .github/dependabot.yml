@@ -1,0 +1,29 @@
+version: 2
+
+updates:
+  # Keeps the pinned Action commit SHAs current. Dependabot does not manage the
+  # vcpkg baseline or the pre-commit hook revisions: those are separate reviewed
+  # tasks, each followed by the complete test matrix.
+  - package-ecosystem: github-actions
+    directory: /
+    schedule:
+      interval: weekly
+      day: monday
+    open-pull-requests-limit: 5
+    commit-message:
+      prefix: 'ci'
+    labels:
+      - dependencies
+      - github-actions
+
+  # Development tooling only; cullfinch itself has no Python runtime dependency.
+  - package-ecosystem: uv
+    directory: /
+    schedule:
+      interval: monthly
+    open-pull-requests-limit: 3
+    commit-message:
+      prefix: 'build'
+    labels:
+      - dependencies
+      - tooling

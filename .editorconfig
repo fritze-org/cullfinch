@@ -1,0 +1,53 @@
+# EditorConfig controls basic whitespace: encoding, line endings, the final
+# newline, trailing whitespace and indent style.
+#
+# It is deliberately *not* the authority on indent width for languages that have
+# a real formatter. clang-format aligns C++ continuation lines to the opening
+# parenthesis, and cmake-format does the same for CMake; both produce column
+# offsets that are not multiples of the nominal indent size. Rather than weaken
+# the formatters or exclude whole source trees, the conflicting subrule is
+# unset for exactly those files, as the design calls for.
+root = true
+
+[*]
+charset = utf-8
+end_of_line = lf
+insert_final_newline = true
+trim_trailing_whitespace = true
+indent_style = space
+indent_size = 4
+
+[*.{yaml,yml,json,toml}]
+indent_size = 2
+
+[*.{xml,plist,in}]
+indent_size = 2
+
+[*.md]
+indent_size = 2
+
+# clang-format is the authority on C++ indentation, alignment and wrapping.
+[*.{c,cc,cpp,h,hpp}]
+indent_size = unset
+
+# cmake-format is the authority on CMake indentation and wrapping.
+[{CMakeLists.txt,*.cmake}]
+indent_size = unset
+
+# Tool configuration files that are YAML without a YAML extension.
+[{.clang-tidy,.clang-format}]
+indent_size = 2
+
+[Makefile]
+indent_style = tab
+
+# Verbatim upstream text: never reformatted, never re-indented.
+[LICENSE]
+indent_size = unset
+indent_style = unset
+trim_trailing_whitespace = false
+
+# Fixtures are byte-exact inputs; never normalise them.
+[tests/fixtures/**]
+trim_trailing_whitespace = false
+insert_final_newline = false

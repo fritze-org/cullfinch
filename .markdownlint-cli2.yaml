@@ -1,0 +1,20 @@
+config:
+  # Long lines are acceptable: the specification contains wide tables and URLs.
+  MD013: false
+  # Duplicate headings are allowed under different parents.
+  MD024:
+    siblings_only: true
+  # Trailing-space line breaks are forbidden; use an explicit backslash or a
+  # blank line. This avoids fighting the trailing-whitespace hook.
+  MD009: true
+  # Table pipe padding is cosmetic and would fight the compact `|---|---|`
+  # delimiter rows used throughout the design document.
+  MD060: false
+
+# Files are supplied by pre-commit, and by the CI job through the same hook, so
+# no globs are configured here: a `globs` key would override that file list and
+# silently widen the scope.
+ignores:
+  - .vcpkg/**
+  - build*/**
+  - vcpkg_installed/**

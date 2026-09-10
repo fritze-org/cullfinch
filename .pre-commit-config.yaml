@@ -1,0 +1,172 @@
+# Comprehensive commit checks for cullfinch (R13).
+#
+# Commit hooks operate on staged files; the required CI job runs this same
+# configuration against all tracked files. Formatting hooks fix files locally
+# and the developer reviews and stages the result; in CI any modification is a
+# failure with a downloadable diff. CI never commits formatting changes.
+#
+# Onboarding:
+#   uv sync --locked --group tooling
+#   uv run --frozen --group tooling pre-commit install --install-hooks
+#   uv run --frozen --group tooling pre-commit run --all-files
+minimum_pre_commit_version: '4.0.0'
+default_install_hook_types: [pre-commit, commit-msg]
+fail_fast: false
+
+exclude: |
+  (?x)^(
+      tests/fixtures/.*|
+      docs/design\.md|
+      .*\.lock
+  )$
+
+repos:
+  # ---------------------------------------------------------------- C++ format
+  - repo: https://github.com/pre-commit/mirrors-clang-format
+    rev: v23.1.0
+    hooks:
+      - id: clang-format
+        name: clang-format (LLVM 23)
+        types_or: [c, c++]
+        args: [--style=file]
+
+  # ------------------------------------------------------------ editor settings
+  - repo: https://github.com/editorconfig-checker/editorconfig-checker.python
+    rev: 3.11.1
+    hooks:
+      - id: editorconfig-checker
+        alias: ec
+        # The managed wrapper, never an arbitrary system binary.
+        exclude: |
+          (?x)^(
+              tests/fixtures/.*|
+              uv\.lock
+          )$
+
+  # --------------------------------------------------------------------- CMake
+  # cheshirekow/cmake_format publishes the tools but no .pre-commit-hooks.yaml,
+  # so the pinned `cmakelang` from the uv tooling group supplies them instead.
+  # That is the same upstream implementation, pinned by uv.lock rather than by a
+  # hook repository. Formatting runs before linting.
+  - repo: local
+    hooks:
+      - id: cmake-format
+        name: cmake-format
+        entry: uv run --frozen --group tooling -- cmake-format --config-files .cmake-format.yaml
+          --in-place
+        language: system
+        files: (CMakeLists\.txt|\.cmake)$
+
+      - id: cmake-lint
+        name: cmake-lint
+        entry: uv run --frozen --group tooling -- cmake-lint --config-files .cmake-format.yaml
+        language: system
+        files: (CMakeLists\.txt|\.cmake)$
+
+  # ------------------------------------------------------------------ Markdown
+  - repo: https://github.com/DavidAnson/markdownlint-cli2
+    rev: v0.23.2
+    hooks:
+      - id: markdownlint-cli2
+        # Pinned so the hook does not depend on whatever Node the machine
+        # happens to have; markdownlint-cli2 requires a recent one.
+        language_version: '22.22.2'
+
+  # ------------------------------------------------------------ GitHub Actions
+  - repo: https://github.com/rhysd/actionlint
+    rev: v1.7.12
+    hooks:
+      - id: actionlint
+        # actionlint's optional ShellCheck integration must be deterministic.
+        # The managed hook environment supplies actionlint; the repository
+        # tooling environment supplies the exact pinned shellcheck-py binary,
+        # so embedded `run:` scripts are always analysed. Verified from an
+        # ordinary `git commit` without an activated virtual environment.
+        entry: uv run --frozen --group tooling -- actionlint
+        language: system
+
+  # ------------------------------------------------------------- Shell scripts
+  - repo: https://github.com/shellcheck-py/shellcheck-py
+    rev: v0.11.0.1
+    hooks:
+      - id: shellcheck
+        args: [--severity=style, --shell=bash]
+
+  - repo: https://github.com/scop/pre-commit-shfmt
+    rev: v3.13.1-1
+    hooks:
+      - id: shfmt
+        # Matches .editorconfig: 4-space indentation, LF, POSIX-safe bash.
+        args: [--language-dialect, bash, --indent, '4', --case-indent, --write]
+
+  # ------------------------------- Python maintenance scripts (no app runtime)
+  - repo: https://github.com/astral-sh/ruff-pre-commit
+    rev: v0.16.6
+    hooks:
+      - id: ruff-check
+        args: [--fix]
+      - id: ruff-format
+
+  # ------------------------------------------------------------------ Spelling
+  - repo: https://github.com/codespell-project/codespell
+    rev: v2.4.3
+    hooks:
+      - id: codespell
+        args: [--ignore-words, .codespell-ignore-words.txt]
+        additional_dependencies: [tomli]
+
+  # ------------------------------------------- Whitespace, data and integrity
+  - repo: https://github.com/pre-commit/pre-commit-hooks
+    rev: v6.0.0
+    hooks:
+      # Whitespace: normalise to LF; Markdown uses explicit line breaks.
+      - id: trailing-whitespace
+        args: [--markdown-linebreak-ext=none]
+      - id: end-of-file-fixer
+      - id: mixed-line-ending
+        args: [--fix=lf]
+      # Structured data. Workflow semantics remain actionlint's job.
+      - id: check-yaml
+      - id: check-json
+      - id: check-toml
+      # Repository integrity.
+      - id: check-merge-conflict
+      - id: check-case-conflict
+      - id: check-symlinks
+      - id: destroyed-symlinks
+      # Script metadata.
+      - id: check-executables-have-shebangs
+      - id: check-shebang-scripts-are-executable
+      # Narrow credential check, not comprehensive secret detection.
+      - id: detect-private-key
+      # Large additions: 1 MiB threshold, enforced on all files.
+      - id: check-added-large-files
+        args: [--maxkb=1024, --enforce-all]
+
+  # ------------------------------------------------------- Tool lock integrity
+  - repo: https://github.com/astral-sh/uv-pre-commit
+    rev: 0.12.12
+    hooks:
+      - id: uv-lock
+        args: [--check]
+
+  # ------------------------------------------------- Manual, explicitly invoked
+  # Not part of an ordinary commit: these need a configure/build tree.
+  # Run with: uv run --frozen --group tooling pre-commit run --hook-stage manual <id>
+  - repo: local
+    hooks:
+      - id: clang-tidy-preset
+        name: clang-tidy through the CMake analysis preset
+        entry: scripts/run-clang-tidy-preset.sh
+        language: script
+        pass_filenames: false
+        stages: [manual]
+        types_or: [c, c++]
+
+      - id: pre-commit-validate-config
+        name: pre-commit validate-config
+        entry: uv run --frozen --group tooling -- pre-commit validate-config
+        language: system
+        pass_filenames: false
+        stages: [manual]
+        files: ^\.pre-commit-config\.yaml$
