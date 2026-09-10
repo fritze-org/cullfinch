@@ -119,6 +119,10 @@ ConformanceFlow.h` is the fixture that keeps that claim honest.
   a group's files must be on one filesystem.
 - RAW files are opaque companions. cullfinch never decodes them and makes no claim to support
   any RAW format's contents.
+- On Linux, the pinned vcpkg Qt build has D-Bus and AT-SPI switched off, so Qt's accessibility
+  tree is not exported to screen readers there. Keyboard-only operation, visible focus, and
+  rejection state shown as text and shape rather than colour alone all work regardless; a
+  screen reader on Linux does not. macOS uses the Cocoa accessibility bridge normally.
 
 ## Licence
 

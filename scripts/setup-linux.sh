@@ -34,33 +34,23 @@ $SUDO apt-get install --no-install-recommends -y \
     libtool \
     m4
 
-# Qt's XCB platform plugin and its font/input stack.
+# Qt's XCB platform plugin and its font stack.
+#
+# The libxcb set is installed by pattern, exactly as the vcpkg qtbase port
+# documents. A hand-written enumeration got this wrong once already: the
+# xcb-sm and system-xcb-xinput features both failed their conditions because
+# libsm-dev and libxcb-xinput-dev were not on the list.
 $SUDO apt-get install --no-install-recommends -y \
-    libdbus-1-dev \
+    '^libxcb.*-dev' \
     libegl1-mesa-dev \
     libfontconfig1-dev \
     libfreetype-dev \
     libgl1-mesa-dev \
     libglu1-mesa-dev \
-    libinput-dev \
+    libice-dev \
+    libsm-dev \
     libx11-dev \
     libx11-xcb-dev \
-    libxcb-cursor-dev \
-    libxcb-glx0-dev \
-    libxcb-icccm4-dev \
-    libxcb-image0-dev \
-    libxcb-keysyms1-dev \
-    libxcb-randr0-dev \
-    libxcb-render-util0-dev \
-    libxcb-render0-dev \
-    libxcb-shape0-dev \
-    libxcb-shm0-dev \
-    libxcb-sync-dev \
-    libxcb-util-dev \
-    libxcb-xfixes0-dev \
-    libxcb-xinerama0-dev \
-    libxcb-xkb-dev \
-    libxcb1-dev \
     libxext-dev \
     libxfixes-dev \
     libxi-dev \
