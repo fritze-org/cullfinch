@@ -6,6 +6,7 @@
 
 #include <QImage>
 #include <QPointF>
+#include <QRectF>
 #include <QWidget>
 
 namespace cullfinch::ui {

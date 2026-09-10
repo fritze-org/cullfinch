@@ -11,9 +11,11 @@
 #include <cullfinch/ui/ComparisonShell.h>
 #include <cullfinch/ui/FlowView.h>
 
+#include <QAction>
 #include <QLabel>
 #include <QListView>
 #include <QMainWindow>
+#include <QMenu>
 #include <QPointer>
 #include <QSortFilterProxyModel>
 

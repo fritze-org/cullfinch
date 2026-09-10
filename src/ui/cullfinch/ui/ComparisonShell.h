@@ -4,6 +4,7 @@
 #include <cullfinch/application/SessionController.h>
 #include <cullfinch/ui/FlowView.h>
 
+#include <QAction>
 #include <QLabel>
 #include <QPointer>
 #include <QToolBar>

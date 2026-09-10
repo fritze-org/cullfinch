@@ -11,6 +11,7 @@
 #include <QHash>
 #include <QLabel>
 #include <QPushButton>
+#include <QRect>
 #include <QWidget>
 
 namespace cullfinch::views::wall {
