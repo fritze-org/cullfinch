@@ -1,4 +1,4 @@
-# cullfinch
+# Cullfinch
 
 Cull a directory of photos: compare candidates two at a time or all at once, mark the rejects,
 and move each rejected photo to Trash **as a complete group** — the JPG and every RAW file that
@@ -25,11 +25,17 @@ belongs with it.
 
 ## Requirements
 
-- Linux x86-64 or macOS (Apple Silicon or Intel)
+- Linux x86-64, primarily on **native Wayland**, with X11 as a compatibility backend
+- macOS (Apple Silicon or Intel)
 - A C++20 compiler, CMake 3.28+, Ninja and Git
 
 Qt comes from vcpkg, which CMake bootstraps for you. You do **not** need a system Qt, and
-cullfinch will never use one it finds by accident.
+Cullfinch will never use one it finds by accident.
+
+On Linux, Cullfinch runs as a native Wayland client in a Wayland session and reports the
+platform plugin it actually got at startup. It never silently falls back to XWayland: if Qt
+picks XCB in a Wayland session you get a warning saying so. `-platform xcb` remains a supported
+compatibility option, and `-platform wayland` requires the native path.
 
 ## Build
 
@@ -80,8 +86,18 @@ ctest --preset dev --label-regex unit
 ```
 
 GUI tests use whatever `QT_QPA_PLATFORM` you give them — `offscreen` by default on a headless
-machine, `xcb` under Xvfb, `cocoa` on macOS. CI additionally sets `CULLFINCH_EXPECTED_PLATFORM`
-so an accidental offscreen fallback fails the desktop-backend job instead of passing quietly.
+machine, `cocoa` on macOS. Two helpers own a complete isolated session, including their own
+compositor, D-Bus and runtime directory:
+
+```sh
+tests/support/with-wayland.sh ctest --preset dev-fast --label-regex gui   # required backend
+tests/support/with-x11.sh     ctest --preset dev-fast --label-regex gui   # compatibility
+```
+
+Both set `CULLFINCH_EXPECTED_PLATFORM`, so a run that quietly lands on XWayland, XCB or
+offscreen fails instead of passing under a backend nobody asked for. The Wayland helper waits
+for a real client connection rather than for a socket to appear, and unsets `DISPLAY` so
+XWayland cannot rescue a broken native path.
 
 ## Layout
 
@@ -119,10 +135,16 @@ ConformanceFlow.h` is the fixture that keeps that claim honest.
   a group's files must be on one filesystem.
 - RAW files are opaque companions. cullfinch never decodes them and makes no claim to support
   any RAW format's contents.
-- On Linux, the pinned vcpkg Qt build has D-Bus and AT-SPI switched off, so Qt's accessibility
-  tree is not exported to screen readers there. Keyboard-only operation, visible focus, and
-  rejection state shown as text and shape rather than colour alone all work regardless; a
-  screen reader on Linux does not. macOS uses the Cocoa accessibility bridge normally.
+- Fullscreen restores the window's previous *size* and state, not its exact desktop position:
+  Wayland does not let a client place its own window, and `QWindow::setPosition()` is documented
+  as unsupported there.
+- 100% inspection means one source-image pixel per rendered *buffer* pixel. Under fractional
+  scaling a compositor may resample the surface afterwards, so a guaranteed one-to-one mapping
+  to physical panel pixels is not promised.
+- Flatpak packaging is not provided. An ordinary AppImage is not sandboxed, so the local
+  filesystem, RAW association and Trash design apply as described; a portal-sandboxed build
+  would need its directory access, companion-file discovery and staging directory verified
+  separately.
 
 ## Licence
 

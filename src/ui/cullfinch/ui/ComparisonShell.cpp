@@ -3,6 +3,7 @@
 
 #include <QAction>
 #include <QCloseEvent>
+#include <QEvent>
 #include <QKeyEvent>
 #include <QKeySequence>
 #include <QMessageBox>
@@ -133,23 +134,36 @@ void ComparisonShell::dispatch(const QString& name, const QJsonObject& payload, 
 }
 
 void ComparisonShell::toggleFullscreen() {
-    if (fullscreen_) {
-        fullscreen_ = false;
+    // The request is asynchronous: the compositor decides when the window
+    // actually changes state and what size it gets. changeEvent() below reacts
+    // to what really happened rather than to what was asked for.
+    if (isFullScreen()) {
         showNormal();
-        if (!restoreGeometry_.isEmpty()) {
-            restoreGeometry(restoreGeometry_);
+        if (normalSize_.isValid()) {
+            resize(normalSize_);
         }
     } else {
-        restoreGeometry_ = saveGeometry();
-        fullscreen_ = true;
+        normalSize_ = size();
         showFullScreen();
     }
+}
+
+void ComparisonShell::changeEvent(QEvent* event) {
+    QWidget::changeEvent(event);
+    if (event->type() != QEvent::WindowStateChange) {
+        return;
+    }
+
+    const bool nowFullscreen = isFullScreen();
+    if (nowFullscreen == fullscreen_) {
+        return;
+    }
+    fullscreen_ = nowFullscreen;
+
     fullscreenAction_->setChecked(fullscreen_);
     if (view_ != nullptr) {
         view_->setFullscreenPresentation(fullscreen_);
-    }
-    // Keyboard focus must survive the transition.
-    if (view_ != nullptr) {
+        // Keyboard focus must survive the transition, whichever way it went.
         view_->widget()->setFocus(Qt::OtherFocusReason);
     }
 }
@@ -206,7 +220,7 @@ void ComparisonShell::discard() {
 void ComparisonShell::keyPressEvent(QKeyEvent* event) {
     if (event->key() == Qt::Key_Escape) {
         // Escape leaves fullscreen first; only otherwise does it pause.
-        if (fullscreen_) {
+        if (isFullScreen()) {
             toggleFullscreen();
         } else {
             pause();

@@ -58,14 +58,22 @@ $SUDO apt-get install --no-install-recommends -y \
     libxkbcommon-x11-dev \
     libxrender-dev
 
-# Wayland support, so the baseline package works on both display servers.
+# Native Wayland is the primary Linux backend, and Qt needs D-Bus for
+# portal-backed folder selection, desktop integration and the accessibility
+# bridge.
 $SUDO apt-get install --no-install-recommends -y \
+    libdbus-1-dev \
     libwayland-dev \
     wayland-protocols
 
-# Headless GUI testing under the real XCB plugin.
+# Headless GUI testing. Weston is the deterministic reference compositor for
+# the required native Wayland suite; Xvfb and a window manager serve the
+# secondary X11 compatibility suite.
 $SUDO apt-get install --no-install-recommends -y \
+    dbus-daemon \
     openbox \
+    wayland-utils \
+    weston \
     x11-utils \
     xvfb
 

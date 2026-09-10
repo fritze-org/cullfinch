@@ -4,6 +4,7 @@
 #include <QApplication>
 #include <QCommandLineOption>
 #include <QCommandLineParser>
+#include <QDebug>
 #include <QDir>
 #include <QElapsedTimer>
 #include <QMessageBox>
@@ -76,8 +77,40 @@ int runSmoke(cullfinch::ui::BrowserWindow* window, cullfinch::app::CompositionRo
         QCoreApplication::processEvents();
     }
 
+    // Naming the backend is the point on Linux: a package that only works
+    // through XWayland does not satisfy the primary Linux target, and looks
+    // identical to one that does unless it says which plugin it loaded.
+    out << "smoke: platform=" << QGuiApplication::platformName() << Qt::endl;
     out << "smoke: ok" << Qt::endl;
     return 0;
+}
+
+} // namespace
+
+namespace {
+
+/// Report the backend actually in use, and say so plainly when it is not the
+/// one this platform is built around.
+///
+/// A Wayland session that silently ends up on XCB through XWayland looks
+/// identical to a working native run until something subtle misbehaves, so the
+/// fallback is diagnosed rather than hidden. It is reported, never overridden:
+/// an explicit `-platform` choice by the user is theirs to make.
+void reportPlatformBackend() {
+    const QString backend = QGuiApplication::platformName();
+    qInfo().noquote() << QStringLiteral("cullfinch %1, Qt %2, platform plugin '%3'")
+                             .arg(QStringLiteral(CULLFINCH_VERSION),
+                                  QString::fromLatin1(qVersion()), backend);
+
+    const bool waylandSession = qEnvironmentVariableIsSet("WAYLAND_DISPLAY");
+    if (waylandSession && backend != QLatin1String("wayland")) {
+        qWarning().noquote()
+            << QStringLiteral(
+                   "cullfinch: this is a Wayland session but Qt selected the '%1' backend. "
+                   "Rendering and scaling go through XWayland. Pass -platform wayland to "
+                   "require the native path, or -platform xcb to silence this.")
+                   .arg(backend);
+    }
 }
 
 } // namespace
@@ -88,6 +121,12 @@ int main(int argc, char* argv[]) {
     QCoreApplication::setOrganizationDomain(QStringLiteral("cullfinch.invalid"));
     QCoreApplication::setApplicationName(QStringLiteral("cullfinch"));
     QCoreApplication::setApplicationVersion(QStringLiteral(CULLFINCH_VERSION));
+
+    // Matches the installed .desktop basename so the desktop can identify
+    // Cullfinch for window grouping, the task switcher and its icon. Wayland
+    // has no window-class fallback for this: without it the application shows
+    // up unnamed and ungrouped.
+    QGuiApplication::setDesktopFileName(QStringLiteral(CULLFINCH_DESKTOP_ID));
 
     QCommandLineParser parser;
     parser.setApplicationDescription(
@@ -118,6 +157,8 @@ int main(int argc, char* argv[]) {
     parser.addOption(smokeOption);
 
     parser.process(application);
+
+    reportPlatformBackend();
 
     cullfinch::app::CompositionRoot::Options options;
     options.dataDirectory = parser.value(dataDirectoryOption);

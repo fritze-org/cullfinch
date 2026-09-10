@@ -84,22 +84,35 @@ jobs:
       fail-fast: false
       matrix:
         include:
-          - name: Linux GCC
+          # Native Wayland is the primary Linux backend, so the complete core
+          # GUI suite and the package smoke run under a real compositor here.
+          - name: Linux GCC / native Wayland
             runner: ubuntu-24.04
             preset: ci-linux-gcc
-            display: xcb
+            display: wayland
+            session: tests/support/with-wayland.sh
           - name: Linux Clang sanitizers
             runner: ubuntu-24.04
             preset: ci-linux-asan
+            display: wayland
+            session: tests/support/with-wayland.sh
+          # Secondary compatibility: the XCB path must keep working, but it is
+          # never a substitute for the Wayland job above.
+          - name: Linux X11 compatibility
+            runner: ubuntu-24.04
+            preset: ci-linux-gcc-x11
             display: xcb
+            session: tests/support/with-x11.sh
           - name: macOS Apple Silicon
             runner: macos-15
             preset: ci-macos
             display: cocoa
+            session: ''
           - name: macOS Intel
             runner: macos-15-intel
             preset: ci-macos
             display: cocoa
+            session: ''
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
 
@@ -157,29 +170,30 @@ jobs:
         run: ctest --preset ${{ matrix.preset }} --label-regex 'unit|integration' --output-junit
           "${{ github.workspace }}/ctest-nogui.xml"
 
-      - name: Start Xvfb and a window manager (Linux)
-        if: runner.os == 'Linux'
-        run: |
-          ./scripts/start-xvfb.sh :99 1920x1080x24
-          echo "DISPLAY=:99" >> "$GITHUB_ENV"
-
-      # The real platform plugin, not offscreen. CULLFINCH_EXPECTED_PLATFORM
-      # makes an accidental offscreen fallback fail rather than pass quietly.
+      # The session helper owns its compositor, its D-Bus and its runtime
+      # directory, waits for a real client connection, and makes the tests
+      # assert the backend they actually got -- so an XWayland, XCB or
+      # offscreen fallback fails the job instead of passing quietly.
       - name: Run GUI tests on the desktop backend
         env:
           QT_QPA_PLATFORM: ${{ matrix.display }}
           CULLFINCH_EXPECTED_PLATFORM: ${{ matrix.display }}
-        run: ctest --preset ${{ matrix.preset }} --label-regex gui --output-junit
-          "${{ github.workspace }}/ctest-gui.xml"
+          CULLFINCH_ARTIFACT_DIR: ${{ github.workspace }}/session-artifacts
+        run: |
+          ${{ matrix.session }} ctest --preset ${{ matrix.preset }} --label-regex gui \
+            --output-junit "${{ github.workspace }}/ctest-gui.xml"
 
       - name: Install into a staging prefix
         run: cmake --install build/${{ matrix.preset }} --prefix "${{ github.workspace }}/stage"
 
       # Linked unit tests cannot catch a missing runtime dependency; launching
-      # the deployed package can.
+      # the deployed package can. On Linux this runs with the native backend
+      # selected and X11 genuinely unavailable, because a package that works
+      # only through XCB does not satisfy the primary Linux target.
       - name: Packaged application smoke test
         env:
           QT_QPA_PLATFORM: ${{ matrix.display }}
+          CULLFINCH_ARTIFACT_DIR: ${{ github.workspace }}/session-artifacts
         run: |
           if [ "${{ runner.os }}" = "macOS" ]; then
             binary="${{ github.workspace }}/stage/cullfinch.app/Contents/MacOS/cullfinch"
@@ -187,8 +201,9 @@ jobs:
             binary="${{ github.workspace }}/stage/bin/cullfinch"
           fi
           echo "CULLFINCH_PACKAGED_BINARY=${binary}" >> "$GITHUB_ENV"
-          CULLFINCH_PACKAGED_BINARY="${binary}" ctest --preset ${{ matrix.preset }} \
-            --label-regex package --output-junit "${{ github.workspace }}/ctest-package.xml"
+          CULLFINCH_PACKAGED_BINARY="${binary}" ${{ matrix.session }} \
+            ctest --preset ${{ matrix.preset }} --label-regex package \
+            --output-junit "${{ github.workspace }}/ctest-package.xml"
 
       - name: Upload test results and failure artifacts
         if: always()
@@ -200,6 +215,7 @@ jobs:
             deps-inventory.txt
             build/${{ matrix.preset }}/Testing/**
             build/${{ matrix.preset }}/clang-tidy-enabled-checks.txt
+            session-artifacts/**
           if-no-files-found: ignore
           retention-days: 14
 
@@ -371,18 +387,16 @@ jobs:
       - name: Build with coverage instrumentation
         run: cmake --build --preset coverage
 
-      - name: Start Xvfb and a window manager
-        run: |
-          ./scripts/start-xvfb.sh :99 1920x1080x24
-          echo "DISPLAY=:99" >> "$GITHUB_ENV"
-
+      # The same isolated native Wayland session helper the required GUI job
+      # uses, so the coverage report reflects the backend that actually ships.
       # Serial execution: concurrent processes writing counters for the same
       # instrumented libraries would corrupt the measurement.
       - name: Run the unit, integration and GUI suites
         env:
-          QT_QPA_PLATFORM: xcb
-          CULLFINCH_EXPECTED_PLATFORM: xcb
-        run: ctest --preset coverage --output-junit "${{ github.workspace }}/ctest-coverage.xml"
+          CULLFINCH_ARTIFACT_DIR: ${{ github.workspace }}/session-artifacts
+        run: |
+          tests/support/with-wayland.sh ctest --preset coverage \
+            --output-junit "${{ github.workspace }}/ctest-coverage.xml"
 
       - name: Require all three suites to have executed
         run: |
@@ -423,6 +437,7 @@ jobs:
             build/coverage/coverage/coverage.xml
             build/coverage/coverage/html/**
             ctest-coverage.xml
+            session-artifacts/**
           if-no-files-found: warn
           retention-days: 14
 

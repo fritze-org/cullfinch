@@ -5,10 +5,11 @@ UV     := uv run --frozen --group tooling
 PRESET ?= dev
 
 .DEFAULT_GOAL := help
-.PHONY: help hooks lint configure build test tidy coverage coverage-open clean
+.PHONY: help hooks lint configure build test gui-wayland gui-x11
+.PHONY: tidy coverage coverage-open clean
 
 help: ## Show the available targets
-	@grep -hE '^[a-zA-Z_-]+:.*?## ' $(MAKEFILE_LIST) \
+	@grep -hE '^[a-zA-Z0-9_-]+:.*?## ' $(MAKEFILE_LIST) \
 		| awk 'BEGIN {FS = ":.*?## "}; {printf "  \033[36m%-16s\033[0m %s\n", $$1, $$2}'
 
 hooks: ## Install the pinned tooling environment and Git hooks
@@ -26,6 +27,12 @@ build: ## Build the configured tree
 
 test: ## Run the test suite for the configured preset
 	ctest --preset $(PRESET) --output-on-failure
+
+gui-wayland: ## Run the GUI suite under an isolated headless Wayland session
+	tests/support/with-wayland.sh ctest --preset $(PRESET) --label-regex gui --output-on-failure
+
+gui-x11: ## Run the GUI suite under an isolated X11 session (compatibility)
+	tests/support/with-x11.sh ctest --preset $(PRESET) --label-regex gui --output-on-failure
 
 tidy: ## Run a fresh clang-tidy analysis build
 	cmake --preset ci-tidy-linux

@@ -25,7 +25,12 @@ set_target_properties(
              MACOSX_BUNDLE_BUNDLE_VERSION ${PROJECT_VERSION}
              MACOSX_BUNDLE_SHORT_VERSION_STRING ${PROJECT_VERSION})
 
-target_compile_definitions(cullfinch_app PRIVATE CULLFINCH_VERSION="${PROJECT_VERSION}")
+# The desktop identity must match the installed .desktop basename exactly, so both come from one
+# definition.
+set(CULLFINCH_DESKTOP_ID "org.fritze.cullfinch")
+
+target_compile_definitions(cullfinch_app PRIVATE CULLFINCH_VERSION="${PROJECT_VERSION}"
+                                                 CULLFINCH_DESKTOP_ID="${CULLFINCH_DESKTOP_ID}")
 
 target_link_libraries(cullfinch_app PRIVATE cullfinch::project_options
                                             cullfinch::cullfinch_composition Qt6::Widgets)

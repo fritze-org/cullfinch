@@ -1,6 +1,8 @@
 // SPDX-License-Identifier: GPL-3.0-or-later
 #include <cullfinch/ui/ImageCanvas.h>
 
+#include <QEvent>
+#include <QFocusEvent>
 #include <QKeyEvent>
 #include <QMouseEvent>
 #include <QPainter>
@@ -170,8 +172,45 @@ void ImageCanvas::setCaption(const QString& caption) {
     update();
 }
 
+void ImageCanvas::focusOutEvent(QFocusEvent* event) {
+    QWidget::focusOutEvent(event);
+    // Alt-Tab, a workspace switch, a dialog or the screen locking all land
+    // here. Whatever gesture was in flight is abandoned rather than completed
+    // against a photo the user is no longer looking at.
+    armed_ = false;
+    dragging_ = false;
+    update();
+}
+
+void ImageCanvas::changeEvent(QEvent* event) {
+    QWidget::changeEvent(event);
+    if (event->type() == QEvent::ActivationChange && !isActiveWindow()) {
+        armed_ = false;
+        dragging_ = false;
+        return;
+    }
+#if QT_VERSION >= QT_VERSION_CHECK(6, 6, 0)
+    if (event->type() == QEvent::DevicePixelRatioChange) {
+        // Moving to a differently scaled output changes how many buffer pixels
+        // this widget owns, so the decoded size that was right a moment ago no
+        // longer is. Any gesture in flight is disarmed for the same reason a
+        // resize disarms one.
+        armed_ = false;
+        if (!presentation_.previewPath.isEmpty()) {
+            requestImage(application::ImageRequestClass::Comparison);
+            if (inspecting_) {
+                requestImage(application::ImageRequestClass::FullResolution);
+            }
+        }
+    }
+#endif
+}
+
 void ImageCanvas::resizeEvent(QResizeEvent* event) {
     QWidget::resizeEvent(event);
+    // A resize between press and release means the photo under the pointer may
+    // not be the one that was pressed.
+    armed_ = false;
     if (!presentation_.previewPath.isEmpty()) {
         // A larger widget needs more pixels; a later refinement must never swap
         // candidate identities, which is why the member id is part of the match.
@@ -246,6 +285,7 @@ void ImageCanvas::mousePressEvent(QMouseEvent* event) {
         return;
     }
     setFocus(Qt::MouseFocusReason);
+    armed_ = true;
     dragging_ = inspecting_;
     dragMoved_ = false;
     dragOrigin_ = event->pos();
@@ -279,11 +319,17 @@ void ImageCanvas::mouseReleaseEvent(QMouseEvent* event) {
         return;
     }
     const bool wasDragging = dragging_;
+    const bool wasArmed = armed_;
     dragging_ = false;
+    armed_ = false;
     if (inspecting_) {
         setCursor(Qt::OpenHandCursor);
     }
 
+    // A gesture the desktop interrupted is not a decision.
+    if (!wasArmed) {
+        return;
+    }
     // A pan gesture is not an elimination.
     if (wasDragging && dragMoved_) {
         return;

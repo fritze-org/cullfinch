@@ -97,18 +97,27 @@ jobs:
           fi
           cat partial.log
 
-  wayland-gui:
-    name: Wayland GUI smoke
+  desktop-compositors:
+    name: Compositor integration (${{ matrix.compositor }})
     runs-on: ubuntu-24.04
     timeout-minutes: 240
+    strategy:
+      fail-fast: false
+      matrix:
+        compositor: [kwin, mutter]
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
 
       - name: Install platform prerequisites
         run: ./scripts/setup-linux.sh
 
-      - name: Install a controlled Wayland compositor
-        run: sudo apt-get install --no-install-recommends -y weston
+      - name: Install the compositor under test
+        run: |
+          if [ "${{ matrix.compositor }}" = "kwin" ]; then
+            sudo apt-get install --no-install-recommends -y kwin-wayland
+          else
+            sudo apt-get install --no-install-recommends -y mutter
+          fi
 
       - uses: lukka/get-cmake@fffaaafeea488556c2c12dad60690008bc1caacb # v4.4.2
 
@@ -117,35 +126,74 @@ jobs:
           cmake --preset ci-linux-gcc
           cmake --build --preset ci-linux-gcc
 
-      # The X11 suite alone does not establish native Wayland compatibility, so
-      # this runs the same GUI binaries against a real compositor.
-      - name: Run the GUI suite under Weston
+      # Weston is the deterministic reference compositor for the required PR
+      # job. These runs cover behaviour that only a full desktop compositor
+      # exhibits: decorations, real focus routing and fractional scaling.
+      - name: Run the GUI suite under ${{ matrix.compositor }}
         env:
-          XDG_RUNTIME_DIR: /tmp/cullfinch-wayland
-          QT_QPA_PLATFORM: wayland
-          CULLFINCH_EXPECTED_PLATFORM: wayland
+          CULLFINCH_COMPOSITOR: ${{ matrix.compositor }}
         run: |
-          mkdir -p "${XDG_RUNTIME_DIR}"
-          chmod 700 "${XDG_RUNTIME_DIR}"
-          weston --backend=headless --socket=wayland-1 --idle-time=0 &
-          for _ in $(seq 1 100); do
-            if [ -S "${XDG_RUNTIME_DIR}/wayland-1" ]; then break; fi
+          runtime="${RUNNER_TEMP}/cullfinch-${{ matrix.compositor }}"
+          mkdir -p "${runtime}"
+          chmod 700 "${runtime}"
+          export XDG_RUNTIME_DIR="${runtime}"
+          if [ "${{ matrix.compositor }}" = "kwin" ]; then
+            kwin_wayland --headless --width 1920 --height 1080 --socket cullfinch-kwin &
+          else
+            mutter --headless --wayland --wayland-display cullfinch-mutter &
+          fi
+          compositor_pid=$!
+          for _ in $(seq 1 150); do
+            if [ -S "${runtime}/cullfinch-${{ matrix.compositor }}" ]; then break; fi
             sleep 0.2
           done
-          test -S "${XDG_RUNTIME_DIR}/wayland-1" || {
-            echo "the compositor never came up" >&2
+          test -S "${runtime}/cullfinch-${{ matrix.compositor }}" || {
+            echo "${{ matrix.compositor }} never came up" >&2
             exit 1
           }
-          WAYLAND_DISPLAY=wayland-1 ctest --preset ci-linux-gcc --label-regex gui \
-            --output-on-failure
+          WAYLAND_DISPLAY="cullfinch-${{ matrix.compositor }}" \
+            QT_QPA_PLATFORM=wayland CULLFINCH_EXPECTED_PLATFORM=wayland \
+            ctest --preset ci-linux-gcc --label-regex gui --output-on-failure
+          kill "${compositor_pid}" 2>/dev/null || true
 
       - name: Upload failure artifacts
         if: always()
         uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
         with:
-          name: wayland-gui-results
+          name: compositor-${{ matrix.compositor }}-results
           path: build/ci-linux-gcc/Testing/**
           if-no-files-found: ignore
+
+  fractional-scaling:
+    name: Fractional scaling and output changes
+    runs-on: ubuntu-24.04
+    timeout-minutes: 240
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+
+      - name: Install platform prerequisites
+        run: ./scripts/setup-linux.sh
+
+      - uses: lukka/get-cmake@fffaaafeea488556c2c12dad60690008bc1caacb # v4.4.2
+
+      - name: Configure and build
+        run: |
+          cmake --preset ci-linux-gcc
+          cmake --build --preset ci-linux-gcc
+
+      # 100% inspection means one source pixel per rendered buffer pixel, so
+      # the scale factor has to be part of the test matrix rather than assumed
+      # to be 1.
+      - name: Run the GUI suite at each supported scale
+        run: |
+          for scale in 1 1.25 1.5 2; do
+            echo "::group::scale ${scale}"
+            CULLFINCH_WESTON_WIDTH=2560 CULLFINCH_WESTON_HEIGHT=1440 \
+              QT_WAYLAND_FORCE_DPI=$(python3 -c "print(int(96 * ${scale}))") \
+              tests/support/with-wayland.sh ctest --preset ci-linux-gcc \
+                --label-regex gui --output-on-failure
+            echo "::endgroup::"
+          done
 
   native-trash:
     name: Native Trash integration (${{ matrix.runner }})

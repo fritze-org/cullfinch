@@ -69,6 +69,8 @@ protected:
     void mouseReleaseEvent(QMouseEvent* event) override;
     void keyPressEvent(QKeyEvent* event) override;
     void wheelEvent(QWheelEvent* event) override;
+    void focusOutEvent(QFocusEvent* event) override;
+    void changeEvent(QEvent* event) override;
 
 private:
     void requestImage(application::ImageRequestClass kind);
@@ -90,6 +92,11 @@ private:
     QString caption_;
 
     bool inspecting_ = false;
+    /// True between press and release of a gesture that could still eliminate.
+    /// Losing focus, changing scale or being resized disarms it: a decision
+    /// must come from a gesture the user completed on the photo they were
+    /// looking at, not one interrupted by the desktop.
+    bool armed_ = false;
     bool dragging_ = false;
     bool dragMoved_ = false;
     QPoint dragOrigin_;

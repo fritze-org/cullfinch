@@ -34,17 +34,20 @@
         {
           "name": "qtbase",
           "default-features": false,
-          "features": ["testlib"]
+          "features": [
+            "testlib"
+          ]
         }
       ]
     },
     "linux-desktop": {
-      "description": "X11 and Wayland platform support for the Linux desktop build",
+      "description": "Native Wayland as the primary Linux backend, XCB for compatibility, and Qt D-Bus for portal-backed desktop integration",
       "dependencies": [
         {
           "name": "qtbase",
           "default-features": false,
           "features": [
+            "dbus",
             "egl",
             "fontconfig",
             "wayland",
@@ -64,7 +67,10 @@
         {
           "name": "qtbase",
           "default-features": false,
-          "features": ["gui", "widgets"]
+          "features": [
+            "gui",
+            "widgets"
+          ]
         }
       ]
     }

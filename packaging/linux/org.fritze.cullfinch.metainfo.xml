@@ -3,12 +3,12 @@
   <id>org.fritze.cullfinch</id>
   <metadata_license>CC0-1.0</metadata_license>
   <project_license>GPL-3.0-or-later</project_license>
-  <name>cullfinch</name>
+  <name>Cullfinch</name>
   <summary>Cull a directory of photos</summary>
 
   <description>
     <p>
-      cullfinch opens a directory of photos, shows one thumbnail per photo even when a JPG
+      Cullfinch opens a directory of photos, shows one thumbnail per photo even when a JPG
       and one or more RAW files belong together, and runs comparison flows over a selection.
       The versus tree shows two candidates at a time until one remains; the image wall shows
       everything at once and removes what you click.

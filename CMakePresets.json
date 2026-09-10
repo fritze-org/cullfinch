@@ -56,6 +56,24 @@
       }
     },
     {
+      "name": "ci-linux-gcc-x11",
+      "inherits": "base",
+      "displayName": "CI: Linux GCC, X11 compatibility",
+      "cacheVariables": {
+        "CMAKE_BUILD_TYPE": "RelWithDebInfo",
+        "CMAKE_C_COMPILER": "gcc",
+        "CMAKE_CXX_COMPILER": "g++",
+        "CULLFINCH_WARNINGS_AS_ERRORS": "ON",
+        "CULLFINCH_ENABLE_CLANG_TIDY": "OFF"
+      },
+      "condition": {
+        "type": "equals",
+        "lhs": "${hostSystemName}",
+        "rhs": "Linux"
+      },
+      "description": "Same build as ci-linux-gcc; the separate binary directory keeps the secondary XCB run from disturbing the required Wayland one"
+    },
+    {
       "name": "ci-linux-asan",
       "inherits": "base",
       "displayName": "CI: Linux Clang with ASan and UBSan",
@@ -156,15 +174,46 @@
     }
   ],
   "buildPresets": [
-    { "name": "dev", "configurePreset": "dev" },
-    { "name": "dev-fast", "configurePreset": "dev-fast" },
-    { "name": "ci-linux-gcc", "configurePreset": "ci-linux-gcc" },
-    { "name": "ci-linux-asan", "configurePreset": "ci-linux-asan" },
-    { "name": "ci-macos", "configurePreset": "ci-macos" },
-    { "name": "ci-tidy-linux", "configurePreset": "ci-tidy-linux" },
-    { "name": "ci-tidy-macos", "configurePreset": "ci-tidy-macos" },
-    { "name": "coverage", "configurePreset": "coverage" },
-    { "name": "release", "configurePreset": "release" }
+    {
+      "name": "dev",
+      "configurePreset": "dev"
+    },
+    {
+      "name": "dev-fast",
+      "configurePreset": "dev-fast"
+    },
+    {
+      "name": "ci-linux-gcc",
+      "configurePreset": "ci-linux-gcc"
+    },
+    {
+      "name": "ci-linux-gcc-x11",
+      "configurePreset": "ci-linux-gcc-x11"
+    },
+    {
+      "name": "ci-linux-asan",
+      "configurePreset": "ci-linux-asan"
+    },
+    {
+      "name": "ci-macos",
+      "configurePreset": "ci-macos"
+    },
+    {
+      "name": "ci-tidy-linux",
+      "configurePreset": "ci-tidy-linux"
+    },
+    {
+      "name": "ci-tidy-macos",
+      "configurePreset": "ci-tidy-macos"
+    },
+    {
+      "name": "coverage",
+      "configurePreset": "coverage"
+    },
+    {
+      "name": "release",
+      "configurePreset": "release"
+    }
   ],
   "testPresets": [
     {
@@ -180,13 +229,25 @@
         "timeout": 300
       }
     },
-    { "name": "dev", "inherits": "base", "configurePreset": "dev" },
-    { "name": "dev-fast", "inherits": "base", "configurePreset": "dev-fast" },
+    {
+      "name": "dev",
+      "inherits": "base",
+      "configurePreset": "dev"
+    },
+    {
+      "name": "dev-fast",
+      "inherits": "base",
+      "configurePreset": "dev-fast"
+    },
     {
       "name": "unit",
       "inherits": "base",
       "configurePreset": "dev",
-      "filter": { "include": { "label": "unit" } }
+      "filter": {
+        "include": {
+          "label": "unit"
+        }
+      }
     },
     {
       "name": "ci-linux-gcc",
@@ -194,27 +255,57 @@
       "configurePreset": "ci-linux-gcc"
     },
     {
+      "name": "ci-linux-gcc-x11",
+      "inherits": "base",
+      "configurePreset": "ci-linux-gcc-x11"
+    },
+    {
       "name": "ci-linux-asan",
       "inherits": "base",
       "configurePreset": "ci-linux-asan",
-      "filter": { "include": { "label": "unit|integration|gui" } }
+      "filter": {
+        "include": {
+          "label": "unit|integration|gui"
+        }
+      }
     },
-    { "name": "ci-macos", "inherits": "base", "configurePreset": "ci-macos" },
+    {
+      "name": "ci-macos",
+      "inherits": "base",
+      "configurePreset": "ci-macos"
+    },
     {
       "name": "coverage",
       "inherits": "base",
       "configurePreset": "coverage",
-      "filter": { "include": { "label": "unit|integration|gui" } },
-      "execution": { "jobs": 1, "noTestsAction": "error", "timeout": 600 }
+      "filter": {
+        "include": {
+          "label": "unit|integration|gui"
+        }
+      },
+      "execution": {
+        "jobs": 1,
+        "noTestsAction": "error",
+        "timeout": 600
+      }
     }
   ],
   "workflowPresets": [
     {
       "name": "dev",
       "steps": [
-        { "type": "configure", "name": "dev" },
-        { "type": "build", "name": "dev" },
-        { "type": "test", "name": "dev" }
+        {
+          "type": "configure",
+          "name": "dev"
+        },
+        {
+          "type": "build",
+          "name": "dev"
+        },
+        {
+          "type": "test",
+          "name": "dev"
+        }
       ]
     }
   ]

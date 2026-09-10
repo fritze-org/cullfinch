@@ -29,6 +29,7 @@ private slots:
     void undoRestoresTheExactPreviousMatch();
     void aRepeatedClickOnADecidedMatchDecidesNothing();
     void spaceEntersInspectionAndAPanDoesNotEliminate();
+    void losingFocusMidGestureDecidesNothing();
     void escapeLeavesFullscreenBeforePausing();
     void aDecodeErrorIsNotARejection();
 
@@ -225,6 +226,29 @@ void TestVersusView::spaceEntersInspectionAndAPanDoesNotEliminate() {
 
     QTest::keyClick(left, Qt::Key_Space);
     QVERIFY(!left->isInspecting());
+}
+
+void TestVersusView::losingFocusMidGestureDecidesNothing() {
+    startVersusOn(4);
+    application::SessionController& session = fixture_->root().session();
+
+    ui::ImageCanvas* left = view_->leftCanvas();
+    const QPoint centre = left->rect().center();
+
+    // Alt-Tab, a workspace switch, a dialog or the lock screen all arrive as a
+    // focus loss between press and release. The half-finished gesture must not
+    // become a decision about a photo the user stopped looking at.
+    QTest::mousePress(left, Qt::LeftButton, Qt::NoModifier, centre);
+    view_->rightCanvas()->setFocus(Qt::OtherFocusReason);
+    QTest::mouseRelease(left, Qt::LeftButton, Qt::NoModifier, centre);
+
+    QCoreApplication::processEvents();
+    QCOMPARE(session.summary().draftRejected.size(), 0);
+
+    // A fresh, uninterrupted gesture still decides.
+    QVERIFY(GuiFixture::waitFor([this]() { return view_->leftCanvas()->isReady(); }));
+    QTest::mouseClick(left, Qt::LeftButton, Qt::NoModifier, centre);
+    QVERIFY(GuiFixture::waitFor([&]() { return session.summary().draftRejected.size() == 1; }));
 }
 
 void TestVersusView::escapeLeavesFullscreenBeforePausing() {

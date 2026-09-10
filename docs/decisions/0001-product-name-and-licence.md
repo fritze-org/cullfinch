@@ -11,7 +11,8 @@ licences of the selected Qt modules and every bundled dependency.
 
 ## Decision
 
-The product is **cullfinch**.
+The product is **Cullfinch**, confirmed by R17 in specification revision 0.3. The
+executable, repository and package basename is the lowercase `cullfinch`.
 
 The application is licensed **GPL-3.0-or-later**. Every owned source file
 carries an `SPDX-License-Identifier: GPL-3.0-or-later` header, and the full

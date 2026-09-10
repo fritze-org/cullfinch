@@ -49,6 +49,7 @@ signals:
 protected:
     void keyPressEvent(QKeyEvent* event) override;
     void closeEvent(QCloseEvent* event) override;
+    void changeEvent(QEvent* event) override;
 
 private:
     void buildControls();
@@ -70,7 +71,12 @@ private:
     QAction* finishAction_ = nullptr;
     QAction* fullscreenAction_ = nullptr;
 
-    QByteArray restoreGeometry_;
+    /// Size and window state only. Wayland does not let a client place its own
+    /// window -- QWindow::setPosition is documented as unsupported there -- so
+    /// restoring an exact desktop coordinate is not something to promise. The
+    /// comparison state and internal focus are what actually matter across the
+    /// transition, and those are preserved.
+    QSize normalSize_;
     bool fullscreen_ = false;
     bool closingProgrammatically_ = false;
 };

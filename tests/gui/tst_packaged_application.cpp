@@ -48,6 +48,9 @@ QProcessEnvironment TestPackagedApplication::cleanEnvironment(const QString& dat
     environment.insert(QStringLiteral("CULLFINCH_TEST_MODE"), QStringLiteral("1"));
     environment.insert(QStringLiteral("CULLFINCH_SMOKE_DATA_DIR"), dataDirectory);
     environment.insert(QStringLiteral("CULLFINCH_SMOKE_CACHE_DIR"), cacheDirectory);
+
+    // Inherit the session's backend when there is one; only a genuinely
+    // headless machine falls back to offscreen.
     if (!qEnvironmentVariableIsSet("DISPLAY") && !qEnvironmentVariableIsSet("WAYLAND_DISPLAY")) {
         environment.insert(QStringLiteral("QT_QPA_PLATFORM"), QStringLiteral("offscreen"));
     }
@@ -91,6 +94,16 @@ void TestPackagedApplication::completesASmokeRunAgainstARealJpeg() {
     // The smoke path decodes a real JPEG, opens SQLite and shows both flows, so
     // a missing image-format, platform or SQL driver plugin fails here.
     QVERIFY2(output.contains(QStringLiteral("smoke: ok")), qPrintable(output));
+
+    // And it must have done so on the backend this job is testing. An installed
+    // package rescued by XWayland passes every other assertion here.
+    const QString expected = qEnvironmentVariable("CULLFINCH_EXPECTED_PLATFORM");
+    if (!expected.isEmpty()) {
+        QVERIFY2(
+            output.contains(QStringLiteral("smoke: platform=") + expected),
+            qPrintable(
+                QStringLiteral("expected backend '%1'; output was:\n%2").arg(expected, output)));
+    }
 }
 
 QTEST_MAIN(TestPackagedApplication)
