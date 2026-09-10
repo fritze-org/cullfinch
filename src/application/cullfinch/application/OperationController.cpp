@@ -5,14 +5,6 @@
 #include <QDateTime>
 
 namespace cullfinch::application {
-namespace {
-
-QString tr(const char* text) {
-    return QCoreApplication::translate("cullfinch", text);
-}
-
-} // namespace
-
 OperationController::OperationController(IAssetRepository& repository, IOperationExecutor& executor,
                                          QObject* parent)
     : QObject(parent), repository_(repository), executor_(executor) {}

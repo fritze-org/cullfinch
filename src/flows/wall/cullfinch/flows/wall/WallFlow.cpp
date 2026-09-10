@@ -34,7 +34,7 @@ constexpr auto kKeyMode = "mode";
 
 struct Wall {
     bool valid = false;
-    QList<WallSlot> slots;
+    QList<WallSlot> positions;
     QList<AssetId> rejected;
     QList<AssetId> input;
     LayoutMode mode = LayoutMode::Reflow;
@@ -48,12 +48,12 @@ Wall parse(const FlowState& state) {
         return wall;
     }
 
-    const QJsonArray slots = payload.value(QLatin1String(kKeySlots)).toArray();
-    for (const QJsonValue& value : slots) {
+    const QJsonArray positions = payload.value(QLatin1String(kKeySlots)).toArray();
+    for (const QJsonValue& value : positions) {
         if (value.isNull()) {
-            wall.slots.append(WallSlot{});
+            wall.positions.append(WallSlot{});
         } else if (value.isString()) {
-            wall.slots.append(WallSlot{AssetId(value.toString())});
+            wall.positions.append(WallSlot{AssetId(value.toString())});
         } else {
             return Wall{};
         }
@@ -68,17 +68,17 @@ Wall parse(const FlowState& state) {
 }
 
 QJsonObject serialise(const Wall& wall) {
-    QJsonArray slots;
-    for (const WallSlot& slot : wall.slots) {
+    QJsonArray positions;
+    for (const WallSlot& slot : wall.positions) {
         if (slot.isPlaceholder()) {
-            slots.append(QJsonValue(QJsonValue::Null));
+            positions.append(QJsonValue(QJsonValue::Null));
         } else {
-            slots.append(slot.id.toString());
+            positions.append(slot.id.toString());
         }
     }
 
     QJsonObject payload;
-    payload.insert(QLatin1String(kKeySlots), slots);
+    payload.insert(QLatin1String(kKeySlots), positions);
     payload.insert(QLatin1String(kKeyRejected), domain::toJsonArray(wall.rejected));
     payload.insert(QLatin1String(kKeyInput), domain::toJsonArray(wall.input));
     payload.insert(QLatin1String(kKeyLayoutMode), layoutModeToken(wall.mode));
@@ -144,7 +144,7 @@ FlowState WallFlow::initialise(const SelectionSnapshot& selection,
         layoutModeFromToken(options.string(QLatin1String(kKeyLayoutMode), QStringLiteral("reflow")),
                             LayoutMode::Reflow);
     for (const AssetId& id : selection.orderedAssetIds) {
-        wall.slots.append(WallSlot{id});
+        wall.positions.append(WallSlot{id});
     }
 
     FlowState state;
@@ -173,8 +173,8 @@ TransitionResult WallFlow::reduce(const FlowState& state, const FlowAction& acti
         }
 
         int position = -1;
-        for (int index = 0; index < wall.slots.size(); ++index) {
-            if (wall.slots.at(index).id == target) {
+        for (int index = 0; index < wall.positions.size(); ++index) {
+            if (wall.positions.at(index).id == target) {
                 position = index;
                 break;
             }
@@ -186,9 +186,9 @@ TransitionResult WallFlow::reduce(const FlowState& state, const FlowAction& acti
         }
 
         if (wall.mode == LayoutMode::FixedPositions) {
-            wall.slots[position] = WallSlot{};
+            wall.positions[position] = WallSlot{};
         } else {
-            wall.slots.removeAt(position);
+            wall.positions.removeAt(position);
         }
         wall.rejected.append(target);
 
@@ -207,13 +207,14 @@ TransitionResult WallFlow::reduce(const FlowState& state, const FlowAction& acti
         if (wall.mode == LayoutMode::Reflow) {
             // Switching to reflow implies compacting: placeholders have no
             // meaning once survivors are allowed to move.
-            wall.slots.removeIf([](const WallSlot& slot) { return slot.isPlaceholder(); });
+            wall.positions.removeIf([](const WallSlot& slot) { return slot.isPlaceholder(); });
         }
         return TransitionResult::accept(advance(state, wall), DecisionDelta{});
     }
 
     if (action.name == QLatin1String(kActionCompact)) {
-        if (wall.slots.removeIf([](const WallSlot& slot) { return slot.isPlaceholder(); }) == 0) {
+        if (wall.positions.removeIf([](const WallSlot& slot) { return slot.isPlaceholder(); }) ==
+            0) {
             return TransitionResult::rejectedWith(tr("There is nothing to compact."));
         }
         return TransitionResult::accept(advance(state, wall), DecisionDelta{});
@@ -230,7 +231,7 @@ FlowSummary WallFlow::summarise(const FlowState& state) const {
         return summary;
     }
 
-    for (const WallSlot& slot : wall.slots) {
+    for (const WallSlot& slot : wall.positions) {
         if (!slot.isPlaceholder()) {
             summary.remaining.append(slot.id);
         }
@@ -275,13 +276,13 @@ RestoreResult WallFlow::restore(const VersionedFlowState& saved) const {
     return result;
 }
 
-QList<WallSlot> WallFlow::slots(const FlowState& state) {
-    return parse(state).slots;
+QList<WallSlot> WallFlow::positions(const FlowState& state) {
+    return parse(state).positions;
 }
 
 QList<AssetId> WallFlow::candidates(const FlowState& state) {
     QList<AssetId> ids;
-    for (const WallSlot& slot : parse(state).slots) {
+    for (const WallSlot& slot : parse(state).positions) {
         if (!slot.isPlaceholder()) {
             ids.append(slot.id);
         }
@@ -294,7 +295,7 @@ LayoutMode WallFlow::layoutMode(const FlowState& state) {
 }
 
 bool WallFlow::hasPlaceholders(const FlowState& state) {
-    for (const WallSlot& slot : parse(state).slots) {
+    for (const WallSlot& slot : parse(state).positions) {
         if (slot.isPlaceholder()) {
             return true;
         }

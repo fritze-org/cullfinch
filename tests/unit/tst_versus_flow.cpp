@@ -131,11 +131,11 @@ void TestVersusFlow::byesAdvanceWithoutAFakeOpponent() {
     // Five candidates need an eight-slot bracket, so three positions are byes.
     const domain::FlowState state = flow.initialise(snapshotOf(5), domain::FlowOptions{});
 
-    const QList<domain::AssetId> slots = VersusFlow::bracketSlots(state);
-    QCOMPARE(slots.size(), 8);
+    const QList<domain::AssetId> positions = VersusFlow::bracketSlots(state);
+    QCOMPARE(positions.size(), 8);
 
     int real = 0;
-    for (const domain::AssetId& slot : slots) {
+    for (const domain::AssetId& slot : positions) {
         if (slot.isValid()) {
             ++real;
         }

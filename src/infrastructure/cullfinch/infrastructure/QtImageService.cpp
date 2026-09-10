@@ -15,10 +15,6 @@
 namespace cullfinch::infrastructure {
 namespace {
 
-QString tr(const char* text) {
-    return QCoreApplication::translate("cullfinch", text);
-}
-
 /// Bumped whenever the colour policy changes, so cached images from an older
 /// policy are never reused.
 constexpr int kColourPolicyVersion = 1;

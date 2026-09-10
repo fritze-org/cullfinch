@@ -110,16 +110,16 @@ void TestWallFlow::fixedPositionsLeaveAPlaceholderUntilCompact() {
     state = flow.reduce(state, eliminate(selection.orderedAssetIds.at(1), state.revision)).state;
 
     // The survivors keep their positions, so spatial memory survives.
-    const QList<flows::wall::WallSlot> slots = WallFlow::slots(state);
-    QCOMPARE(slots.size(), 4);
-    QVERIFY(slots.at(1).isPlaceholder());
-    QCOMPARE(slots.at(2).id, selection.orderedAssetIds.at(2));
+    const QList<flows::wall::WallSlot> positions = WallFlow::positions(state);
+    QCOMPARE(positions.size(), 4);
+    QVERIFY(positions.at(1).isPlaceholder());
+    QCOMPARE(positions.at(2).id, selection.orderedAssetIds.at(2));
     QVERIFY(WallFlow::hasPlaceholders(state));
 
     state = flow.reduce(state, action(QLatin1String(flows::wall::kActionCompact), QJsonObject{},
                                       state.revision))
                 .state;
-    QCOMPARE(WallFlow::slots(state).size(), 3);
+    QCOMPARE(WallFlow::positions(state).size(), 3);
     QVERIFY(!WallFlow::hasPlaceholders(state));
 
     // Compacting again has nothing to do and is refused rather than producing

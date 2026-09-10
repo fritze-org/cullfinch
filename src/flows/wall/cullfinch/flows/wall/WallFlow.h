@@ -62,7 +62,7 @@ public:
     restore(const domain::VersionedFlowState& saved) const override;
 
     /// Wall positions in display order, including placeholders.
-    [[nodiscard]] static QList<WallSlot> slots(const domain::FlowState& state);
+    [[nodiscard]] static QList<WallSlot> positions(const domain::FlowState& state);
 
     /// Candidates still on the wall, in order, without placeholders.
     [[nodiscard]] static QList<AssetId> candidates(const domain::FlowState& state);

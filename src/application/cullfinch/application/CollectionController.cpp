@@ -5,14 +5,6 @@
 #include <QHash>
 
 namespace cullfinch::application {
-namespace {
-
-QString tr(const char* text) {
-    return QCoreApplication::translate("cullfinch", text);
-}
-
-} // namespace
-
 CollectionController::CollectionController(IAssetRepository& repository, IScanService& scanner,
                                            QObject* parent)
     : QObject(parent), repository_(repository), scanner_(scanner) {

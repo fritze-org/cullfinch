@@ -7,10 +7,6 @@
 namespace cullfinch::application {
 namespace {
 
-QString tr(const char* text) {
-    return QCoreApplication::translate("cullfinch", text);
-}
-
 using domain::AssetId;
 using domain::Disposition;
 

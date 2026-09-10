@@ -21,10 +21,6 @@
 namespace cullfinch::infrastructure {
 namespace {
 
-QString tr(const char* text) {
-    return QCoreApplication::translate("cullfinch", text);
-}
-
 /// Native identity, where the platform offers one. Used to notice replaced
 /// files and hardlink aliases; never to merge assets.
 domain::NativeIdentity nativeIdentityOf(const QFileInfo& info) {

@@ -48,7 +48,7 @@ int nextPowerOfTwo(int value) {
 struct Bracket {
     bool valid = false;
     int bracketSize = 0;
-    QList<AssetId> slots;          ///< Length bracketSize; invalid entries are byes.
+    QList<AssetId> positions;      ///< Length bracketSize; invalid entries are byes.
     QList<AssetId> input;          ///< Frozen selection order.
     QHash<int, AssetId> decisions; ///< node -> eliminated candidate.
     QList<int> decisionOrder;
@@ -63,15 +63,15 @@ Bracket parse(const FlowState& state) {
     const QJsonObject& payload = state.payload;
 
     const int bracketSize = payload.value(QLatin1String(kKeyBracketSize)).toInt(0);
-    const QJsonArray slots = payload.value(QLatin1String(kKeySlots)).toArray();
-    if (bracketSize <= 0 || slots.size() != bracketSize) {
+    const QJsonArray positions = payload.value(QLatin1String(kKeySlots)).toArray();
+    if (bracketSize <= 0 || positions.size() != bracketSize) {
         return bracket;
     }
 
     bracket.bracketSize = bracketSize;
-    bracket.slots.reserve(bracketSize);
-    for (const QJsonValue& value : slots) {
-        bracket.slots.append(value.isString() ? AssetId(value.toString()) : AssetId());
+    bracket.positions.reserve(bracketSize);
+    for (const QJsonValue& value : positions) {
+        bracket.positions.append(value.isString() ? AssetId(value.toString()) : AssetId());
     }
 
     bracket.input = domain::assetIdsFromJson(payload.value(QLatin1String(kKeyInput)).toArray());
@@ -96,12 +96,12 @@ Bracket parse(const FlowState& state) {
 }
 
 QJsonObject serialise(const Bracket& bracket) {
-    QJsonArray slots;
-    for (const AssetId& id : bracket.slots) {
+    QJsonArray positions;
+    for (const AssetId& id : bracket.positions) {
         if (id.isValid()) {
-            slots.append(id.toString());
+            positions.append(id.toString());
         } else {
-            slots.append(QJsonValue(QJsonValue::Null));
+            positions.append(QJsonValue(QJsonValue::Null));
         }
     }
 
@@ -115,7 +115,7 @@ QJsonObject serialise(const Bracket& bracket) {
 
     QJsonObject payload;
     payload.insert(QLatin1String(kKeyBracketSize), bracket.bracketSize);
-    payload.insert(QLatin1String(kKeySlots), slots);
+    payload.insert(QLatin1String(kKeySlots), positions);
     payload.insert(QLatin1String(kKeyInput), domain::toJsonArray(bracket.input));
     payload.insert(QLatin1String(kKeyDecisions), decisions);
     return payload;
@@ -133,7 +133,7 @@ struct Outcome {
 
 Outcome resolveNode(const Bracket& bracket, int node) {
     if (bracket.isLeaf(node)) {
-        return Outcome{true, bracket.slots.at(bracket.slotOfLeaf(node))};
+        return Outcome{true, bracket.positions.at(bracket.slotOfLeaf(node))};
     }
 
     const Outcome left = resolveNode(bracket, (2 * node) + 1);
@@ -255,11 +255,11 @@ FlowState VersusFlow::initialise(const SelectionSnapshot& selection,
     // i+1. Positions whose seed exceeds the candidate count stay empty, which
     // distributes the first-round byes across the bracket.
     const QList<int> order = seedOrder(bracket.bracketSize);
-    bracket.slots.resize(bracket.bracketSize);
+    bracket.positions.resize(bracket.bracketSize);
     for (int position = 0; position < bracket.bracketSize; ++position) {
         const int seed = order.at(position);
         if (seed <= candidates) {
-            bracket.slots[position] = selection.orderedAssetIds.at(seed - 1);
+            bracket.positions[position] = selection.orderedAssetIds.at(seed - 1);
         }
     }
 
@@ -335,8 +335,8 @@ FlowSummary VersusFlow::summarise(const FlowState& state) const {
     summary.decisionsMade = static_cast<int>(bracket.decisionOrder.size());
     summary.decisionsExpected = std::max(0, static_cast<int>(bracket.input.size()) - 1);
 
-    const Outcome root =
-        bracket.bracketSize >= 2 ? resolveNode(bracket, 0) : Outcome{true, bracket.slots.value(0)};
+    const Outcome root = bracket.bracketSize >= 2 ? resolveNode(bracket, 0)
+                                                  : Outcome{true, bracket.positions.value(0)};
     summary.complete = root.resolved;
     // Versus may always finish early: only decided losers become marks.
     summary.canFinish = true;
@@ -392,14 +392,14 @@ AssetId VersusFlow::survivor(const FlowState& state) {
         return AssetId();
     }
     if (bracket.bracketSize < 2) {
-        return bracket.slots.value(0);
+        return bracket.positions.value(0);
     }
     const Outcome root = resolveNode(bracket, 0);
     return root.resolved ? root.id : AssetId();
 }
 
 QList<AssetId> VersusFlow::bracketSlots(const FlowState& state) {
-    return parse(state).slots;
+    return parse(state).positions;
 }
 
 QList<int> VersusFlow::seedOrder(int bracketSize) {

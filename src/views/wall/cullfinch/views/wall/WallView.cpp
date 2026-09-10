@@ -221,10 +221,10 @@ void WallView::setState(const domain::FlowState& state, const domain::FlowSummar
     // Placeholders are represented by absence here: the surface lays out the
     // real candidates, and fixed-position mode simply keeps their indices
     // stable because the flow does not remove the slot.
-    const QList<flows::wall::WallSlot> slots = flows::wall::WallFlow::slots(state);
+    const QList<flows::wall::WallSlot> positions = flows::wall::WallFlow::positions(state);
     QList<domain::AssetId> order;
-    order.reserve(slots.size());
-    for (const flows::wall::WallSlot& slot : slots) {
+    order.reserve(positions.size());
+    for (const flows::wall::WallSlot& slot : positions) {
         if (!slot.isPlaceholder()) {
             order.append(slot.id);
         }
