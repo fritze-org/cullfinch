@@ -64,6 +64,11 @@ void WallSurface::setCandidates(const QList<domain::AssetId>& order,
                 Q_EMIT eliminateRequested(id, revision_);
             }
         });
+        connect(tile, &ui::ImageCanvas::readinessChanged, this, [this, id](bool ready) {
+            if (ready) {
+                recordAspect(id);
+            }
+        });
         tile->show();
         tiles_.insert(id, tile);
     }
@@ -98,6 +103,22 @@ void WallSurface::resizeEvent(QResizeEvent* event) {
     relayout();
 }
 
+void WallSurface::recordAspect(const domain::AssetId& id) {
+    if (aspects_.contains(id)) {
+        return; // Recorded once per candidate, so the grid cannot oscillate.
+    }
+    ui::ImageCanvas* tile = tiles_.value(id, nullptr);
+    if (tile == nullptr) {
+        return;
+    }
+    const QRectF drawn = tile->imageRect();
+    if (drawn.width() <= 0.0 || drawn.height() <= 0.0) {
+        return;
+    }
+    aspects_.insert(id, drawn.size());
+    relayout();
+}
+
 void WallSurface::relayout() {
     // Expire stale suppression regions so the list cannot grow without bound.
     const int interval = QGuiApplication::styleHints()->mouseDoubleClickInterval();
@@ -111,13 +132,9 @@ void WallSurface::relayout() {
     for (const domain::AssetId& id : order_) {
         flows::wall::LayoutItem item;
         item.id = id;
-        ui::ImageCanvas* tile = tiles_.value(id, nullptr);
-        if (tile != nullptr) {
-            const QRectF drawn = tile->imageRect();
-            if (drawn.width() > 0 && drawn.height() > 0) {
-                item.imageSize = drawn.size();
-            }
-        }
+        // A placeholder aspect until the preview decodes, so tiles do not jump
+        // the moment an image arrives.
+        item.imageSize = aspects_.value(id);
         items.append(item);
     }
 

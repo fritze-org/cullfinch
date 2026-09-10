@@ -42,12 +42,18 @@ protected:
 
 private:
     void relayout();
+    void recordAspect(const domain::AssetId& id);
     [[nodiscard]] bool acceptGesture(const domain::AssetId& id);
 
     application::IImageService& images_;
     QList<domain::AssetId> order_;
     ui::AssetPresentationMap presentations_;
     QHash<domain::AssetId, ui::ImageCanvas*> tiles_;
+    /// Oriented image size per candidate, learned once its preview decodes.
+    /// The initial layout uses a placeholder aspect; recording the real one
+    /// exactly once per tile lets the grid settle without oscillating between
+    /// "resize the cell" and "re-fit the image".
+    QHash<domain::AssetId, QSizeF> aspects_;
     quint64 revision_ = 0;
 
     /// Where a tile used to be, and when it vanished. Repeat clicks inside that
