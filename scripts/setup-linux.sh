@@ -25,12 +25,15 @@ $SUDO apt-get install --no-install-recommends -y \
     unzip \
     zip
 
-# Autotools. Several vcpkg ports in the dependency graph -- gperf, which
-# fontconfig needs -- run autoreconf and fail without these.
+# Autotools, the complete set vcpkg's own vcpkg-make helper asks for. Several
+# ports in the dependency graph run autoreconf: gperf, which fontconfig needs,
+# and libxcrypt, which D-Bus needs and whose configure.ac uses
+# LT_CONFIG_LTDL_DIR and so also wants the ltdl development files.
 $SUDO apt-get install --no-install-recommends -y \
     autoconf \
     autoconf-archive \
     automake \
+    libltdl-dev \
     libtool \
     m4
 

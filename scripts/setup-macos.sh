@@ -10,8 +10,9 @@ if ! command -v brew >/dev/null 2>&1; then
     exit 1
 fi
 
-# Autotools. Several vcpkg ports in the dependency graph -- gperf, which
-# fontconfig needs -- run autoreconf and fail without these.
+# Autotools. Several vcpkg ports in the dependency graph run autoreconf --
+# gperf, which fontconfig needs, and libxcrypt, which D-Bus needs. Homebrew's
+# libtool ships the ltdl development files those ports look for.
 brew install ninja pkg-config autoconf autoconf-archive automake libtool
 
 if ! command -v uv >/dev/null 2>&1; then
