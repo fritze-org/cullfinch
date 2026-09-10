@@ -31,8 +31,17 @@ void AssetFilterProxy::setMode(Mode mode) {
     if (mode_ == mode) {
         return;
     }
+#if QT_VERSION >= QT_VERSION_CHECK(6, 9, 0)
+    // invalidateFilter() is deprecated from 6.13; the begin/end pair lets the
+    // proxy keep its persistent indexes valid across the change, which matters
+    // because the browser's selection is held through those indexes.
+    beginFilterChange();
+    mode_ = mode;
+    endFilterChange(QSortFilterProxyModel::Direction::Rows);
+#else
     mode_ = mode;
     invalidateFilter();
+#endif
 }
 
 bool AssetFilterProxy::filterAcceptsRow(int sourceRow, const QModelIndex& sourceParent) const {

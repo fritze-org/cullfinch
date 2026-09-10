@@ -44,6 +44,18 @@ void report(QString* error, const QString& message) {
     }
 }
 
+/// Bind a string that must not become SQL NULL.
+///
+/// SQLite distinguishes a null QString from an empty one, and every text column
+/// in this schema is NOT NULL. A default-constructed QString is null -- which is
+/// exactly what an asset sitting directly in the scan root has for its relative
+/// directory, and what an operation has for its Trash path until the platform
+/// reports one. Binding that directly overrides the column default and the
+/// insert fails.
+QVariant text(const QString& value) {
+    return value.isNull() ? QVariant(QString(QLatin1String(""))) : QVariant(value);
+}
+
 bool fail(QString* error, const QSqlQuery& query, const QString& what) {
     report(error, tr("%1 failed: %2").arg(what, query.lastError().text()));
     return false;
@@ -430,7 +442,7 @@ std::optional<CollectionId> SqliteRepository::ensureCollection(const QString& ro
 
     QSqlQuery lookup(database_);
     lookup.prepare(QStringLiteral("SELECT id FROM collections WHERE root_path = :root"));
-    lookup.bindValue(QStringLiteral(":root"), canonical);
+    lookup.bindValue(QStringLiteral(":root"), text(canonical));
     if (!lookup.exec()) {
         fail(error, lookup, tr("Looking up the collection"));
         return std::nullopt;
@@ -441,7 +453,7 @@ std::optional<CollectionId> SqliteRepository::ensureCollection(const QString& ro
         update.prepare(
             QStringLiteral("UPDATE collections SET recursive = :recursive WHERE id = :id"));
         update.bindValue(QStringLiteral(":recursive"), recursive ? 1 : 0);
-        update.bindValue(QStringLiteral(":id"), id.toString());
+        update.bindValue(QStringLiteral(":id"), text(id.toString()));
         if (!update.exec()) {
             fail(error, update, tr("Updating the collection"));
             return std::nullopt;
@@ -459,8 +471,8 @@ std::optional<CollectionId> SqliteRepository::ensureCollection(const QString& ro
     insert.prepare(QStringLiteral(
         "INSERT INTO collections (id, root_path, recursive, association_config, revision) "
         "VALUES (:id, :root, :recursive, '', 1)"));
-    insert.bindValue(QStringLiteral(":id"), id.toString());
-    insert.bindValue(QStringLiteral(":root"), canonical);
+    insert.bindValue(QStringLiteral(":id"), text(id.toString()));
+    insert.bindValue(QStringLiteral(":root"), text(canonical));
     insert.bindValue(QStringLiteral(":recursive"), recursive ? 1 : 0);
     if (!insert.exec()) {
         fail(error, insert, tr("Creating the collection"));
@@ -472,7 +484,7 @@ std::optional<CollectionId> SqliteRepository::ensureCollection(const QString& ro
 quint64 SqliteRepository::collectionRevision(const CollectionId& id, QString* error) const {
     QSqlQuery query(database_);
     query.prepare(QStringLiteral("SELECT revision FROM collections WHERE id = :id"));
-    query.bindValue(QStringLiteral(":id"), id.toString());
+    query.bindValue(QStringLiteral(":id"), text(id.toString()));
     if (!query.exec() || !query.next()) {
         report(error, tr("The collection revision could not be read."));
         return 0;
@@ -483,7 +495,7 @@ quint64 SqliteRepository::collectionRevision(const CollectionId& id, QString* er
 bool SqliteRepository::bumpRevision(const CollectionId& id, quint64* newRevision, QString* error) {
     QSqlQuery query(database_);
     query.prepare(QStringLiteral("UPDATE collections SET revision = revision + 1 WHERE id = :id"));
-    query.bindValue(QStringLiteral(":id"), id.toString());
+    query.bindValue(QStringLiteral(":id"), text(id.toString()));
     if (!query.exec()) {
         return fail(error, query, tr("Advancing the collection revision"));
     }
@@ -501,7 +513,7 @@ PhotoAssetList SqliteRepository::loadAssets(const CollectionId& id, QString* err
         "SELECT id, stem, relative_directory, display_name, preview_member_id, pairing_state,"
         " disposition, membership_revision, operations_blocked, diagnostics"
         " FROM assets WHERE collection_id = :collection ORDER BY relative_directory, stem"));
-    query.bindValue(QStringLiteral(":collection"), id.toString());
+    query.bindValue(QStringLiteral(":collection"), text(id.toString()));
     if (!query.exec()) {
         fail(error, query, tr("Reading the collection"));
         return assets;
@@ -535,7 +547,7 @@ PhotoAssetList SqliteRepository::loadAssets(const CollectionId& id, QString* err
         "SELECT asset_id, id, role, absolute_path, file_name, extension, size_bytes,"
         " modified_msecs, native_device, native_file_id, native_known, is_symlink"
         " FROM members WHERE collection_id = :collection ORDER BY asset_id, ordinal"));
-    members.bindValue(QStringLiteral(":collection"), id.toString());
+    members.bindValue(QStringLiteral(":collection"), text(id.toString()));
     if (!members.exec()) {
         fail(error, members, tr("Reading the file groups"));
         return assets;
@@ -587,15 +599,27 @@ bool SqliteRepository::reconcileAssets(const CollectionId& id, const PhotoAssetL
 
             // A member that disappeared after pairing keeps its place and marks
             // the asset stale. It is never silently reclassified as JPG-only.
+            //
+            // Retention is keyed on member identity as well as path: a member
+            // row is unique per (id, asset), so re-adding one whose identity a
+            // current member already carries would abort the whole scan on a
+            // primary-key conflict rather than merely mis-describe one photo.
+            QSet<QString> currentIds;
+            for (const FileMember& member : asset.members) {
+                currentIds.insert(member.id.toString());
+            }
+
             bool stale = false;
             for (const FileMember& member : previous->members) {
-                if (!currentPaths.contains(member.absolutePath)) {
-                    asset.members.append(member);
-                    asset.diagnostics.append(
-                        tr("'%1' was part of this photo but is no longer on disk.")
-                            .arg(member.fileName));
-                    stale = true;
+                if (currentPaths.contains(member.absolutePath) ||
+                    currentIds.contains(member.id.toString())) {
+                    continue;
                 }
+                asset.members.append(member);
+                currentIds.insert(member.id.toString());
+                asset.diagnostics.append(tr("'%1' was part of this photo but is no longer on disk.")
+                                             .arg(member.fileName));
+                stale = true;
             }
             if (stale) {
                 asset.pairingState = PairingState::Stale;
@@ -628,14 +652,14 @@ bool SqliteRepository::reconcileAssets(const CollectionId& id, const PhotoAssetL
 
     QSqlQuery clearMembers(database_);
     clearMembers.prepare(QStringLiteral("DELETE FROM members WHERE collection_id = :collection"));
-    clearMembers.bindValue(QStringLiteral(":collection"), id.toString());
+    clearMembers.bindValue(QStringLiteral(":collection"), text(id.toString()));
     if (!clearMembers.exec()) {
         return rollback(clearMembers, tr("Clearing stored file groups"));
     }
 
     QSqlQuery clearAssets(database_);
     clearAssets.prepare(QStringLiteral("DELETE FROM assets WHERE collection_id = :collection"));
-    clearAssets.bindValue(QStringLiteral(":collection"), id.toString());
+    clearAssets.bindValue(QStringLiteral(":collection"), text(id.toString()));
     if (!clearAssets.exec()) {
         return rollback(clearAssets, tr("Clearing stored photos"));
     }
@@ -657,13 +681,13 @@ bool SqliteRepository::reconcileAssets(const CollectionId& id, const PhotoAssetL
         " :device, :fileId, :known, :symlink, :ordinal)"));
 
     for (const PhotoAsset& asset : result) {
-        insertAsset.bindValue(QStringLiteral(":id"), asset.id.toString());
-        insertAsset.bindValue(QStringLiteral(":collection"), id.toString());
-        insertAsset.bindValue(QStringLiteral(":stem"), asset.stem);
-        insertAsset.bindValue(QStringLiteral(":directory"), asset.relativeDirectory);
-        insertAsset.bindValue(QStringLiteral(":display"), asset.displayName);
-        insertAsset.bindValue(QStringLiteral(":preview"), asset.previewMemberId.toString());
-        insertAsset.bindValue(QStringLiteral(":pairing"), pairingToken(asset.pairingState));
+        insertAsset.bindValue(QStringLiteral(":id"), text(asset.id.toString()));
+        insertAsset.bindValue(QStringLiteral(":collection"), text(id.toString()));
+        insertAsset.bindValue(QStringLiteral(":stem"), text(asset.stem));
+        insertAsset.bindValue(QStringLiteral(":directory"), text(asset.relativeDirectory));
+        insertAsset.bindValue(QStringLiteral(":display"), text(asset.displayName));
+        insertAsset.bindValue(QStringLiteral(":preview"), text(asset.previewMemberId.toString()));
+        insertAsset.bindValue(QStringLiteral(":pairing"), text(pairingToken(asset.pairingState)));
         insertAsset.bindValue(QStringLiteral(":disposition"),
                               asset.disposition == Disposition::Reject ? QStringLiteral("reject")
                                                                        : QStringLiteral("neutral"));
@@ -671,20 +695,20 @@ bool SqliteRepository::reconcileAssets(const CollectionId& id, const PhotoAssetL
                               QString::number(asset.membershipRevision));
         insertAsset.bindValue(QStringLiteral(":blocked"), asset.operationsBlocked ? 1 : 0);
         insertAsset.bindValue(QStringLiteral(":diagnostics"),
-                              asset.diagnostics.join(QLatin1Char('\n')));
+                              text(asset.diagnostics.join(QLatin1Char('\n'))));
         if (!insertAsset.exec()) {
             return rollback(insertAsset, tr("Storing a photo"));
         }
 
         int ordinal = 0;
         for (const FileMember& member : asset.members) {
-            insertMember.bindValue(QStringLiteral(":id"), member.id.toString());
-            insertMember.bindValue(QStringLiteral(":asset"), asset.id.toString());
-            insertMember.bindValue(QStringLiteral(":collection"), id.toString());
-            insertMember.bindValue(QStringLiteral(":role"), roleToken(member.role));
-            insertMember.bindValue(QStringLiteral(":path"), member.absolutePath);
-            insertMember.bindValue(QStringLiteral(":name"), member.fileName);
-            insertMember.bindValue(QStringLiteral(":extension"), member.extensionLower);
+            insertMember.bindValue(QStringLiteral(":id"), text(member.id.toString()));
+            insertMember.bindValue(QStringLiteral(":asset"), text(asset.id.toString()));
+            insertMember.bindValue(QStringLiteral(":collection"), text(id.toString()));
+            insertMember.bindValue(QStringLiteral(":role"), text(roleToken(member.role)));
+            insertMember.bindValue(QStringLiteral(":path"), text(member.absolutePath));
+            insertMember.bindValue(QStringLiteral(":name"), text(member.fileName));
+            insertMember.bindValue(QStringLiteral(":extension"), text(member.extensionLower));
             insertMember.bindValue(QStringLiteral(":size"),
                                    static_cast<qlonglong>(member.fingerprint.sizeBytes));
             insertMember.bindValue(QStringLiteral(":modified"),
@@ -706,7 +730,7 @@ bool SqliteRepository::reconcileAssets(const CollectionId& id, const PhotoAssetL
     QSqlQuery revision(database_);
     revision.prepare(
         QStringLiteral("UPDATE collections SET revision = revision + 1 WHERE id = :id"));
-    revision.bindValue(QStringLiteral(":id"), id.toString());
+    revision.bindValue(QStringLiteral(":id"), text(id.toString()));
     if (!revision.exec()) {
         return rollback(revision, tr("Advancing the collection revision"));
     }
@@ -750,9 +774,9 @@ bool SqliteRepository::applyDispositions(const CollectionId& id, quint64 expecte
 
     const auto applyAll = [&](const QList<AssetId>& ids, const QString& token) {
         for (const AssetId& assetId : ids) {
-            update.bindValue(QStringLiteral(":disposition"), token);
-            update.bindValue(QStringLiteral(":id"), assetId.toString());
-            update.bindValue(QStringLiteral(":collection"), id.toString());
+            update.bindValue(QStringLiteral(":disposition"), text(token));
+            update.bindValue(QStringLiteral(":id"), text(assetId.toString()));
+            update.bindValue(QStringLiteral(":collection"), text(id.toString()));
             if (!update.exec()) {
                 return false;
             }
@@ -771,7 +795,7 @@ bool SqliteRepository::applyDispositions(const CollectionId& id, quint64 expecte
     QSqlQuery revision(database_);
     revision.prepare(
         QStringLiteral("UPDATE collections SET revision = revision + 1 WHERE id = :id"));
-    revision.bindValue(QStringLiteral(":id"), id.toString());
+    revision.bindValue(QStringLiteral(":id"), text(id.toString()));
     if (!revision.exec()) {
         const QString message = revision.lastError().text();
         database_.rollback();
@@ -809,16 +833,16 @@ bool SqliteRepository::saveSession(const StoredSession& session, QString* error)
     QJsonObject rejected;
     rejected.insert(QLatin1String("ids"), domain::toJsonArray(session.draftRejected));
 
-    query.bindValue(QStringLiteral(":id"), session.id.toString());
-    query.bindValue(QStringLiteral(":collection"), session.collectionId.toString());
-    query.bindValue(QStringLiteral(":flow"), session.draft.flowId);
+    query.bindValue(QStringLiteral(":id"), text(session.id.toString()));
+    query.bindValue(QStringLiteral(":collection"), text(session.collectionId.toString()));
+    query.bindValue(QStringLiteral(":flow"), text(session.draft.flowId));
     query.bindValue(QStringLiteral(":schema"), session.draft.schemaVersion);
     query.bindValue(QStringLiteral(":revision"), QString::number(session.draft.revision));
     query.bindValue(QStringLiteral(":snapshot"), jsonToString(snapshotToJson(session.snapshot)));
-    query.bindValue(QStringLiteral(":payload"), jsonToString(session.draft.payload));
-    query.bindValue(QStringLiteral(":rejected"), jsonToString(rejected));
+    query.bindValue(QStringLiteral(":payload"), text(jsonToString(session.draft.payload)));
+    query.bindValue(QStringLiteral(":rejected"), text(jsonToString(rejected)));
     query.bindValue(QStringLiteral(":lifecycle"),
-                    application::sessionLifecycleToken(session.lifecycle));
+                    text(application::sessionLifecycleToken(session.lifecycle)));
     query.bindValue(
         QStringLiteral(":created"),
         (session.createdUtc.isValid() ? session.createdUtc : now).toString(Qt::ISODate));
@@ -862,7 +886,7 @@ std::optional<StoredSession> SqliteRepository::loadSession(const domain::Session
     QSqlQuery query(database_);
     query.prepare(QStringLiteral("SELECT %1 FROM sessions WHERE id = :id")
                       .arg(QLatin1String(kSessionColumns)));
-    query.bindValue(QStringLiteral(":id"), id.toString());
+    query.bindValue(QStringLiteral(":id"), text(id.toString()));
     if (!query.exec()) {
         fail(error, query, tr("Reading the comparison draft"));
         return std::nullopt;
@@ -883,7 +907,7 @@ QList<StoredSession> SqliteRepository::resumableSessions(const CollectionId& id,
                                  " AND lifecycle IN ('active', 'paused')"
                                  " ORDER BY updated_utc DESC")
                       .arg(QLatin1String(kSessionColumns)));
-    query.bindValue(QStringLiteral(":collection"), id.toString());
+    query.bindValue(QStringLiteral(":collection"), text(id.toString()));
     if (!query.exec()) {
         fail(error, query, tr("Reading saved comparison drafts"));
         return sessions;
@@ -897,7 +921,7 @@ QList<StoredSession> SqliteRepository::resumableSessions(const CollectionId& id,
 bool SqliteRepository::deleteSession(const domain::SessionId& id, QString* error) {
     QSqlQuery query(database_);
     query.prepare(QStringLiteral("DELETE FROM sessions WHERE id = :id"));
-    query.bindValue(QStringLiteral(":id"), id.toString());
+    query.bindValue(QStringLiteral(":id"), text(id.toString()));
     if (!query.exec()) {
         return fail(error, query, tr("Discarding the comparison draft"));
     }
@@ -923,12 +947,12 @@ bool SqliteRepository::saveOperation(const OperationRecord& record, QString* err
         " updated_utc = excluded.updated_utc"));
 
     const QDateTime now = QDateTime::currentDateTimeUtc();
-    query.bindValue(QStringLiteral(":id"), record.plan.id.toString());
-    query.bindValue(QStringLiteral(":collection"), record.plan.collectionId.toString());
+    query.bindValue(QStringLiteral(":id"), text(record.plan.id.toString()));
+    query.bindValue(QStringLiteral(":collection"), text(record.plan.collectionId.toString()));
     query.bindValue(QStringLiteral(":plan"), jsonToString(planToJson(record.plan)));
-    query.bindValue(QStringLiteral(":state"), domain::operationStateToken(record.state));
-    query.bindValue(QStringLiteral(":trash"), record.trashPath);
-    query.bindValue(QStringLiteral(":error"), record.error);
+    query.bindValue(QStringLiteral(":state"), text(domain::operationStateToken(record.state)));
+    query.bindValue(QStringLiteral(":trash"), text(record.trashPath));
+    query.bindValue(QStringLiteral(":error"), text(record.error));
     query.bindValue(QStringLiteral(":created"),
                     (record.createdUtc.isValid() ? record.createdUtc : now).toString(Qt::ISODate));
     query.bindValue(QStringLiteral(":updated"),
@@ -951,13 +975,13 @@ bool SqliteRepository::saveOperation(const OperationRecord& record, QString* err
         " error = excluded.error"));
 
     for (const OperationMemberRecord& entry : record.members) {
-        member.bindValue(QStringLiteral(":operation"), record.plan.id.toString());
-        member.bindValue(QStringLiteral(":member"), entry.memberId.toString());
-        member.bindValue(QStringLiteral(":asset"), entry.assetId.toString());
-        member.bindValue(QStringLiteral(":source"), entry.sourcePath);
-        member.bindValue(QStringLiteral(":staging"), entry.stagingPath);
-        member.bindValue(QStringLiteral(":step"), entry.lastDurableStep);
-        member.bindValue(QStringLiteral(":error"), entry.error);
+        member.bindValue(QStringLiteral(":operation"), text(record.plan.id.toString()));
+        member.bindValue(QStringLiteral(":member"), text(entry.memberId.toString()));
+        member.bindValue(QStringLiteral(":asset"), text(entry.assetId.toString()));
+        member.bindValue(QStringLiteral(":source"), text(entry.sourcePath));
+        member.bindValue(QStringLiteral(":staging"), text(entry.stagingPath));
+        member.bindValue(QStringLiteral(":step"), text(entry.lastDurableStep));
+        member.bindValue(QStringLiteral(":error"), text(entry.error));
         if (!member.exec()) {
             const QString message = member.lastError().text();
             database_.rollback();
@@ -995,7 +1019,7 @@ std::optional<OperationRecord> SqliteRepository::loadOperation(const domain::Ope
     query.prepare(
         QStringLiteral("SELECT id, plan, state, trash_path, error, created_utc, updated_utc"
                        " FROM operations WHERE id = :id"));
-    query.bindValue(QStringLiteral(":id"), id.toString());
+    query.bindValue(QStringLiteral(":id"), text(id.toString()));
     if (!query.exec()) {
         fail(error, query, tr("Reading the operation"));
         return std::nullopt;
@@ -1011,7 +1035,7 @@ std::optional<OperationRecord> SqliteRepository::loadOperation(const domain::Ope
     members.prepare(
         QStringLiteral("SELECT member_id, asset_id, source_path, staging_path, last_step, error"
                        " FROM operation_members WHERE operation_id = :id"));
-    members.bindValue(QStringLiteral(":id"), id.toString());
+    members.bindValue(QStringLiteral(":id"), text(id.toString()));
     if (!members.exec()) {
         fail(error, members, tr("Reading the operation journal"));
         return record;
@@ -1036,7 +1060,7 @@ QList<OperationRecord> SqliteRepository::unfinishedOperations(const CollectionId
     query.prepare(QStringLiteral(
         "SELECT id FROM operations WHERE collection_id = :collection AND state <> 'completed'"
         " ORDER BY created_utc"));
-    query.bindValue(QStringLiteral(":collection"), id.toString());
+    query.bindValue(QStringLiteral(":collection"), text(id.toString()));
     if (!query.exec()) {
         fail(error, query, tr("Reading unfinished operations"));
         return records;

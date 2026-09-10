@@ -9,6 +9,8 @@
 
 namespace cullfinch::app {
 
+CompositionRoot::CompositionRoot() : CompositionRoot(Options{}) {}
+
 CompositionRoot::CompositionRoot(const Options& options) : options_(options) {
     if (!options_.dataDirectory.isEmpty() || !options_.cacheDirectory.isEmpty()) {
         infrastructure::Paths::overrideRoots(options_.dataDirectory, options_.cacheDirectory);

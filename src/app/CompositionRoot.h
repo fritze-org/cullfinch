@@ -37,7 +37,11 @@ public:
         qint64 imageMemoryBudgetBytes = 512LL * 1024 * 1024;
     };
 
-    explicit CompositionRoot(const Options& options = {});
+    /// Two constructors rather than a defaulted argument: a nested aggregate's
+    /// default member initializers are not usable until the enclosing class is
+    /// complete, so `= {}` here is ill-formed.
+    CompositionRoot();
+    explicit CompositionRoot(const Options& options);
     ~CompositionRoot();
 
     CompositionRoot(const CompositionRoot&) = delete;

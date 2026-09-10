@@ -113,7 +113,8 @@ void TestSqliteRepository::keepsMarksWhenMembershipIsUnchanged() {
     const domain::PhotoAssetList assets = AssetBuilder::resolvedSeries(3);
 
     quint64 revision = 0;
-    repository_->reconcileAssets(*id, assets, nullptr, &revision, &error);
+    QVERIFY2(repository_->reconcileAssets(*id, assets, nullptr, &revision, &error),
+             qPrintable(error));
     QVERIFY2(
         repository_->applyDispositions(*id, revision, {assets.at(1).id}, {}, &revision, &error),
         qPrintable(error));
@@ -134,7 +135,8 @@ void TestSqliteRepository::invalidatesMarksWhenMembershipChanges() {
     domain::PhotoAssetList assets = AssetBuilder::resolvedSeries(2);
 
     quint64 revision = 0;
-    repository_->reconcileAssets(*id, assets, nullptr, &revision, &error);
+    QVERIFY2(repository_->reconcileAssets(*id, assets, nullptr, &revision, &error),
+             qPrintable(error));
     repository_->applyDispositions(*id, revision, {assets.at(0).id}, {}, &revision, &error);
 
     // The JPG was replaced by a different file: the prior decision no longer
@@ -181,7 +183,8 @@ void TestSqliteRepository::refusesAMarkChangeAgainstAStaleRevision() {
     const domain::PhotoAssetList assets = AssetBuilder::resolvedSeries(2);
 
     quint64 revision = 0;
-    repository_->reconcileAssets(*id, assets, nullptr, &revision, &error);
+    QVERIFY2(repository_->reconcileAssets(*id, assets, nullptr, &revision, &error),
+             qPrintable(error));
 
     quint64 ignored = 0;
     QVERIFY2(!repository_->applyDispositions(*id, revision - 1, {assets.first().id}, {}, &ignored,
