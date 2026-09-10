@@ -121,7 +121,8 @@ jobs:
       # and baseline, and the triplets. vcpkg still validates ABI compatibility
       # internally; a complete CMake build tree is never restored.
       - name: Restore the vcpkg dependency cache
-        uses: actions/cache@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
+        id: vcpkg-cache
+        uses: actions/cache/restore@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
         with:
           path: |
             .vcpkg
@@ -193,6 +194,18 @@ jobs:
           if-no-files-found: ignore
           retention-days: 14
 
+      # Saved even when a later step fails: building Qt from source costs about
+      # forty minutes, and throwing it away because the application did not
+      # compile would make every retry pay for it again.
+      - name: Save the vcpkg dependency cache
+        if: always() && steps.vcpkg-cache.outputs.cache-hit != 'true'
+        uses: actions/cache/save@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
+        with:
+          path: |
+            .vcpkg
+            .vcpkg-binary-cache
+          key: ${{ steps.vcpkg-cache.outputs.cache-primary-key }}
+
   clang-tidy:
     name: CMake clang-tidy (${{ matrix.runner }})
     runs-on: ${{ matrix.runner }}
@@ -236,7 +249,8 @@ jobs:
       # Dependency binaries are reused; a precompiled application build tree is
       # not, because an up-to-date build would perform no analysis at all.
       - name: Restore the vcpkg dependency cache
-        uses: actions/cache@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
+        id: vcpkg-cache
+        uses: actions/cache/restore@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
         with:
           path: |
             .vcpkg
@@ -274,6 +288,18 @@ jobs:
           path: build/${{ matrix.preset }}/clang-tidy-enabled-checks.txt
           if-no-files-found: warn
 
+      # Saved even when a later step fails: building Qt from source costs about
+      # forty minutes, and throwing it away because the application did not
+      # compile would make every retry pay for it again.
+      - name: Save the vcpkg dependency cache
+        if: always() && steps.vcpkg-cache.outputs.cache-hit != 'true'
+        uses: actions/cache/save@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
+        with:
+          path: |
+            .vcpkg
+            .vcpkg-binary-cache
+          key: ${{ steps.vcpkg-cache.outputs.cache-primary-key }}
+
   coverage:
     name: Coverage and Codecov
     runs-on: ubuntu-24.04
@@ -302,7 +328,8 @@ jobs:
       - uses: lukka/get-cmake@fffaaafeea488556c2c12dad60690008bc1caacb # v4.4.2
 
       - name: Restore the vcpkg dependency cache
-        uses: actions/cache@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
+        id: vcpkg-cache
+        uses: actions/cache/restore@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
         with:
           path: |
             .vcpkg
@@ -377,6 +404,18 @@ jobs:
             ctest-coverage.xml
           if-no-files-found: warn
           retention-days: 14
+
+      # Saved even when a later step fails: building Qt from source costs about
+      # forty minutes, and throwing it away because the application did not
+      # compile would make every retry pay for it again.
+      - name: Save the vcpkg dependency cache
+        if: always() && steps.vcpkg-cache.outputs.cache-hit != 'true'
+        uses: actions/cache/save@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
+        with:
+          path: |
+            .vcpkg
+            .vcpkg-binary-cache
+          key: ${{ steps.vcpkg-cache.outputs.cache-primary-key }}
 
   required:
     name: Required checks
