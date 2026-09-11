@@ -292,6 +292,7 @@ void ImageCanvas::mousePressEvent(QMouseEvent* event) {
     if (dragging_) {
         setCursor(Qt::ClosedHandCursor);
     }
+    Q_EMIT gestureArmed(event->pos());
 }
 
 void ImageCanvas::mouseMoveEvent(QMouseEvent* event) {

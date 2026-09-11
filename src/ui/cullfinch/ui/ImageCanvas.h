@@ -55,6 +55,11 @@ public:
     void setCaption(const QString& caption);
 
 signals:
+    /// A primary-button press that could become an elimination, with the
+    /// pointer position in this widget's coordinates. Hosts bind the gesture
+    /// to what was under the pointer *now*; the release reports only that
+    /// the gesture completed.
+    void gestureArmed(const QPoint& position);
     void eliminateRequested();
     void inspectToggled(bool inspecting);
     void viewChanged(const QPointF& centre, qreal zoom);
