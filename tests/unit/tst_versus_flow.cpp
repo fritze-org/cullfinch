@@ -273,7 +273,7 @@ void TestVersusFlow::restoreRejectsABracketSizeBeyondWhatRoundIndexingCanShift()
     // pass the length check that follows it, so the bound is checked first:
     // this stays cheap to test and never depends on constructing that array.
     QJsonObject payload;
-    payload.insert(QStringLiteral("bracketSize"), (1 << 30) + 1);
+    payload.insert(QStringLiteral("bracketSize"), static_cast<int>(1U << 30U) + 1);
     payload.insert(QStringLiteral("slots"), QJsonArray{});
 
     domain::VersionedFlowState saved;
