@@ -130,11 +130,14 @@ ConformanceFlow.h` is the fixture that keeps that claim honest.
 - Undo history for comparisons lives only within a run. Saved drafts and deletion marks survive
   a restart; the undo stack does not.
 - A completed group appears in Trash as a *directory*. Restoring it from the desktop does not
-  restore the original individual file paths — the manifest inside it exists so cullfinch can.
+  restore the original individual file paths — the manifest inside it exists so Cullfinch can.
 - Deletion requires a writable staging location on the same filesystem as the photos, and all of
   a group's files must be on one filesystem.
-- RAW files are opaque companions. cullfinch never decodes them and makes no claim to support
+- RAW files are opaque companions. Cullfinch never decodes them and makes no claim to support
   any RAW format's contents.
+- One Cullfinch instance writes to a collection at a time. A second instance that opens the same
+  directory gets it read-only: it shows the inventory as last stored, does not rescan, and refuses
+  marks, comparisons and file operations until the first instance closes the collection.
 - Fullscreen restores the window's previous *size* and state, not its exact desktop position:
   Wayland does not let a client place its own window, and `QWindow::setPosition()` is documented
   as unsupported there.

@@ -6,7 +6,7 @@ departs from it, and why.
 
 | Record | Decision |
 |---|---|
-| [0001](0001-product-name-and-licence.md) | The product is cullfinch, licensed GPL-3.0-or-later |
+| [0001](0001-product-name-and-licence.md) | The product is Cullfinch, licensed GPL-3.0-or-later |
 | [0002](0002-target-and-option-prefix.md) | Targets and options use a `cullfinch_` / `CULLFINCH_` prefix |
 | [0003](0003-widgets-instead-of-graphics-items.md) | Comparison surfaces use widgets, not `QGraphicsItem`s |
 | [0004](0004-generated-image-fixtures.md) | Image fixtures are generated at run time, not committed |
