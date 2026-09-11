@@ -32,12 +32,13 @@ public:
 
 private:
     void apply(const QHash<AssetId, Disposition>& targets) {
-        QString error;
-        if (!controller_->persist(targets, &error)) {
-            // The authoritative marks are unchanged; the history can no longer
-            // be trusted to describe storage, so it is dropped.
-            Q_EMIT controller_->errorOccurred(error);
-        }
+        // QUndoStack has already moved its index by the time this runs, so a
+        // refused write leaves the stack describing a transition storage never
+        // saw. The controller resolves that by dropping the history -- but it
+        // must not do so *here*: clearing the stack deletes this command while
+        // it is still executing. The controller therefore defers the clear
+        // until control has left the command.
+        controller_->applyFromHistory(targets);
     }
 
     DispositionController* controller_;
@@ -59,6 +60,10 @@ void DispositionController::setCollection(const domain::CollectionId& id, quint6
         blocked_ = false;
         Q_EMIT blockedChanged(false);
     }
+}
+
+void DispositionController::setReadOnly(bool readOnly) {
+    readOnly_ = readOnly;
 }
 
 void DispositionController::setMarkingEnabled(bool enabled) {
@@ -102,7 +107,16 @@ bool DispositionController::persist(const QHash<AssetId, Disposition>& targets, 
         }
         if (!blocked_) {
             blocked_ = true;
-            undoStack_.clear();
+            if (applyingFromHistory_) {
+                // The stack is mid-call into the command that brought us
+                // here; deleting it now is a use-after-free. Drop the history
+                // once the stack has returned to the event loop. `blocked_`
+                // already refuses new pushes in the meantime.
+                QMetaObject::invokeMethod(
+                    this, [this]() { undoStack_.clear(); }, Qt::QueuedConnection);
+            } else {
+                undoStack_.clear();
+            }
             Q_EMIT blockedChanged(true);
         }
         return false;
@@ -113,10 +127,30 @@ bool DispositionController::persist(const QHash<AssetId, Disposition>& targets, 
     return true;
 }
 
+void DispositionController::applyFromHistory(
+    const QHash<AssetId, Disposition>& targets) {
+    QString error;
+    applyingFromHistory_ = true;
+    const bool written = persist(targets, &error);
+    applyingFromHistory_ = false;
+    if (!written) {
+        // The authoritative marks are unchanged; the history can no longer be
+        // trusted to describe storage, so it is being dropped.
+        Q_EMIT errorOccurred(error);
+    }
+}
+
 bool DispositionController::applyRejections(const QList<AssetId>& ids, const QString& commandText,
                                             QString* error) {
     if (ids.isEmpty()) {
         return true;
+    }
+    if (readOnly_) {
+        if (error != nullptr) {
+            *error = tr("This collection is open read-only because another Cullfinch window has "
+                        "it open; deletion marks cannot change here.");
+        }
+        return false;
     }
     if (blocked_) {
         if (error != nullptr) {
@@ -150,6 +184,13 @@ bool DispositionController::unmark(const QList<AssetId>& ids, QString* error) {
     if (!markingEnabled_) {
         if (error != nullptr) {
             *error = tr("Finish or discard the active comparison before changing deletion marks.");
+        }
+        return false;
+    }
+    if (readOnly_) {
+        if (error != nullptr) {
+            *error = tr("This collection is open read-only because another Cullfinch window has "
+                        "it open; deletion marks cannot change here.");
         }
         return false;
     }

@@ -47,6 +47,7 @@ private slots:
     void resumeRefusesWhenAGroupChangedUnderneath();
     void aFailedDraftWriteKeepsTheInMemoryDraft();
     void aFailedMarkWriteLeavesMarksUnchanged();
+    void aFailedUndoWriteDropsTheHistoryWithoutTouchingMarks();
     void marksCannotChangeWhileAComparisonIsActive();
     void anArbitraryNewFlowRunsThroughTheSameController();
 
@@ -358,6 +359,36 @@ void TestSessionController::aFailedMarkWriteLeavesMarksUnchanged() {
     // The history is dropped rather than left describing storage incorrectly.
     QVERIFY(dispositions_->isBlocked());
     QCOMPARE(dispositions_->undoStack()->count(), 0);
+}
+
+void TestSessionController::aFailedUndoWriteDropsTheHistoryWithoutTouchingMarks() {
+    QString error;
+    const domain::AssetId target = assets_.first().id;
+    QVERIFY2(dispositions_->applyRejections({target}, QStringLiteral("test"), &error),
+             qPrintable(error));
+    QCOMPARE(dispositions_->undoStack()->count(), 1);
+
+    QSignalSpy errors(dispositions_.get(), &application::DispositionController::errorOccurred);
+    repository_->failNextDispositionWrites(1);
+
+    // QUndoStack::undo() runs the command's undo() *before* the write is
+    // known to have failed. The controller must survive that call -- clearing
+    // the stack from inside the executing command deletes the command under
+    // its own feet -- and must leave the authoritative marks alone.
+    dispositions_->undoStack()->undo();
+
+    QVERIFY(dispositions_->isBlocked());
+    QCOMPARE(errors.size(), 1);
+    for (const domain::PhotoAsset& asset : repository_->loadAssets(collection_, nullptr)) {
+        QCOMPARE(asset.disposition,
+                 asset.id == target ? domain::Disposition::Reject : domain::Disposition::Neutral);
+    }
+
+    // The history is dropped once control is back in the event loop, and no
+    // further mark change is accepted until the collection is reloaded.
+    QTRY_COMPARE(dispositions_->undoStack()->count(), 0);
+    QVERIFY(!dispositions_->applyRejections({assets_.at(1).id}, QStringLiteral("test"), &error));
+    QVERIFY(!error.isEmpty());
 }
 
 void TestSessionController::marksCannotChangeWhileAComparisonIsActive() {
