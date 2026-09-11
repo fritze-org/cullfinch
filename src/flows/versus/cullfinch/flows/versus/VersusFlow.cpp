@@ -9,7 +9,6 @@
 #include <QSet>
 
 #include <algorithm>
-#include <utility>
 
 namespace cullfinch::flows::versus {
 namespace {
@@ -357,32 +356,18 @@ FlowSummary VersusFlow::summarise(const FlowState& state) const {
 }
 
 RestoreResult VersusFlow::restore(const VersionedFlowState& saved) const {
-    if (saved.flowId != QLatin1String(kFlowId)) {
-        return RestoreResult::failure(
-            tr("Saved state belongs to flow '%1', not the versus tree.").arg(saved.flowId));
+    RestoreResult result = domain::restoreFlowState(
+        saved, QLatin1String(kFlowId), kStateSchemaVersion,
+        tr("Saved state belongs to flow '%1', not the versus tree.").arg(saved.flowId),
+        tr("Saved versus state uses schema version %1; this build supports version %2.")
+            .arg(saved.schemaVersion)
+            .arg(kStateSchemaVersion));
+    if (!result.restored) {
+        return result;
     }
-    if (saved.schemaVersion != kStateSchemaVersion) {
-        // An unknown or newer state version must never be interpreted. The
-        // record is preserved and reported as incompatible instead.
-        return RestoreResult::failure(
-            tr("Saved versus state uses schema version %1; this build supports version %2.")
-                .arg(saved.schemaVersion)
-                .arg(kStateSchemaVersion));
-    }
-
-    FlowState state;
-    state.flowId = saved.flowId;
-    state.schemaVersion = saved.schemaVersion;
-    state.revision = saved.revision;
-    state.payload = saved.payload;
-
-    if (!parse(state).valid) {
+    if (!parse(result.state).valid) {
         return RestoreResult::failure(tr("The saved bracket is not internally consistent."));
     }
-
-    RestoreResult result;
-    result.restored = true;
-    result.state = std::move(state);
     return result;
 }
 

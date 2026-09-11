@@ -7,8 +7,6 @@
 #include <QJsonValue>
 #include <QSet>
 
-#include <utility>
-
 namespace cullfinch::flows::wall {
 namespace {
 
@@ -251,30 +249,18 @@ FlowSummary WallFlow::summarise(const FlowState& state) const {
 }
 
 RestoreResult WallFlow::restore(const VersionedFlowState& saved) const {
-    if (saved.flowId != QLatin1String(kFlowId)) {
-        return RestoreResult::failure(
-            tr("Saved state belongs to flow '%1', not the image wall.").arg(saved.flowId));
+    RestoreResult result = domain::restoreFlowState(
+        saved, QLatin1String(kFlowId), kStateSchemaVersion,
+        tr("Saved state belongs to flow '%1', not the image wall.").arg(saved.flowId),
+        tr("Saved wall state uses schema version %1; this build supports version %2.")
+            .arg(saved.schemaVersion)
+            .arg(kStateSchemaVersion));
+    if (!result.restored) {
+        return result;
     }
-    if (saved.schemaVersion != kStateSchemaVersion) {
-        return RestoreResult::failure(
-            tr("Saved wall state uses schema version %1; this build supports version %2.")
-                .arg(saved.schemaVersion)
-                .arg(kStateSchemaVersion));
-    }
-
-    FlowState state;
-    state.flowId = saved.flowId;
-    state.schemaVersion = saved.schemaVersion;
-    state.revision = saved.revision;
-    state.payload = saved.payload;
-
-    if (!parse(state).valid) {
+    if (!parse(result.state).valid) {
         return RestoreResult::failure(tr("The saved wall is not internally consistent."));
     }
-
-    RestoreResult result;
-    result.restored = true;
-    result.state = std::move(state);
     return result;
 }
 
