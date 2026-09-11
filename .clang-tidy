@@ -20,7 +20,11 @@ Checks: >
   readability-redundant-member-init,
   -bugprone-easily-swappable-parameters,
   -bugprone-exception-escape,
-  -performance-enum-size
+  -performance-enum-size,
+  # `#pragma once` is the convention throughout this project and is supported
+  # by every compiler it is built with. Include guards would add noise to 40
+  # headers without making any supported build work that does not already.
+  -portability-avoid-pragma-once
 
 # Analyse owned headers through their translation units. Dependency headers are
 # treated as system headers by the compile command and are excluded here too.

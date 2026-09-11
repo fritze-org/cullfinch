@@ -314,7 +314,9 @@ AssociationResult StemAssociationResolver::resolve(const CollectionId& collectio
         const QByteArray digest = hash.result();
         quint64 revision = 0;
         for (int i = 0; i < 8 && i < digest.size(); ++i) {
-            revision = (revision << 8) | static_cast<quint8>(digest.at(i));
+            // Widen to the unsigned accumulator before the bitwise OR: a
+            // quint8 promotes to int, which would mix signedness.
+            revision = (revision << 8U) | static_cast<quint64>(static_cast<quint8>(digest.at(i)));
         }
         asset.membershipRevision = revision;
     }

@@ -70,14 +70,14 @@ Bracket parse(const FlowState& state) {
 
     bracket.bracketSize = bracketSize;
     bracket.positions.reserve(bracketSize);
-    for (const QJsonValue& value : positions) {
+    for (const auto& value : positions) {
         bracket.positions.append(value.isString() ? AssetId(value.toString()) : AssetId());
     }
 
     bracket.input = domain::assetIdsFromJson(payload.value(QLatin1String(kKeyInput)).toArray());
 
     const QJsonArray decisions = payload.value(QLatin1String(kKeyDecisions)).toArray();
-    for (const QJsonValue& value : decisions) {
+    for (const auto& value : decisions) {
         const QJsonObject decision = value.toObject();
         const int node = decision.value(QLatin1String(kKeyNode)).toInt(-1);
         const AssetId eliminated(decision.value(QLatin1String(kKeyEliminated)).toString());

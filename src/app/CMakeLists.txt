@@ -58,6 +58,25 @@ install(SCRIPT ${cullfinch_deploy_script})
 # explicitly: without it the installed package silently runs through XWayland, which the design
 # rules out. The wayland-shell-integration and wayland-graphics-integration plugins the helper
 # already deploys are useless on their own.
+#
+# The macOS bundle showed the same gap from the other direction: it received libQt6Sql and the
+# Cocoa, image-format and style plugins, but no sqldrivers directory at all, so the application
+# could not open its own database:
+#
+# QSqlDatabase: can not load requested driver 'QSQLITE', available drivers:
+#
+# Each plugin is added only where the helper leaves it out, so the ones it does deploy keep the load
+# paths it rewrote for them.
+if(APPLE)
+  if(NOT TARGET Qt6::QSQLiteDriverPlugin)
+    message(
+      FATAL_ERROR "cullfinch: the Qt SQLite driver plugin is missing from this Qt build. "
+                  "cullfinch stores all of its metadata in SQLite and cannot start " "without it.")
+  endif()
+  install(FILES $<TARGET_FILE:Qt6::QSQLiteDriverPlugin>
+          DESTINATION "cullfinch.app/Contents/PlugIns/sqldrivers")
+endif()
+
 if(CMAKE_SYSTEM_NAME STREQUAL "Linux")
   if(NOT TARGET Qt6::QWaylandIntegrationPlugin)
     message(
