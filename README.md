@@ -99,6 +99,26 @@ offscreen fails instead of passing under a backend nobody asked for. The Wayland
 for a real client connection rather than for a socket to appear, and unsets `DISPLAY` so
 XWayland cannot rescue a broken native path.
 
+## Branch protection
+
+The repository's protection rules live in [`.github/rulesets/`](.github/rulesets/) as GitHub
+ruleset definitions, so what protects `main` is reviewed like everything else:
+
+| Ruleset | Applies to | What it enforces |
+|---|---|---|
+| [`main.json`](.github/rulesets/main.json) | the default branch | No deletion, no force-push; changes arrive through a pull request with every review thread resolved; the `Required checks` aggregation job and the SonarCloud quality gate must pass on a head that is up to date with `main`. Repository admins may bypass only through a pull request, never by pushing directly. |
+| [`release-tags.json`](.github/rulesets/release-tags.json) | `v*` tags | A release tag can neither be moved nor deleted once it exists. |
+
+`Required checks` is the one job that depends on every required CI job (pre-commit on both
+platforms, every build-and-test entry, clang-tidy and coverage), so it is the single Actions
+context a ruleset needs to name; `codecov/patch` stays informational, as `codecov.yml` records.
+The main ruleset requires no approving review because the project currently has one maintainer;
+raise `required_approving_review_count` to 1 once a second maintainer can review.
+
+To apply or update them: *Settings → Rules → Rulesets → New ruleset → Import a ruleset*, and
+choose the file. Importing needs repository admin rights, which is why this is a checked-in
+definition rather than something CI can do.
+
 ## Layout
 
 ```text
