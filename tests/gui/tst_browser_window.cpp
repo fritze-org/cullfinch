@@ -1,6 +1,7 @@
 // SPDX-License-Identifier: GPL-3.0-or-later
 #include "GuiFixture.h"
 
+#include <cullfinch/domain/SelectionSnapshot.h>
 #include <cullfinch/ui/ReviewDialog.h>
 
 #include <QAbstractItemModelTester>
@@ -252,12 +253,40 @@ void TestBrowserWindow::aSecondInstanceOpensTheCollectionReadOnly() {
     QVERIFY(window->activeShell() == nullptr);
     QVERIFY(!second.dispositions().applyRejections({first}, QStringLiteral("test"), &error));
     QVERIFY(!error.isEmpty());
-    const auto* review = window->findChild<QAction*>(QStringLiteral("actionReviewOperations"));
+    QVERIFY(!second.dispositions().unmark({first}, &error));
+    QVERIFY(!second.session().resume(application::StoredSession{}, second.collection().assets(),
+                                     &error));
+    QVERIFY2(error.contains(QStringLiteral("read-only")), qPrintable(error));
+    // Callers that do not want the reason still get the refusal.
+    QVERIFY(!second.dispositions().applyRejections({first}, QStringLiteral("test"), nullptr));
+    QVERIFY(!second.dispositions().unmark({first}, nullptr));
+    QVERIFY(!second.session().start(
+        QStringLiteral("image-wall"),
+        domain::SelectionSnapshot::freeze(second.collection().collectionId(), 1,
+                                          second.collection().assets()),
+        domain::FlowOptions{}, nullptr));
+    // A refresh is a rescan, and a rescan is a write: refused too.
+    second.collection().refresh();
+    QVERIFY(!second.collection().isScanning());
+    auto* review = window->findChild<QAction*>(QStringLiteral("actionReviewOperations"));
     QVERIFY(review != nullptr && !review->isEnabled());
+    // The action is disabled, but the guard behind it holds on its own: a
+    // shortcut or a stale menu that reaches it is refused with a reason.
+    QSignalSpy refused(window.get(), &ui::BrowserWindow::errorOccurred);
+    review->setEnabled(true);
+    review->trigger();
+    QCOMPARE(refused.size(), 1);
+    QVERIFY(refused.first().at(0).toString().contains(QStringLiteral("read-only")));
     const auto* compare = window->findChild<QMenu*>(QStringLiteral("compareMenu"));
     QVERIFY(compare != nullptr && !compare->isEnabled());
 
-    // Once the first window lets go, reopening takes the lock and scans.
+    // Closing clears the state, and once the first window lets go, reopening
+    // takes the lock and scans.
+    second.collection().close();
+    QVERIFY(!second.collection().isReadOnly());
+    QCOMPARE(readOnly.size(), 2);
+    second.collection().refresh(); // Nothing open: nothing to scan.
+    QVERIFY(!second.collection().isScanning());
     fixture_->root().collection().close();
     QVERIFY(window->openDirectory(fixture_->collection().path()));
     QVERIFY(!second.collection().isReadOnly());

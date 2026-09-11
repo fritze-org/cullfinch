@@ -6,11 +6,13 @@
 
 #include <QAction>
 #include <QCheckBox>
+#include <QGuiApplication>
 #include <QJsonObject>
 #include <QKeyEvent>
 #include <QLabel>
 #include <QPushButton>
 #include <QSet>
+#include <QStyleHints>
 #include <QTest>
 
 #include <tuple>
@@ -169,6 +171,17 @@ void TestWallView::repeatClicksInTheVacatedRegionDoNotRejectTheNextPhoto() {
         QCoreApplication::processEvents();
     }
     QCOMPARE(session.summary().draftRejected.size(), 1);
+
+    // Once the double-click interval has passed, the same coordinates are an
+    // ordinary target again: the suppression is about a leftover gesture,
+    // not about the region.
+    QTest::qWait(QGuiApplication::styleHints()->mouseDoubleClickInterval() + 100);
+    landed = view_->surface()->childAt(region.center());
+    if (landed != nullptr) {
+        QTest::mouseClick(landed, Qt::LeftButton, Qt::NoModifier,
+                          landed->mapFrom(view_->surface(), region.center()));
+        QVERIFY(GuiFixture::waitFor([&]() { return session.summary().draftRejected.size() == 2; }));
+    }
 }
 
 void TestWallView::keyRepeatDoesNotRejectASequence() {

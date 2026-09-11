@@ -152,7 +152,17 @@ bool FakeRepository::deleteSession(const domain::SessionId& id, QString* error) 
 }
 
 bool FakeRepository::saveOperation(const application::OperationRecord& record, QString* error) {
-    Q_UNUSED(error)
+    if (operationSaveFailures_ > 0) {
+        if (operationSavesBeforeFailure_ > 0) {
+            --operationSavesBeforeFailure_;
+        } else {
+            --operationSaveFailures_;
+            report(error, QStringLiteral("fake journal write failure"));
+            return false;
+        }
+    }
+    ++operationSaveCount_;
+    operationJournal_.append(record);
     operations_.insert(record.plan.id, record);
     return true;
 }

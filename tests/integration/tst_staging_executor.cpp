@@ -16,6 +16,8 @@
 
 #include <tuple>
 
+#include <unistd.h>
+
 using namespace cullfinch;
 using cullfinch::testsupport::FakeTrashAdapter;
 using cullfinch::testsupport::TempCollection;
@@ -102,6 +104,17 @@ private slots:
     void recoveryReportsAnUncertainTrashOutcome();
     void preflightBlocksAGroupThatGainedACompanion();
     void preflightBlocksAGroupOnAnotherFilesystem();
+
+    void readManifestReportsAbsentCorruptAndForeignManifests();
+    void recoveryOfAPlanThatNeverStartedChangesNothing();
+    void recoveryWorksFromThePlanAloneWhenTheManifestIsGone();
+    void recoveryReportsAFileMissingFromAPartlyPresentGroup();
+    void recoveryAfterAPartialRunReportsWhatReachedTrash();
+    void aFailedRenameMidGroupPutsTheMovedMembersBack();
+    void aJournalRefusedMidGroupLeavesTheFilesForRecovery_data();
+    void aJournalRefusedMidGroupLeavesTheFilesForRecovery();
+    void anUnreadableManifestIsReported();
+    void recoveryReportsAFileItCannotPutBack();
 };
 
 void TestStagingExecutor::movesTheWholeGroupAndWritesAManifest() {
@@ -637,6 +650,283 @@ void TestStagingExecutor::preflightBlocksAGroupOnAnotherFilesystem() {
     QVERIFY(verified.hasBlockers());
     QVERIFY(verified.blocked.first().reason.contains(QStringLiteral("filesystem")));
     QVERIFY(QFileInfo::exists(collection.filePath(QStringLiteral("A.JPG"))));
+}
+
+void TestStagingExecutor::readManifestReportsAbsentCorruptAndForeignManifests() {
+    QTemporaryDir directory;
+    QVERIFY(directory.isValid());
+    const QString path = QDir(directory.path())
+                             .absoluteFilePath(infrastructure::StagingExecutor::manifestFileName());
+
+    QString error;
+    QVERIFY(!infrastructure::StagingExecutor::readManifest(directory.path(), &error).has_value());
+    QVERIFY2(error.contains(QStringLiteral("no recovery manifest")), qPrintable(error));
+
+    {
+        QFile file(path);
+        QVERIFY(file.open(QIODevice::WriteOnly));
+        file.write(QByteArrayLiteral("{ not json"));
+    }
+    error.clear();
+    QVERIFY(!infrastructure::StagingExecutor::readManifest(directory.path(), &error).has_value());
+    QVERIFY2(error.contains(QStringLiteral("not readable")), qPrintable(error));
+
+    {
+        QFile file(path);
+        QVERIFY(file.open(QIODevice::WriteOnly | QIODevice::Truncate));
+        file.write(QByteArrayLiteral("{\"version\": 99, \"members\": []}"));
+    }
+    error.clear();
+    // A manifest from a newer or unknown writer is reported, never guessed at.
+    QVERIFY(!infrastructure::StagingExecutor::readManifest(directory.path(), &error).has_value());
+    QVERIFY2(error.contains(QStringLiteral("unknown version")), qPrintable(error));
+}
+
+void TestStagingExecutor::recoveryOfAPlanThatNeverStartedChangesNothing() {
+    TempCollection collection;
+    collection.addJpeg(QStringLiteral("A.JPG"));
+    collection.addRaw(QStringLiteral("A.RAF"));
+    const domain::PhotoAssetList assets = markAll(scan(collection));
+    const domain::PlanningResult planning = domain::OperationPlanner::plan(
+        domain::CollectionId(QStringLiteral("c1")), 1, stagingRootOf(collection), assets);
+
+    FakeTrashAdapter trash;
+    infrastructure::StagingExecutor executor(trash);
+    // A crash right after the plan was recorded: every file is still at its
+    // source and the plan may simply be retried.
+    const application::OperationRecord recovered = executor.recover(recordFor(planning.plan));
+    QCOMPARE(recovered.state, domain::OperationState::Planned);
+    QVERIFY(recovered.error.isEmpty());
+    QCOMPARE(stepOf(recovered, QStringLiteral("A.JPG")), QStringLiteral("planned"));
+    QVERIFY(QFileInfo::exists(collection.filePath(QStringLiteral("A.JPG"))));
+    QVERIFY(QFileInfo::exists(collection.filePath(QStringLiteral("A.RAF"))));
+}
+
+void TestStagingExecutor::recoveryWorksFromThePlanAloneWhenTheManifestIsGone() {
+    TempCollection collection;
+    collection.addJpeg(QStringLiteral("A.JPG"));
+    collection.addRaw(QStringLiteral("A.RAF"));
+    const domain::PhotoAssetList assets = markAll(scan(collection));
+    const domain::PlanningResult planning = domain::OperationPlanner::plan(
+        domain::CollectionId(QStringLiteral("c1")), 1, stagingRootOf(collection), assets);
+
+    FakeTrashAdapter trash;
+    trash.failNextCalls(1);
+    infrastructure::StagingExecutor executor(trash);
+    std::ignore = executor.executeGroup(recordFor(planning.plan), planning.plan.groups.first(), {});
+
+    // Neither the journal (still at "planned") nor the manifest can say where
+    // the files went; the plan's own staging layout still can.
+    const QString directory =
+        QDir(stagingRootOf(collection))
+            .absoluteFilePath(planning.plan.groups.first().stagingDirectoryName);
+    QVERIFY(QFile::remove(
+        QDir(directory).absoluteFilePath(infrastructure::StagingExecutor::manifestFileName())));
+
+    const application::OperationRecord recovered = executor.recover(recordFor(planning.plan));
+    QCOMPARE(recovered.state, domain::OperationState::Planned);
+    QVERIFY(QFileInfo::exists(collection.filePath(QStringLiteral("A.JPG"))));
+    QVERIFY(QFileInfo::exists(collection.filePath(QStringLiteral("A.RAF"))));
+}
+
+void TestStagingExecutor::recoveryReportsAFileMissingFromAPartlyPresentGroup() {
+    TempCollection collection;
+    collection.addJpeg(QStringLiteral("A.JPG"));
+    collection.addRaw(QStringLiteral("A.RAF"));
+    const domain::PhotoAssetList assets = markAll(scan(collection));
+    const domain::PlanningResult planning = domain::OperationPlanner::plan(
+        domain::CollectionId(QStringLiteral("c1")), 1, stagingRootOf(collection), assets);
+
+    FakeTrashAdapter trash;
+    trash.failNextCalls(1);
+    infrastructure::StagingExecutor executor(trash);
+    const application::OperationRecord staged =
+        executor.executeGroup(recordFor(planning.plan), planning.plan.groups.first(), {});
+
+    // The RAW vanished from staging while the JPG is still there. That is
+    // not a Trash outcome and not something to assume completed.
+    const QString directory =
+        QDir(stagingRootOf(collection))
+            .absoluteFilePath(planning.plan.groups.first().stagingDirectoryName);
+    QVERIFY(QFile::remove(QDir(directory).absoluteFilePath(QStringLiteral("A.RAF"))));
+
+    const application::OperationRecord recovered = executor.recover(staged);
+    QCOMPARE(recovered.state, domain::OperationState::NeedsRecovery);
+    QVERIFY2(recovered.error.contains(QStringLiteral("A.RAF")), qPrintable(recovered.error));
+    QVERIFY(!recovered.error.contains(QStringLiteral("Trash")));
+    // What could be put back, was.
+    QVERIFY(QFileInfo::exists(collection.filePath(QStringLiteral("A.JPG"))));
+}
+
+void TestStagingExecutor::recoveryAfterAPartialRunReportsWhatReachedTrash() {
+    TempCollection collection;
+    collection.addJpeg(QStringLiteral("A.JPG"));
+    collection.addRaw(QStringLiteral("A.RAF"));
+    collection.addJpeg(QStringLiteral("B.JPG"));
+    const domain::PhotoAssetList assets = markAll(scan(collection));
+    const domain::PlanningResult planning = domain::OperationPlanner::plan(
+        domain::CollectionId(QStringLiteral("c1")), 1, stagingRootOf(collection), assets);
+    QCOMPARE(planning.plan.groups.size(), 2);
+
+    // The first group reaches Trash; Trash refuses the second.
+    FakeTrashAdapter trash;
+    infrastructure::StagingExecutor executor(trash);
+    application::OperationRecord record =
+        executor.executeGroup(recordFor(planning.plan), planning.plan.groups.at(0), {});
+    QCOMPARE(record.state, domain::OperationState::Trashing);
+    trash.failNextCalls(1);
+    record = executor.executeGroup(record, planning.plan.groups.at(1), {});
+    QCOMPARE(record.state, domain::OperationState::NeedsRecovery);
+
+    // Recovery puts the second group back and says plainly that the first
+    // is already in Trash: the plan cannot be retried as it stands.
+    const application::OperationRecord recovered = executor.recover(record);
+    QCOMPARE(recovered.state, domain::OperationState::Failed);
+    QVERIFY2(recovered.error.contains(QStringLiteral("1 photo")), qPrintable(recovered.error));
+    const QString first = planning.plan.groups.at(0).members.first().fileName;
+    const QString second = planning.plan.groups.at(1).members.first().fileName;
+    QVERIFY(!QFileInfo::exists(collection.filePath(first)));
+    QVERIFY(QFileInfo::exists(collection.filePath(second)));
+    QCOMPARE(stepOf(recovered, first), QStringLiteral("trashed"));
+    QCOMPARE(stepOf(recovered, second), QStringLiteral("restored"));
+}
+
+void TestStagingExecutor::aFailedRenameMidGroupPutsTheMovedMembersBack() {
+    TempCollection collection;
+    collection.addJpeg(QStringLiteral("A.JPG"));
+    collection.addRaw(QStringLiteral("A.RAF"));
+    const domain::PhotoAssetList assets = markAll(scan(collection));
+    const domain::PlanningResult planning = domain::OperationPlanner::plan(
+        domain::CollectionId(QStringLiteral("c1")), 1, stagingRootOf(collection), assets);
+    const domain::PlannedGroup& group = planning.plan.groups.first();
+    QCOMPARE(group.members.size(), 2);
+
+    // The last member disappears after preflight, so its rename fails after
+    // the first member has already moved.
+    const domain::PlannedMember& last = group.members.last();
+    const domain::PlannedMember& first = group.members.first();
+    QVERIFY(QFile::remove(last.sourcePath));
+
+    FakeTrashAdapter trash;
+    infrastructure::StagingExecutor executor(trash);
+    const application::OperationRecord result =
+        executor.executeGroup(recordFor(planning.plan), group, {});
+    QCOMPARE(result.state, domain::OperationState::Failed);
+    QVERIFY2(result.error.contains(last.fileName), qPrintable(result.error));
+    // The member that had moved is back where it was, and says so.
+    QVERIFY(QFileInfo::exists(first.sourcePath));
+    QCOMPARE(stepOf(result, first.fileName), QStringLiteral("restored"));
+    QCOMPARE(trash.callCount(), 0);
+}
+
+void TestStagingExecutor::aJournalRefusedMidGroupLeavesTheFilesForRecovery_data() {
+    QTest::addColumn<int>("failingWrite");
+    QTest::addColumn<QString>("expectedMention");
+    // Writes for a two-member group: intent, JPG staged, RAF staged, Staged,
+    // Trashing. The first is covered elsewhere (nothing has moved yet).
+    QTest::newRow("after the first move") << 2 << QStringLiteral("already been moved");
+    QTest::newRow("after the last move") << 3 << QStringLiteral("already been moved");
+    QTest::newRow("at Staged") << 4 << QStringLiteral("journal");
+    QTest::newRow("at Trashing") << 5 << QStringLiteral("journal");
+}
+
+void TestStagingExecutor::aJournalRefusedMidGroupLeavesTheFilesForRecovery() {
+    QFETCH(const int, failingWrite);
+    QFETCH(const QString, expectedMention);
+
+    TempCollection collection;
+    collection.addJpeg(QStringLiteral("A.JPG"));
+    collection.addRaw(QStringLiteral("A.RAF"));
+    const domain::PhotoAssetList assets = markAll(scan(collection));
+    const domain::PlanningResult planning = domain::OperationPlanner::plan(
+        domain::CollectionId(QStringLiteral("c1")), 1, stagingRootOf(collection), assets);
+
+    int writes = 0;
+    const application::JournalWriter flaky =
+        [&writes, failingWrite](const application::OperationRecord&, QString* error) {
+            if (++writes == failingWrite) {
+                *error = QStringLiteral("disk full");
+                return false;
+            }
+            return true;
+        };
+
+    FakeTrashAdapter trash;
+    infrastructure::StagingExecutor executor(trash);
+    const application::OperationRecord result =
+        executor.executeGroup(recordFor(planning.plan), planning.plan.groups.first(), flaky);
+
+    // Once a file has moved, a journal that cannot be written is a recovery
+    // task, not a failure to shrug off -- and never a reason to call Trash.
+    QCOMPARE(result.state, domain::OperationState::NeedsRecovery);
+    QVERIFY2(result.error.contains(expectedMention), qPrintable(result.error));
+    QCOMPARE(trash.callCount(), 0);
+    const QString directory =
+        QDir(stagingRootOf(collection))
+            .absoluteFilePath(planning.plan.groups.first().stagingDirectoryName);
+    QVERIFY(QFileInfo::exists(QDir(directory).absoluteFilePath(QStringLiteral("A.JPG"))) ||
+            QFileInfo::exists(collection.filePath(QStringLiteral("A.JPG"))));
+
+    // And recovery from that record puts everything back.
+    const application::OperationRecord recovered = executor.recover(result);
+    QCOMPARE(recovered.state, domain::OperationState::Planned);
+    QVERIFY(QFileInfo::exists(collection.filePath(QStringLiteral("A.JPG"))));
+    QVERIFY(QFileInfo::exists(collection.filePath(QStringLiteral("A.RAF"))));
+}
+
+void TestStagingExecutor::anUnreadableManifestIsReported() {
+    if (::geteuid() == 0) {
+        QSKIP("root ignores file permissions, so an unreadable file cannot be staged");
+    }
+    QTemporaryDir directory;
+    QVERIFY(directory.isValid());
+    const QString path = QDir(directory.path())
+                             .absoluteFilePath(infrastructure::StagingExecutor::manifestFileName());
+    {
+        QFile file(path);
+        QVERIFY(file.open(QIODevice::WriteOnly));
+        file.write(QByteArrayLiteral("{}"));
+    }
+    QVERIFY(QFile::setPermissions(path, QFileDevice::Permissions{}));
+
+    QString error;
+    QVERIFY(!infrastructure::StagingExecutor::readManifest(directory.path(), &error).has_value());
+    QVERIFY2(error.contains(QStringLiteral("could not be read")), qPrintable(error));
+    QVERIFY(QFile::setPermissions(path, QFileDevice::ReadOwner | QFileDevice::WriteOwner));
+}
+
+void TestStagingExecutor::recoveryReportsAFileItCannotPutBack() {
+    if (::geteuid() == 0) {
+        QSKIP("root ignores directory permissions, so the rename back cannot be made to fail");
+    }
+    TempCollection collection;
+    collection.addJpeg(QStringLiteral("A.JPG"));
+    collection.addRaw(QStringLiteral("A.RAF"));
+    const domain::PhotoAssetList assets = markAll(scan(collection));
+    const domain::PlanningResult planning = domain::OperationPlanner::plan(
+        domain::CollectionId(QStringLiteral("c1")), 1, stagingRootOf(collection), assets);
+
+    FakeTrashAdapter trash;
+    trash.failNextCalls(1);
+    infrastructure::StagingExecutor executor(trash);
+    const application::OperationRecord staged =
+        executor.executeGroup(recordFor(planning.plan), planning.plan.groups.first(), {});
+
+    // The photo directory became read-only while the group sat in staging.
+    const QFileDevice::Permissions original = QFile::permissions(collection.path());
+    QVERIFY(
+        QFile::setPermissions(collection.path(), QFileDevice::ReadOwner | QFileDevice::ExeOwner));
+    const application::OperationRecord recovered = executor.recover(staged);
+    QVERIFY(QFile::setPermissions(collection.path(), original));
+
+    // Nothing was lost: the files stay in staging, and the record says why.
+    QCOMPARE(recovered.state, domain::OperationState::NeedsRecovery);
+    QVERIFY2(recovered.error.contains(QStringLiteral("failed")), qPrintable(recovered.error));
+    const QString directory =
+        QDir(stagingRootOf(collection))
+            .absoluteFilePath(planning.plan.groups.first().stagingDirectoryName);
+    QVERIFY(QFileInfo::exists(QDir(directory).absoluteFilePath(QStringLiteral("A.JPG"))));
+    QVERIFY(QFileInfo::exists(QDir(directory).absoluteFilePath(QStringLiteral("A.RAF"))));
 }
 
 QTEST_MAIN(TestStagingExecutor)

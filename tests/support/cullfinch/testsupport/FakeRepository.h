@@ -47,6 +47,11 @@ public:
     // ---- Fault injection and inspection -----------------------------------
     void failNextSessionSaves(int count) { sessionSaveFailures_ = count; }
     void failNextDispositionWrites(int count) { dispositionFailures_ = count; }
+    /// Refuse operation journal writes, starting after `after` successes.
+    void failOperationSaves(int after, int count) {
+        operationSavesBeforeFailure_ = after;
+        operationSaveFailures_ = count;
+    }
     void setAssets(const domain::CollectionId& id, const domain::PhotoAssetList& assets);
     void setRevision(const domain::CollectionId& id, quint64 revision) {
         revisions_[id] = revision;
@@ -54,6 +59,12 @@ public:
 
     [[nodiscard]] int sessionSaveCount() const { return sessionSaveCount_; }
     [[nodiscard]] int dispositionWriteCount() const { return dispositionWriteCount_; }
+    [[nodiscard]] int operationSaveCount() const { return operationSaveCount_; }
+    /// Every journal write, in order, so a test can see what a crash at any
+    /// point would have left behind.
+    [[nodiscard]] const QList<application::OperationRecord>& operationJournal() const {
+        return operationJournal_;
+    }
 
 private:
     QHash<QString, domain::CollectionId> collectionsByRoot_;
@@ -64,8 +75,12 @@ private:
 
     int sessionSaveFailures_ = 0;
     int dispositionFailures_ = 0;
+    int operationSavesBeforeFailure_ = 0;
+    int operationSaveFailures_ = 0;
     int sessionSaveCount_ = 0;
     int dispositionWriteCount_ = 0;
+    int operationSaveCount_ = 0;
+    QList<application::OperationRecord> operationJournal_;
 };
 
 } // namespace cullfinch::testsupport
