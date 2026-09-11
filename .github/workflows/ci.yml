@@ -290,6 +290,10 @@ jobs:
           curl -fsSL -o /tmp/llvm.sh https://apt.llvm.org/llvm.sh
           chmod +x /tmp/llvm.sh
           sudo /tmp/llvm.sh "${CULLFINCH_LLVM_VERSION}"
+          # llvm.sh installs clang, lldb, lld and clangd, but clang-tidy ships
+          # in its own package that the script does not pull in.
+          sudo apt-get install --no-install-recommends -y \
+            "clang-tidy-${CULLFINCH_LLVM_VERSION}"
           tidy="$(command -v "clang-tidy-${CULLFINCH_LLVM_VERSION}" || true)"
           if [ -z "${tidy}" ]; then
             echo "apt.llvm.org did not provide clang-tidy-${CULLFINCH_LLVM_VERSION}" >&2
