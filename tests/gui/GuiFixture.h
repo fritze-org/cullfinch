@@ -117,6 +117,50 @@ inline void settleWindow(QWidget* window) {
     QCoreApplication::processEvents();
 }
 
+/// Resize a window and wait until the size it is laid out at is the one asked
+/// for.
+///
+/// resize() only asks. On X11 the window manager answers with a
+/// ConfigureNotify that arrives after the call returns, and when the request
+/// races the window being mapped, that answer can carry the size the manager
+/// mapped it at instead. Qt adopts the requested size immediately, so size()
+/// cannot tell a granted request from one about to be taken back; the revert
+/// surfaces later as a relayout, moving widgets a test has already measured.
+/// That is precisely how the wall suite failed under X11 and nowhere else:
+/// tile geometry read before the revert, compared after it.
+///
+/// So the request is repeated whenever it is taken back, and accepted only
+/// once it has held still. Bounded and never fatal, like settleWindow(): a
+/// window manager is entitled to refuse a size, and a caller that cares can
+/// look at the result.
+inline bool settleWindowSize(QWidget* window, const QSize& size, int timeoutMs = 5000) {
+    if (window == nullptr) {
+        return false;
+    }
+    window->resize(size);
+    std::ignore = QTest::qWaitForWindowExposed(window, timeoutMs);
+
+    // Comfortably more than a round trip to the display server under load,
+    // which is what this is buying; the dozen calls the wall suite makes cost
+    // it a few seconds in total.
+    const int holdMs = 250;
+    QElapsedTimer overall;
+    QElapsedTimer held;
+    overall.start();
+    held.start();
+    while (overall.elapsed() < timeoutMs) {
+        if (window->size() != size) {
+            window->resize(size);
+            held.restart();
+        } else if (held.elapsed() >= holdMs) {
+            break;
+        }
+        QTest::qWait(10);
+    }
+    QCoreApplication::processEvents();
+    return window->size() == size;
+}
+
 /// Assert the Qt platform plugin actually in use, so an accidental fallback to
 /// offscreen never passes as a desktop-backend run.
 inline void requirePlatform(const QString& expected) {

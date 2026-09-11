@@ -20,6 +20,16 @@
 using namespace cullfinch;
 using cullfinch::guitests::GuiFixture;
 
+namespace {
+
+/// The size every wall test lays out at. Tile geometry is a function of the
+/// surface size, so readings taken at different sizes are not comparable --
+/// which is why the tests that compare two of them settle on this size again
+/// before the second one.
+const QSize kWallWindowSize(1000, 700);
+
+} // namespace
+
 class TestWallView : public QObject {
     Q_OBJECT
 
@@ -86,8 +96,7 @@ void TestWallView::startWallOn(int count) {
 
     shell_ = fixture_->window()->activeShell();
     QVERIFY(shell_ != nullptr);
-    shell_->resize(1000, 700);
-    guitests::settleWindow(shell_);
+    std::ignore = guitests::settleWindowSize(shell_, kWallWindowSize);
     view_ = dynamic_cast<views::wall::WallView*>(shell_->view());
     QVERIFY(view_ != nullptr);
 
@@ -231,7 +240,10 @@ void TestWallView::fixedPositionsKeepSurvivorsInPlaceUntilCompact() {
     QVERIFY(GuiFixture::waitFor([&]() { return session.summary().draftRejected.size() == 1; }));
     QCoreApplication::processEvents();
 
-    // Spatial memory is preserved: the survivor did not move.
+    // Spatial memory is preserved: the survivor did not move. Both readings
+    // have to be taken at the same surface size, so a window manager that
+    // revised it in between is undone first; it would move every tile.
+    std::ignore = guitests::settleWindowSize(shell_, kWallWindowSize);
     QCOMPARE(view_->surface()->tileFor(neighbour)->geometry(), before);
     QVERIFY(compact->isEnabled());
 
@@ -258,7 +270,9 @@ void TestWallView::undoReinstatesThePhotoAndItsPosition() {
     QVERIFY(GuiFixture::waitFor([&]() { return session.summary().remaining.size() == 6; }));
     QCoreApplication::processEvents();
 
-    // The same photo, in the same deterministic position.
+    // The same photo, in the same deterministic position -- read at the size
+    // the first reading was taken at, for the reason above.
+    std::ignore = guitests::settleWindowSize(shell_, kWallWindowSize);
     QCOMPARE(view_->surface()->order(), before);
     QCOMPARE(view_->surface()->tileFor(before.at(2))->geometry(), victimGeometry);
 }
