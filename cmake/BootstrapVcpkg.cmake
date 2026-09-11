@@ -380,7 +380,9 @@ if(CULLFINCH_OFFLINE)
   # its caches or fail with a precise report.
   set(ENV{VCPKG_DISABLE_METRICS} "1")
   set(ENV{X_VCPKG_ASSET_SOURCES} "x-block-origin")
-  list(APPEND VCPKG_INSTALL_OPTIONS "--only-downloads-from-cache")
+  # `--no-downloads` is vcpkg's own "never fetch new sources" switch; together with the blocked
+  # asset source above, anything not already in a cache is a hard failure with a named artefact.
+  list(APPEND VCPKG_INSTALL_OPTIONS "--no-downloads")
   set(VCPKG_INSTALL_OPTIONS
       "${VCPKG_INSTALL_OPTIONS}"
       CACHE STRING "" FORCE)

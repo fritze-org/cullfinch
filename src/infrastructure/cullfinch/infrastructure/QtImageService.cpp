@@ -41,6 +41,10 @@ QtImageService::QtImageService(QObject* parent) : application::IImageService(par
     // Bounded decoder concurrency: four workers initially.
     pool_.setMaxThreadCount(std::min(4, std::max(1, QThread::idealThreadCount() - 1)));
     pool_.setObjectName(QStringLiteral("cullfinch-decode"));
+    // QImageReader's allocation limit is process-global state. It is set
+    // here, on the owning thread, before any worker exists; the workers only
+    // read it, which is the one access pattern the API is safe for.
+    QImageReader::setAllocationLimit(allocationLimitMegabytes_);
 }
 
 QtImageService::~QtImageService() {
@@ -83,6 +87,9 @@ void QtImageService::setMaximumWorkers(int workers) {
 void QtImageService::setAllocationLimitMegabytes(int megabytes) {
     QMutexLocker locker(&mutex_);
     allocationLimitMegabytes_ = std::max(1, megabytes);
+    // Applied once, from the owning thread, rather than by every decode
+    // worker racing to store the same global.
+    QImageReader::setAllocationLimit(allocationLimitMegabytes_);
 }
 
 void QtImageService::cancel(quint64 requestId) {
@@ -129,12 +136,7 @@ quint64 QtImageService::request(const application::ImageRequest& request) {
         }
     }
 
-    int allocationLimit = 0;
-    {
-        QMutexLocker locker(&mutex_);
-        allocationLimit = allocationLimitMegabytes_;
-    }
-    std::ignore = QtConcurrent::run(&pool_, [this, request, requestId, key, allocationLimit]() {
+    std::ignore = QtConcurrent::run(&pool_, [this, request, requestId, key]() {
         application::ImageResult result;
         result.requestId = requestId;
         result.memberId = request.memberId;
@@ -147,7 +149,6 @@ quint64 QtImageService::request(const application::ImageRequest& request) {
 
         QImageReader reader(request.path);
         reader.setAutoTransform(true); // Honour the embedded orientation.
-        QImageReader::setAllocationLimit(allocationLimit);
 
         const QSize native = reader.size();
         if (!native.isValid()) {

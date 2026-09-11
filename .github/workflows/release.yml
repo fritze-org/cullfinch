@@ -68,18 +68,25 @@ jobs:
         run: cmake --install build/release --prefix "${{ github.workspace }}/stage"
 
       # Launching the deployed package is what catches a missing runtime
-      # dependency; a linked test cannot.
+      # dependency; a linked test cannot. On Linux the gate runs the installed
+      # binary under native Wayland with X11 unavailable and asserts which
+      # platform plugin loaded: a package that works only through XCB or
+      # offscreen does not satisfy the primary Linux target and must not ship.
       - name: Packaged application gate
         env:
-          QT_QPA_PLATFORM: offscreen
+          QT_QPA_PLATFORM: ${{ runner.os == 'macOS' && 'cocoa' || 'wayland' }}
+          CULLFINCH_EXPECTED_PLATFORM: ${{ runner.os == 'macOS' && 'cocoa' || 'wayland' }}
+          CULLFINCH_ARTIFACT_DIR: ${{ github.workspace }}/session-artifacts
         run: |
           if [ "${{ runner.os }}" = "macOS" ]; then
             binary="${{ github.workspace }}/stage/cullfinch.app/Contents/MacOS/cullfinch"
+            session=""
           else
             binary="${{ github.workspace }}/stage/bin/cullfinch"
+            session="tests/support/with-wayland.sh"
           fi
-          CULLFINCH_PACKAGED_BINARY="${binary}" ctest --preset release --label-regex package \
-            --output-on-failure
+          CULLFINCH_PACKAGED_BINARY="${binary}" ${session} \
+            ctest --preset release --label-regex package --output-on-failure
 
       - name: Record the dependency and licence inventory
         run: |
