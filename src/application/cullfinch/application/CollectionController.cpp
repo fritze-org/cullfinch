@@ -6,8 +6,8 @@
 
 namespace cullfinch::application {
 CollectionController::CollectionController(IAssetRepository& repository, IScanService& scanner,
-                                           QObject* parent)
-    : QObject(parent), repository_(repository), scanner_(scanner) {
+                                           ICollectionLock* lock, QObject* parent)
+    : QObject(parent), repository_(repository), scanner_(scanner), lock_(lock) {
     connect(&scanner_, &IScanService::scanBatch, this,
             [this](quint64 generation, const domain::PhotoAssetList& batch) {
                 if (generation != generation_) {
@@ -62,13 +62,33 @@ CollectionController::CollectionController(IAssetRepository& repository, IScanSe
             [this](const QString&) { refresh(); });
 }
 
+CollectionController::~CollectionController() {
+    if (lock_ != nullptr) {
+        lock_->release();
+    }
+}
+
 bool CollectionController::open(const QString& rootPath, bool recursive, QString* error) {
+    // The lock is taken before the collection record is touched: creating the
+    // record is itself a write, and a read-only instance must make none.
+    QString holder;
+    const bool writable = lock_ == nullptr || lock_->acquire(rootPath, &holder);
+
+    // A read-only instance only looks the collection up: ensureCollection()
+    // creates and updates rows, and that is the writer's business.
     QString storageError;
     const std::optional<domain::CollectionId> id =
-        repository_.ensureCollection(rootPath, recursive, &storageError);
+        writable ? repository_.ensureCollection(rootPath, recursive, &storageError)
+                 : repository_.findCollection(rootPath, &storageError);
     if (!id.has_value()) {
         if (error != nullptr) {
             *error = storageError;
+        }
+        if (writable && lock_ != nullptr) {
+            // Nothing was opened, so nothing may stay locked: another
+            // instance must not be refused for a collection this one has not
+            // got.
+            lock_->release();
         }
         return false;
     }
@@ -76,19 +96,30 @@ bool CollectionController::open(const QString& rootPath, bool recursive, QString
     collectionId_ = *id;
     rootPath_ = rootPath;
     recursive_ = recursive;
+    readOnly_ = !writable;
+    readOnlyReason_ = writable ? QString() : holder;
     revision_ = repository_.collectionRevision(collectionId_, &storageError);
     assets_ = repository_.loadAssets(collectionId_, &storageError);
 
     Q_EMIT collectionOpened(rootPath_);
+    Q_EMIT readOnlyChanged(readOnly_, readOnlyReason_);
     Q_EMIT revisionChanged(revision_);
     Q_EMIT assetsChanged();
+
+    if (readOnly_) {
+        // A scan reconciles into the database, which is the writer's job. The
+        // stored inventory is shown as it stands; reopening once the other
+        // instance has finished takes the lock and scans normally.
+        scanner_.setWatchEnabled(false);
+        return true;
+    }
     startScan();
     scanner_.setWatchEnabled(true);
     return true;
 }
 
 void CollectionController::refresh() {
-    if (!collectionId_.isValid()) {
+    if (!collectionId_.isValid() || readOnly_) {
         return;
     }
     startScan();
@@ -103,6 +134,14 @@ void CollectionController::close() {
     assets_.clear();
     revision_ = 0;
     scanning_ = false;
+    if (lock_ != nullptr) {
+        lock_->release();
+    }
+    if (readOnly_) {
+        readOnly_ = false;
+        readOnlyReason_.clear();
+        Q_EMIT readOnlyChanged(false, QString());
+    }
     Q_EMIT assetsChanged();
     Q_EMIT scanStateChanged(false);
 }

@@ -80,11 +80,27 @@ void WallSurface::setCandidates(const QList<domain::AssetId>& positions,
         tile->setObjectName(QStringLiteral("wallTile_") + id.toString());
         tile->setPresentation(presentations_.value(id), revision_);
         tile->setCaption(presentations_.value(id).displayName);
-        connect(tile, &ui::ImageCanvas::eliminateRequested, this, [this, id]() {
-            if (acceptGesture(id)) {
-                Q_EMIT eliminateRequested(id, revision_);
-            }
+        connect(tile, &ui::ImageCanvas::gestureArmed, this, [this, id, tile](const QPoint& at) {
+            armedTile_ = id;
+            armedRevision_ = revision_;
+            armedPosition_ = tile->mapTo(this, at);
         });
+        connect(tile, &ui::ImageCanvas::eliminateRequested, this,
+                [this, id, tile](ui::ImageCanvas::ActivationSource source) {
+                    // A pointer gesture is judged against the layout it was
+                    // pressed on. A key has no press, so it acts on the current
+                    // layout -- and never on whatever a cancelled pointer
+                    // gesture left behind.
+                    const bool pointer =
+                        source == ui::ImageCanvas::ActivationSource::Pointer && armedTile_ == id;
+                    const quint64 against = pointer ? armedRevision_ : revision_;
+                    const QPoint at =
+                        pointer ? armedPosition_ : tile->mapTo(this, tile->rect().center());
+                    armedTile_ = domain::AssetId{};
+                    if (acceptGesture(id, at)) {
+                        Q_EMIT eliminateRequested(id, against);
+                    }
+                });
         connect(tile, &ui::ImageCanvas::readinessChanged, this, [this, id](bool ready) {
             if (ready) {
                 recordAspect(id);
@@ -97,9 +113,8 @@ void WallSurface::setCandidates(const QList<domain::AssetId>& positions,
     relayout();
 }
 
-bool WallSurface::acceptGesture(const domain::AssetId& id) {
-    ui::ImageCanvas* tile = tiles_.value(id, nullptr);
-    if (tile == nullptr) {
+bool WallSurface::acceptGesture(const domain::AssetId& id, const QPoint& pointer) {
+    if (!tiles_.contains(id)) {
         return false;
     }
 
@@ -107,15 +122,20 @@ bool WallSurface::acceptGesture(const domain::AssetId& id) {
     // the pointer deliberately moved to another target. Finishing a layout
     // animation alone never rearms a second click at the same coordinates.
     const int interval = QGuiApplication::styleHints()->mouseDoubleClickInterval();
-    const QPoint pointer = tile->mapTo(this, tile->rect().center());
-    for (const VanishedTile& gone : vanished_) {
-        if (sinceStart_.elapsed() - gone.elapsedAtRemoval > interval) {
-            continue;
-        }
-        if (gone.region.contains(pointer)) {
-            return false;
+    if (const bool movedDeliberately =
+            lastGesturePosition_.x() >= 0 && (pointer - lastGesturePosition_).manhattanLength() >
+                                                 QGuiApplication::styleHints()->startDragDistance();
+        !movedDeliberately) {
+        for (const VanishedTile& gone : vanished_) {
+            if (sinceStart_.elapsed() - gone.elapsedAtRemoval > interval) {
+                continue;
+            }
+            if (gone.region.contains(pointer)) {
+                return false;
+            }
         }
     }
+    lastGesturePosition_ = pointer;
     return true;
 }
 

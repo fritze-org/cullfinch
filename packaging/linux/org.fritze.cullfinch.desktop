@@ -3,6 +3,7 @@ Type=Application
 Name=Cullfinch
 GenericName=Photo culling utility
 Comment=Compare photos side by side or on a wall and mark the rejects for deletion
+Icon=org.fritze.cullfinch
 Exec=cullfinch %f
 Terminal=false
 Categories=Graphics;Photography;Viewer;

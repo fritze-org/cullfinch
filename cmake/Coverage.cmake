@@ -99,9 +99,12 @@ add_custom_target(
   COMMAND "${CMAKE_COMMAND}" -E make_directory "${CULLFINCH_COVERAGE_DIR}/html"
   COMMAND
     ${_gcovr_command} --config "${PROJECT_SOURCE_DIR}/gcovr.cfg" --root "${PROJECT_SOURCE_DIR}"
-    --gcov-executable "${CULLFINCH_GCOV_EXECUTABLE}" --cobertura
+    --gcov-executable "${CULLFINCH_GCOV_EXECUTABLE}" --txt-summary --cobertura
     "${CULLFINCH_COVERAGE_DIR}/coverage.xml" --cobertura-pretty --html-details
-    "${CULLFINCH_COVERAGE_DIR}/html/index.html" --txt-summary "${PROJECT_BINARY_DIR}"
+    "${CULLFINCH_COVERAGE_DIR}/html/index.html"
+    # The build tree is gcovr's positional search path for .gcda/.gcno files; `--txt-summary` itself
+    # is a flag and takes no argument.
+    "${PROJECT_BINARY_DIR}"
   WORKING_DIRECTORY "${PROJECT_SOURCE_DIR}"
   COMMENT "Generating Cobertura XML and HTML coverage reports"
   VERBATIM)

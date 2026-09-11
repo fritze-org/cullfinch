@@ -46,7 +46,9 @@ private slots:
     void pauseSavesTheDraftAndResumeRestoresIt();
     void resumeRefusesWhenAGroupChangedUnderneath();
     void aFailedDraftWriteKeepsTheInMemoryDraft();
+    void aReadOnlyCollectionRefusesToSaveTheDraft();
     void aFailedMarkWriteLeavesMarksUnchanged();
+    void aFailedUndoWriteDropsTheHistoryWithoutTouchingMarks();
     void marksCannotChangeWhileAComparisonIsActive();
     void anArbitraryNewFlowRunsThroughTheSameController();
 
@@ -343,6 +345,28 @@ void TestSessionController::aFailedDraftWriteKeepsTheInMemoryDraft() {
     QVERIFY(session_->hasUnsavedChanges());
 }
 
+void TestSessionController::aReadOnlyCollectionRefusesToSaveTheDraft() {
+    QString error;
+    session_->start(QLatin1String(ConformanceFlow::kId), snapshotFor(assets_, collection_),
+                    domain::FlowOptions{}, &error);
+    session_->dispatch(QStringLiteral("drop"), QJsonObject{}, &error);
+
+    // The collection became read-only underneath a running comparison. No
+    // write reaches storage -- not the autosave, not a pause -- and the draft
+    // waits in memory until the collection is writable again.
+    dispositions_->setReadOnly(true);
+    QVERIFY2(!session_->flushPendingSave(&error), "a read-only collection must refuse the save");
+    QVERIFY(error.contains(QStringLiteral("read-only")));
+    QVERIFY(!session_->pause(&error));
+    QVERIFY(session_->isActive());
+    QCOMPARE(session_->summary().draftRejected.size(), 1);
+    QVERIFY(session_->hasUnsavedChanges());
+
+    dispositions_->setReadOnly(false);
+    QVERIFY2(session_->flushPendingSave(&error), qPrintable(error));
+    QVERIFY(!session_->hasUnsavedChanges());
+}
+
 void TestSessionController::aFailedMarkWriteLeavesMarksUnchanged() {
     QString error;
     session_->start(QLatin1String(ConformanceFlow::kId), snapshotFor(assets_, collection_),
@@ -358,6 +382,36 @@ void TestSessionController::aFailedMarkWriteLeavesMarksUnchanged() {
     // The history is dropped rather than left describing storage incorrectly.
     QVERIFY(dispositions_->isBlocked());
     QCOMPARE(dispositions_->undoStack()->count(), 0);
+}
+
+void TestSessionController::aFailedUndoWriteDropsTheHistoryWithoutTouchingMarks() {
+    QString error;
+    const domain::AssetId target = assets_.first().id;
+    QVERIFY2(dispositions_->applyRejections({target}, QStringLiteral("test"), &error),
+             qPrintable(error));
+    QCOMPARE(dispositions_->undoStack()->count(), 1);
+
+    QSignalSpy errors(dispositions_.get(), &application::DispositionController::errorOccurred);
+    repository_->failNextDispositionWrites(1);
+
+    // QUndoStack::undo() runs the command's undo() *before* the write is
+    // known to have failed. The controller must survive that call -- clearing
+    // the stack from inside the executing command deletes the command under
+    // its own feet -- and must leave the authoritative marks alone.
+    dispositions_->undoStack()->undo();
+
+    QVERIFY(dispositions_->isBlocked());
+    QCOMPARE(errors.size(), 1);
+    for (const domain::PhotoAsset& asset : repository_->loadAssets(collection_, nullptr)) {
+        QCOMPARE(asset.disposition,
+                 asset.id == target ? domain::Disposition::Reject : domain::Disposition::Neutral);
+    }
+
+    // The history is dropped once control is back in the event loop, and no
+    // further mark change is accepted until the collection is reloaded.
+    QTRY_COMPARE(dispositions_->undoStack()->count(), 0);
+    QVERIFY(!dispositions_->applyRejections({assets_.at(1).id}, QStringLiteral("test"), &error));
+    QVERIFY(!error.isEmpty());
 }
 
 void TestSessionController::marksCannotChangeWhileAComparisonIsActive() {

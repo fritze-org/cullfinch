@@ -11,6 +11,7 @@
 #include <QList>
 #include <QString>
 
+#include <functional>
 #include <optional>
 
 namespace cullfinch::application {
@@ -72,6 +73,11 @@ public:
     /// Create or find the collection for a root directory.
     virtual std::optional<domain::CollectionId>
     ensureCollection(const QString& rootPath, bool recursive, QString* error) = 0;
+
+    /// Find the collection for a root directory without creating or touching
+    /// it. A read-only instance uses this: it must write nothing.
+    [[nodiscard]] virtual std::optional<domain::CollectionId>
+    findCollection(const QString& rootPath, QString* error) const = 0;
     [[nodiscard]] virtual quint64 collectionRevision(const domain::CollectionId& id,
                                                      QString* error) const = 0;
 
@@ -106,6 +112,31 @@ public:
     unfinishedOperations(const domain::CollectionId& id, QString* error) const = 0;
 };
 
+/// Guards a collection against simultaneous cullfinch *writers*.
+///
+/// A second instance that cannot take the lock may still open the collection
+/// read-only. External tools are outside this lock entirely, which is exactly
+/// why every file operation revalidates its preconditions immediately before
+/// execution. Implemented in the infrastructure layer.
+class ICollectionLock {
+public:
+    ICollectionLock() = default;
+    virtual ~ICollectionLock() = default;
+    ICollectionLock(const ICollectionLock&) = delete;
+    ICollectionLock& operator=(const ICollectionLock&) = delete;
+    ICollectionLock(ICollectionLock&&) = delete;
+    ICollectionLock& operator=(ICollectionLock&&) = delete;
+
+    /// Take the writer lock for `collectionRoot`, releasing any other root
+    /// this lock currently holds.
+    ///
+    /// @param holder on false, describes the process that holds the lock,
+    ///        where the platform reports it.
+    virtual bool acquire(const QString& collectionRoot, QString* holder) = 0;
+    virtual void release() = 0;
+    [[nodiscard]] virtual bool isHeld() const = 0;
+};
+
 /// Moving a group to Trash. Behind an adapter so GUI tests can use a fake one
 /// and never touch the user's real Trash.
 class ITrashAdapter {
@@ -124,6 +155,12 @@ public:
     /// @return false on failure. Never falls back to permanent deletion.
     virtual bool moveToTrash(const QString& path, QString* resultingPath, QString* error) = 0;
 };
+
+/// Makes an operation record durable. The executor calls it before and after
+/// every step that moves a file, so an interruption at any point leaves a
+/// journal that says what was intended and what is known to have happened.
+/// @return false when the record could not be written; the run then stops.
+using JournalWriter = std::function<bool(const OperationRecord& record, QString* error)>;
 
 /// Executes a reviewed plan: recoverable same-filesystem staging, then one
 /// Trash call on the completed group directory.
@@ -145,8 +182,12 @@ public:
                                                            QString* error) const = 0;
 
     /// Run one group to completion or to a recorded recoverable state.
+    ///
+    /// `journal` is invoked with the record as each step is about to happen
+    /// and again once it has; a journal write that fails stops the group.
     virtual OperationRecord executeGroup(const OperationRecord& record,
-                                         const domain::PlannedGroup& group) = 0;
+                                         const domain::PlannedGroup& group,
+                                         const JournalWriter& journal) = 0;
 
     /// Reconcile a journal after a crash or an interrupted run.
     virtual OperationRecord recover(const OperationRecord& record) = 0;

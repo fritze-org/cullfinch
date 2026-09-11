@@ -49,14 +49,24 @@ public:
     /// True once a storage failure has invalidated the undo history.
     [[nodiscard]] bool isBlocked() const { return blocked_; }
 
+    /// Set while another instance holds the collection's writer lock. Every
+    /// mark change is refused; nothing about the history is invalidated.
+    void setReadOnly(bool readOnly);
+    [[nodiscard]] bool isReadOnly() const { return readOnly_; }
+
     /// Enabled while no comparison draft is active: changing collection marks
     /// underneath a running session is not allowed.
     void setMarkingEnabled(bool enabled);
     [[nodiscard]] bool isMarkingEnabled() const { return markingEnabled_; }
 
-    /// Called by the undo commands. Public so the command type stays a plain
+    /// Persist a mark change. Public so the command type stays a plain
     /// implementation detail of this translation unit.
     bool persist(const QHash<domain::AssetId, domain::Disposition>& targets, QString* error);
+
+    /// Called by the undo commands from inside QUndoStack::undo()/redo().
+    /// A refused write must not clear the stack synchronously from here:
+    /// that would delete the executing command.
+    void applyFromHistory(const QHash<domain::AssetId, domain::Disposition>& targets);
 
 signals:
     void dispositionsChanged(const QList<cullfinch::domain::AssetId>& affected, quint64 revision);
@@ -70,7 +80,10 @@ private:
     domain::CollectionId collectionId_;
     quint64 revision_ = 0;
     bool blocked_ = false;
+    bool readOnly_ = false;
     bool markingEnabled_ = true;
+    /// True while a QUndoCommand is executing against this controller.
+    bool applyingFromHistory_ = false;
 };
 
 } // namespace cullfinch::application

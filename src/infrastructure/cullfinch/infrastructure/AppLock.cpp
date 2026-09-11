@@ -10,26 +10,44 @@
 
 namespace cullfinch::infrastructure {
 
-AppLock::AppLock(const QString& collectionRoot) {
-    // The lock lives beside the metadata, not in the collection: writing to the
-    // photo directory must never be a precondition for browsing it.
+namespace {
+
+/// One name per directory, however it was spelled: a symlink to the
+/// collection and the collection itself must contend for the same lock, or
+/// the lock protects nothing. Canonical form needs the path to exist, which a
+/// collection root does; anything else falls back to the absolute spelling.
+QString identityOf(const QString& collectionRoot) {
+    const QFileInfo info(collectionRoot);
+    const QString canonical = info.canonicalFilePath();
+    return canonical.isEmpty() ? info.absoluteFilePath() : canonical;
+}
+
+} // namespace
+
+QString AppLock::lockFileFor(const QString& collectionRoot) {
     QCryptographicHash hash(QCryptographicHash::Sha1);
-    hash.addData(QFileInfo(collectionRoot).absoluteFilePath().toUtf8());
+    hash.addData(identityOf(collectionRoot).toUtf8());
     const QString name = QStringLiteral("collection-%1.lock")
                              .arg(QString::fromLatin1(hash.result().toHex().left(16)));
-    lock_ =
-        std::make_unique<QLockFile>(QDir(Paths::applicationDataDirectory()).absoluteFilePath(name));
-    lock_->setStaleLockTime(0); // Never steal a lock automatically.
+    return QDir(Paths::applicationDataDirectory()).absoluteFilePath(name);
 }
 
 AppLock::~AppLock() {
     release();
 }
 
-bool AppLock::acquire(QString* holder) {
-    if (held_) {
+bool AppLock::acquire(const QString& collectionRoot, QString* holder) {
+    const QString root = identityOf(collectionRoot);
+    if (held_ && root_ == root) {
         return true;
     }
+    release();
+
+    root_ = root;
+    lock_ = std::make_unique<QLockFile>(lockFileFor(root));
+    // Never steal a lock automatically: a stale-looking lock may belong to a
+    // process that is merely busy, and taking it would allow two writers.
+    lock_->setStaleLockTime(0);
     if (lock_->tryLock(0)) {
         held_ = true;
         return true;
@@ -47,9 +65,10 @@ bool AppLock::acquire(QString* holder) {
                           .arg(hostname);
         } else {
             *holder = QCoreApplication::translate(
-                "cullfinch", "Another cullfinch window has this collection open.");
+                "cullfinch", "Another Cullfinch window has this collection open.");
         }
     }
+    lock_.reset();
     return false;
 }
 
@@ -57,7 +76,9 @@ void AppLock::release() {
     if (held_ && lock_ != nullptr) {
         lock_->unlock();
     }
+    lock_.reset();
     held_ = false;
+    root_.clear();
 }
 
 } // namespace cullfinch::infrastructure

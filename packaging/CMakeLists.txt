@@ -8,4 +8,10 @@ if(CMAKE_SYSTEM_NAME STREQUAL "Linux")
           DESTINATION ${CMAKE_INSTALL_DATAROOTDIR}/applications)
   install(FILES linux/org.fritze.cullfinch.metainfo.xml
           DESTINATION ${CMAKE_INSTALL_DATAROOTDIR}/metainfo)
+  # Named after the desktop id so the compositor can find it from the app id alone: on Wayland there
+  # is no window-class fallback, and setDesktopFileName() is the only link.
+  install(FILES linux/icons/org.fritze.cullfinch.svg
+          DESTINATION ${CMAKE_INSTALL_DATAROOTDIR}/icons/hicolor/scalable/apps)
+  install(FILES linux/icons/org.fritze.cullfinch.png
+          DESTINATION ${CMAKE_INSTALL_DATAROOTDIR}/icons/hicolor/256x256/apps)
 endif()

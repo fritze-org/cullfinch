@@ -51,9 +51,21 @@ class CollectionController : public QObject {
     Q_OBJECT
 
 public:
+    /// @param lock optional writer lock. Without one every open is writable,
+    ///        which is what the controller tests want; the composition root
+    ///        always supplies the real one.
     CollectionController(IAssetRepository& repository, IScanService& scanner,
-                         QObject* parent = nullptr);
+                         ICollectionLock* lock = nullptr, QObject* parent = nullptr);
+    ~CollectionController() override;
 
+    CollectionController(const CollectionController&) = delete;
+    CollectionController& operator=(const CollectionController&) = delete;
+    CollectionController(CollectionController&&) = delete;
+    CollectionController& operator=(CollectionController&&) = delete;
+
+    /// Open a collection. Succeeds even when another Cullfinch instance holds
+    /// the writer lock: the collection is then opened read-only, which
+    /// `isReadOnly()` and `readOnlyChanged` report.
     bool open(const QString& rootPath, bool recursive, QString* error);
     void refresh();
     void close();
@@ -62,6 +74,11 @@ public:
     [[nodiscard]] quint64 revision() const { return revision_; }
     [[nodiscard]] QString rootPath() const { return rootPath_; }
     [[nodiscard]] bool isScanning() const { return scanning_; }
+
+    /// True when another instance holds the writer lock. Marks, drafts and
+    /// file operations are refused; browsing the stored collection is not.
+    [[nodiscard]] bool isReadOnly() const { return readOnly_; }
+    [[nodiscard]] QString readOnlyReason() const { return readOnlyReason_; }
 
     [[nodiscard]] const domain::PhotoAssetList& assets() const { return assets_; }
     [[nodiscard]] const domain::PhotoAsset* asset(const domain::AssetId& id) const;
@@ -82,6 +99,8 @@ signals:
     /// expected revision for optimistic concurrency has to follow it, or
     /// its next write is refused as a phantom conflict.
     void revisionChanged(quint64 revision);
+    /// Emitted on every open. `reason` names the holder when read-only.
+    void readOnlyChanged(bool readOnly, const QString& reason);
     void assetsChanged();
     void scanStateChanged(bool scanning);
     void errorOccurred(const QString& message);
@@ -92,8 +111,11 @@ private:
 
     IAssetRepository& repository_;
     IScanService& scanner_;
+    ICollectionLock* lock_ = nullptr;
 
     domain::CollectionId collectionId_;
+    bool readOnly_ = false;
+    QString readOnlyReason_;
     QString rootPath_;
     bool recursive_ = false;
     quint64 revision_ = 0;

@@ -1,14 +1,19 @@
 // SPDX-License-Identifier: GPL-3.0-or-later
 #include "GuiFixture.h"
 
+#include <cullfinch/domain/SelectionSnapshot.h>
 #include <cullfinch/ui/ReviewDialog.h>
 
+#include <QAbstractItemModelTester>
 #include <QAction>
 #include <QItemSelectionModel>
 #include <QJsonObject>
 #include <QKeySequence>
 #include <QLabel>
 #include <QListView>
+#include <QMenu>
+#include <QSignalSpy>
+#include <QTemporaryDir>
 #include <QTest>
 
 using namespace cullfinch;
@@ -31,6 +36,10 @@ private slots:
     void wallFlowEndToEndAppliesMarksAndSelectsSurvivors();
     void unmarkRestoresEligibility();
     void reviewCountsPhysicalFilesForTheWholeGroup();
+    void aSecondInstanceOpensTheCollectionReadOnly();
+    void closingTheBrowserPausesAnActiveComparison();
+    void openingAnotherDirectoryPausesAnActiveComparison();
+    void theListModelSatisfiesTheModelTester();
 
 private:
     std::unique_ptr<GuiFixture> fixture_;
@@ -212,6 +221,162 @@ void TestBrowserWindow::reviewCountsPhysicalFilesForTheWholeGroup() {
     QVERIFY(summary->text().contains(QStringLiteral("4 files")));
     // Executing is a separate, explicit action.
     QVERIFY(!dialog.executionRequested());
+}
+
+void TestBrowserWindow::aSecondInstanceOpensTheCollectionReadOnly() {
+    // The fixture's window holds the writer lock. A second composition
+    // against the same application data root is exactly a second launch.
+    app::CompositionRoot::Options options;
+    options.dataDirectory = fixture_->dataDirectory();
+    options.cacheDirectory = fixture_->cacheDirectory();
+    options.trashAdapter = &fixture_->trash();
+    app::CompositionRoot second(options);
+    QString error;
+    QVERIFY2(second.initialise(&error), qPrintable(error));
+    std::unique_ptr<ui::BrowserWindow> window(second.createBrowserWindow());
+
+    QSignalSpy readOnly(&second.collection(), &application::CollectionController::readOnlyChanged);
+    QVERIFY2(window->openDirectory(fixture_->collection().path()),
+             "a held lock downgrades the open; it does not refuse it");
+    QVERIFY(second.collection().isReadOnly());
+    QVERIFY(!second.collection().readOnlyReason().isEmpty());
+    QCOMPARE(readOnly.size(), 1);
+    QVERIFY(readOnly.first().at(0).toBool());
+
+    // The stored inventory is browsable without a scan of our own...
+    QCOMPARE(window->model()->rowCount(), 6);
+    const auto* indicator = window->findChild<QLabel*>(QStringLiteral("readOnlyIndicator"));
+    QVERIFY(indicator != nullptr && !indicator->text().isEmpty());
+
+    // ...but nothing that writes is accepted: no draft, no mark, no operation.
+    const domain::AssetId first = window->model()->idForRow(0);
+    window->selectAssets({first, window->model()->idForRow(1)});
+    QVERIFY(!window->startFlow(QStringLiteral("image-wall")));
+    QVERIFY(window->activeShell() == nullptr);
+    QVERIFY(!second.dispositions().applyRejections({first}, QStringLiteral("test"), &error));
+    QVERIFY(!error.isEmpty());
+    QVERIFY(!second.dispositions().unmark({first}, &error));
+    QVERIFY(!second.session().resume(application::StoredSession{}, second.collection().assets(),
+                                     &error));
+    QVERIFY2(error.contains(QStringLiteral("read-only")), qPrintable(error));
+    // Callers that do not want the reason still get the refusal.
+    QVERIFY(!second.dispositions().applyRejections({first}, QStringLiteral("test"), nullptr));
+    QVERIFY(!second.dispositions().unmark({first}, nullptr));
+    QVERIFY(!second.session().start(
+        QStringLiteral("image-wall"),
+        domain::SelectionSnapshot::freeze(second.collection().collectionId(), 1,
+                                          second.collection().assets()),
+        domain::FlowOptions{}, nullptr));
+    // A refresh is a rescan, and a rescan is a write: refused too.
+    second.collection().refresh();
+    QVERIFY(!second.collection().isScanning());
+    auto* review = window->findChild<QAction*>(QStringLiteral("actionReviewOperations"));
+    QVERIFY(review != nullptr && !review->isEnabled());
+    // The action is disabled, but the guard behind it holds on its own: a
+    // shortcut or a stale menu that reaches it is refused with a reason.
+    QSignalSpy refused(window.get(), &ui::BrowserWindow::errorOccurred);
+    review->setEnabled(true);
+    review->trigger();
+    QCOMPARE(refused.size(), 1);
+    QVERIFY(refused.first().at(0).toString().contains(QStringLiteral("read-only")));
+    const auto* compare = window->findChild<QMenu*>(QStringLiteral("compareMenu"));
+    QVERIFY(compare != nullptr && !compare->isEnabled());
+
+    // Closing clears the state, and once the first window lets go, reopening
+    // takes the lock and scans.
+    second.collection().close();
+    QVERIFY(!second.collection().isReadOnly());
+    QCOMPARE(readOnly.size(), 2);
+    second.collection().refresh(); // Nothing open: nothing to scan.
+    QVERIFY(!second.collection().isScanning());
+    fixture_->root().collection().close();
+    QVERIFY(window->openDirectory(fixture_->collection().path()));
+    QVERIFY(!second.collection().isReadOnly());
+    QVERIFY(compare != nullptr && compare->isEnabled());
+    QVERIFY(GuiFixture::waitFor([&]() { return !second.collection().isScanning(); }));
+    QCOMPARE(window->model()->rowCount(), 6);
+}
+
+void TestBrowserWindow::closingTheBrowserPausesAnActiveComparison() {
+    fixture_->window()->selectAssets({fixture_->window()->model()->idForRow(0),
+                                      fixture_->window()->model()->idForRow(1),
+                                      fixture_->window()->model()->idForRow(2)});
+    QVERIFY(fixture_->window()->startFlow(QStringLiteral("image-wall")));
+    application::SessionController& session = fixture_->root().session();
+
+    QJsonObject payload;
+    payload.insert(QStringLiteral("assetId"), session.summary().remaining.at(1).toString());
+    QString error;
+    QVERIFY2(session.dispatch(QStringLiteral("eliminate"), payload, &error), qPrintable(error));
+    // The autosave is coalesced; the write has not happened yet.
+    QVERIFY(session.hasUnsavedChanges());
+
+    // Closing the browser takes the comparison with it. That is a pause with
+    // the draft written first -- never a silent apply, discard, or a lost
+    // autosave.
+    QVERIFY(fixture_->window()->close());
+    QVERIFY(!session.isActive());
+    QCOMPARE(fixture_->root().collection().rejectedCount(), 0);
+
+    const QList<application::StoredSession> saved = fixture_->root().repository().resumableSessions(
+        fixture_->root().collection().collectionId(), &error);
+    QCOMPARE(saved.size(), 1);
+    QCOMPARE(saved.first().lifecycle, application::SessionLifecycle::Paused);
+    QCOMPARE(saved.first().draftRejected.size(), 1);
+}
+
+void TestBrowserWindow::openingAnotherDirectoryPausesAnActiveComparison() {
+    fixture_->window()->selectAssets({fixture_->window()->model()->idForRow(0),
+                                      fixture_->window()->model()->idForRow(1),
+                                      fixture_->window()->model()->idForRow(2)});
+    QVERIFY(fixture_->window()->startFlow(QStringLiteral("image-wall")));
+    application::SessionController& session = fixture_->root().session();
+    const domain::CollectionId original = fixture_->root().collection().collectionId();
+
+    QJsonObject payload;
+    payload.insert(QStringLiteral("assetId"), session.summary().remaining.at(1).toString());
+    QString error;
+    QVERIFY2(session.dispatch(QStringLiteral("eliminate"), payload, &error), qPrintable(error));
+    QVERIFY(session.hasUnsavedChanges());
+
+    // The comparison belongs to the collection it started on. Opening a
+    // different directory pauses it, draft written, before the collection
+    // changes underneath it; a comparison must never outlive its collection
+    // or carry on against one that may have opened read-only.
+    const QTemporaryDir elsewhere;
+    QVERIFY(elsewhere.isValid());
+    QVERIFY(fixture_->window()->openDirectory(elsewhere.path()));
+    QVERIFY(!session.isActive());
+    QVERIFY(fixture_->root().collection().collectionId().toString() != original.toString());
+
+    const QList<application::StoredSession> saved =
+        fixture_->root().repository().resumableSessions(original, &error);
+    QCOMPARE(saved.size(), 1);
+    QCOMPARE(saved.first().lifecycle, application::SessionLifecycle::Paused);
+    QCOMPARE(saved.first().draftRejected.size(), 1);
+}
+
+void TestBrowserWindow::theListModelSatisfiesTheModelTester() {
+    // Qt's own contract checker for QAbstractItemModel: every signal the
+    // model emits while assets, marks and generations change is validated
+    // against what the views are entitled to assume.
+    QAbstractItemModelTester tester(fixture_->window()->model(),
+                                    QAbstractItemModelTester::FailureReportingMode::QtTest);
+
+    const domain::AssetId target = fixture_->window()->model()->idForRow(0);
+    QString error;
+    QVERIFY(
+        fixture_->root().dispositions().applyRejections({target}, QStringLiteral("test"), &error));
+    QVERIFY(
+        GuiFixture::waitFor([&]() { return fixture_->root().collection().rejectedCount() == 1; }));
+    QVERIFY(fixture_->root().dispositions().unmark({target}, &error));
+    QVERIFY(
+        GuiFixture::waitFor([&]() { return fixture_->root().collection().rejectedCount() == 0; }));
+
+    // A rescan republishes the whole set.
+    fixture_->collection().addJpeg(QStringLiteral("IMG_7.JPG"));
+    QVERIFY(fixture_->openCollection(7));
+    QCOMPARE(fixture_->window()->model()->rowCount(), 7);
 }
 
 QTEST_MAIN(TestBrowserWindow)

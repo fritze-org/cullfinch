@@ -14,6 +14,19 @@ target_include_directories(cullfinch_composition PUBLIC "${CMAKE_CURRENT_SOURCE_
 
 qt_add_executable(cullfinch_app main.cpp)
 
+# The raster icon travels inside the binary for QGuiApplication::setWindowIcon(): X11 and the task
+# switcher on compatibility desktops take the icon from the window, not from the theme. The PNG is
+# used rather than the SVG because the pinned Qt build carries no SVG icon engine.
+qt_add_resources(
+  cullfinch_app
+  "cullfinch_icons"
+  PREFIX
+  "/icons"
+  BASE
+  "${PROJECT_SOURCE_DIR}/packaging/linux/icons"
+  FILES
+  "${PROJECT_SOURCE_DIR}/packaging/linux/icons/org.fritze.cullfinch.png")
+
 set_target_properties(
   cullfinch_app
   PROPERTIES AUTOMOC ON
@@ -75,6 +88,24 @@ if(APPLE)
   endif()
   install(FILES $<TARGET_FILE:Qt6::QSQLiteDriverPlugin>
           DESTINATION "cullfinch.app/Contents/PlugIns/sqldrivers")
+
+  # The helper deploys what the executable links, under the names the executable asks for, and
+  # rewrites only the plugins it deploys itself. The driver above was linked inside the Qt build,
+  # before vcpkg rewrote the install names, so it asks for libQt6Sql by its soname
+  # (libQt6Sql.6.dylib) where the bundle holds only the executable's spelling
+  # (libQt6Sql.6.11.1.dylib), and for vcpkg's sqlite3, which nothing else in the bundle needs. The
+  # packaged smoke test showed the result: "can not load requested driver 'QSQLITE', available
+  # drivers: QSQLITE". Both travel by hand under the names the driver asks for; the rpath the helper
+  # gives the executable makes Contents/Frameworks visible to every plugin it loads.
+  find_package(unofficial-sqlite3 CONFIG REQUIRED)
+  foreach(dependency IN ITEMS unofficial::sqlite3::sqlite3 Qt6::Sql)
+    install(
+      FILES $<TARGET_FILE:${dependency}>
+      DESTINATION "cullfinch.app/Contents/Frameworks"
+      RENAME
+        $<IF:$<BOOL:$<TARGET_SONAME_FILE_NAME:${dependency}>>,$<TARGET_SONAME_FILE_NAME:${dependency}>,$<TARGET_FILE_NAME:${dependency}>>
+    )
+  endforeach()
 endif()
 
 if(CMAKE_SYSTEM_NAME STREQUAL "Linux")

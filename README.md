@@ -99,6 +99,29 @@ offscreen fails instead of passing under a backend nobody asked for. The Wayland
 for a real client connection rather than for a socket to appear, and unsets `DISPLAY` so
 XWayland cannot rescue a broken native path.
 
+## Branch protection
+
+The repository's protection rules live in [`.github/rulesets/`](.github/rulesets/) as GitHub
+ruleset definitions, so what protects `main` is reviewed like everything else:
+
+| Ruleset | Applies to | What it enforces |
+|---|---|---|
+| [`main.json`](.github/rulesets/main.json) | the default branch | No deletion, no force-push; changes arrive through a pull request with every review thread resolved; the `Required checks` aggregation job and the SonarCloud quality gate must pass on a head that is up to date with `main`. Repository admins may bypass only through a pull request, never by pushing directly. |
+| [`release-tags.json`](.github/rulesets/release-tags.json) | `v*` tags | A release tag can neither be moved nor deleted once it exists. |
+
+`Required checks` is the one job that depends on every required CI job (pre-commit on both
+platforms, every build-and-test entry, clang-tidy and coverage), so it is the single Actions
+context a ruleset needs to name; `codecov/patch` stays informational, as `codecov.yml` records.
+Each required check is bound to the GitHub App that reports it (`integration_id` 15368 for
+Actions, 12526 for SonarCloud), so a status with the same name from any other source does not
+satisfy it.
+The main ruleset requires no approving review because the project currently has one maintainer;
+raise `required_approving_review_count` to 1 once a second maintainer can review.
+
+To apply or update them: *Settings → Rules → Rulesets → New ruleset → Import a ruleset*, and
+choose the file. Importing needs repository admin rights, which is why this is a checked-in
+definition rather than something CI can do.
+
 ## Layout
 
 ```text
@@ -130,11 +153,14 @@ ConformanceFlow.h` is the fixture that keeps that claim honest.
 - Undo history for comparisons lives only within a run. Saved drafts and deletion marks survive
   a restart; the undo stack does not.
 - A completed group appears in Trash as a *directory*. Restoring it from the desktop does not
-  restore the original individual file paths — the manifest inside it exists so cullfinch can.
+  restore the original individual file paths — the manifest inside it exists so Cullfinch can.
 - Deletion requires a writable staging location on the same filesystem as the photos, and all of
   a group's files must be on one filesystem.
-- RAW files are opaque companions. cullfinch never decodes them and makes no claim to support
+- RAW files are opaque companions. Cullfinch never decodes them and makes no claim to support
   any RAW format's contents.
+- One Cullfinch instance writes to a collection at a time. A second instance that opens the same
+  directory gets it read-only: it shows the inventory as last stored, does not rescan, and refuses
+  marks, comparisons and file operations until the first instance closes the collection.
 - Fullscreen restores the window's previous *size* and state, not its exact desktop position:
   Wayland does not let a client place its own window, and `QWindow::setPosition()` is documented
   as unsupported there.

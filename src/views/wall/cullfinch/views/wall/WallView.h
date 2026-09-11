@@ -47,7 +47,7 @@ protected:
 private:
     void relayout();
     void recordAspect(const domain::AssetId& id);
-    [[nodiscard]] bool acceptGesture(const domain::AssetId& id);
+    [[nodiscard]] bool acceptGesture(const domain::AssetId& id, const QPoint& pointer);
 
     application::IImageService& images_;
     /// Every wall position, placeholders included.
@@ -69,7 +69,17 @@ private:
     };
     QList<VanishedTile> vanished_;
     QElapsedTimer sinceStart_;
+    /// Where the last accepted gesture landed, in surface coordinates. A
+    /// click that lands somewhere else is a deliberate new target even
+    /// inside a region a tile just left.
     QPoint lastGesturePosition_{-1, -1};
+
+    /// The gesture currently in flight, captured at press: the layout
+    /// revision it was made against and where the pointer was. The release
+    /// reports against *these*, never against whatever the layout is by then.
+    domain::AssetId armedTile_;
+    quint64 armedRevision_ = 0;
+    QPoint armedPosition_{-1, -1};
 };
 
 /// The wall flow's view: layout controls plus the tile surface.

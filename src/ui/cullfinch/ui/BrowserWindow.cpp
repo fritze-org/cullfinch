@@ -7,6 +7,7 @@
 #include <QAction>
 #include <QActionGroup>
 #include <QApplication>
+#include <QCloseEvent>
 #include <QComboBox>
 #include <QFileDialog>
 #include <QItemSelectionModel>
@@ -73,7 +74,7 @@ bool AssetFilterProxy::filterAcceptsRow(int sourceRow, const QModelIndex& source
 BrowserWindow::BrowserWindow(const AppContext& context, QWidget* parent)
     : QMainWindow(parent), context_(context) {
     setObjectName(QStringLiteral("browserWindow"));
-    setWindowTitle(tr("cullfinch"));
+    setWindowTitle(tr("Cullfinch"));
     resize(1100, 760);
 
     buildCentralWidget();
@@ -86,6 +87,18 @@ BrowserWindow::BrowserWindow(const AppContext& context, QWidget* parent)
     connect(&context_.collection, &application::CollectionController::scanStateChanged, this,
             [this](bool scanning) {
                 statusBar()->showMessage(scanning ? tr("Scanning…") : tr("Ready"), 4000);
+            });
+    connect(&context_.collection, &application::CollectionController::readOnlyChanged, this,
+            [this](bool readOnly, const QString& reason) {
+                // Browsing stays available; everything that writes is
+                // refused and says why, rather than failing at the first
+                // click.
+                readOnlyLabel_->setText(readOnly ? tr("Read-only") : QString());
+                readOnlyLabel_->setToolTip(reason);
+                if (readOnly) {
+                    reportError(tr("Opened read-only: %1").arg(reason));
+                }
+                refreshStatus();
             });
     connect(&context_.collection, &application::CollectionController::diagnosticsChanged, this,
             [this](const QStringList& diagnostics) {
@@ -103,7 +116,7 @@ BrowserWindow::BrowserWindow(const AppContext& context, QWidget* parent)
     connect(&context_.dispositions, &application::DispositionController::errorOccurred, this,
             &BrowserWindow::reportError);
     connect(&context_.dispositions, &application::DispositionController::markingEnabledChanged,
-            this, [this](bool enabled) { unmarkAction_->setEnabled(enabled); });
+            this, [this](bool) { refreshStatus(); });
 
     connect(&context_.session, &application::SessionController::errorOccurred, this,
             [this](const QString& message) { statusBar()->showMessage(message, 6000); });
@@ -155,6 +168,9 @@ void BrowserWindow::buildCentralWidget() {
     diagnosticsLabel_ = new QLabel(status);
     diagnosticsLabel_->setObjectName(QStringLiteral("diagnosticsCount"));
     status->addPermanentWidget(diagnosticsLabel_);
+    readOnlyLabel_ = new QLabel(status);
+    readOnlyLabel_->setObjectName(QStringLiteral("readOnlyIndicator"));
+    status->addPermanentWidget(readOnlyLabel_);
 }
 
 void BrowserWindow::buildMenus() {
@@ -253,6 +269,20 @@ void BrowserWindow::buildMenus() {
 }
 
 bool BrowserWindow::openDirectory(const QString& path) {
+    // A comparison belongs to the collection it was started on. Opening a
+    // directory pauses it first, with the draft written while that collection
+    // is still the writable one; a draft that cannot be written keeps the
+    // current collection open rather than leaving the comparison stranded on
+    // a collection that may open read-only.
+    if (context_.session.isActive()) {
+        if (QString pauseError; !context_.session.pause(&pauseError)) {
+            reportError(pauseError);
+            return false;
+        }
+        if (shell_ != nullptr) {
+            shell_->close();
+        }
+    }
     QString error;
     if (!context_.collection.open(path, recursiveAction_->isChecked(), &error)) {
         reportError(error);
@@ -260,7 +290,7 @@ bool BrowserWindow::openDirectory(const QString& path) {
     }
     ++presentationGeneration_;
     pathLabel_->setText(path);
-    setWindowTitle(tr("cullfinch — %1").arg(path));
+    setWindowTitle(tr("Cullfinch — %1").arg(path));
     offerResume();
     return true;
 }
@@ -279,9 +309,11 @@ void BrowserWindow::refreshAssets() {
 }
 
 void BrowserWindow::refreshStatus() {
+    const bool writable = !context_.collection.isReadOnly();
     const int rejected = context_.collection.rejectedCount();
     rejectionLabel_->setText(tr("%1 marked for deletion").arg(rejected));
-    reviewAction_->setEnabled(rejected > 0);
+    reviewAction_->setEnabled(writable && rejected > 0);
+    compareMenu_->setEnabled(writable);
 
     const QList<domain::AssetId> selected = selectedAssetIds();
     bool anyRejectedSelected = false;
@@ -292,7 +324,8 @@ void BrowserWindow::refreshStatus() {
             break;
         }
     }
-    unmarkAction_->setEnabled(anyRejectedSelected && context_.dispositions.isMarkingEnabled());
+    unmarkAction_->setEnabled(writable && anyRejectedSelected &&
+                              context_.dispositions.isMarkingEnabled());
 }
 
 QList<domain::AssetId> BrowserWindow::selectedAssetIds() const {
@@ -420,6 +453,11 @@ void BrowserWindow::unmarkSelection() {
 }
 
 void BrowserWindow::reviewFileOperations() {
+    if (context_.collection.isReadOnly()) {
+        reportError(tr("This collection is open read-only; file operations belong to the window "
+                       "that has it open for writing."));
+        return;
+    }
     const domain::PhotoAssetList rejected = context_.collection.rejectedAssets();
     if (rejected.isEmpty()) {
         statusBar()->showMessage(tr("Nothing is marked for deletion."), 4000);
@@ -485,8 +523,10 @@ bool BrowserWindow::resumeSession(const application::StoredSession& stored, QStr
 }
 
 void BrowserWindow::offerResume() {
-    if (!resumePrompt_) {
-        return; // Nobody to ask; the draft stays saved and untouched.
+    if (!resumePrompt_ || context_.collection.isReadOnly()) {
+        // Nobody to ask, or nobody entitled to answer: the draft stays saved
+        // and untouched for the writer.
+        return;
     }
 
     QString error;
@@ -525,6 +565,24 @@ void BrowserWindow::reportError(const QString& message) {
     statusBar()->showMessage(message, 8000);
     statusBar()->setToolTip(message);
     Q_EMIT errorOccurred(message);
+}
+
+void BrowserWindow::closeEvent(QCloseEvent* event) {
+    // The comparison shell is this window's child, so closing the browser
+    // takes the comparison down with it. That is a pause -- the draft is
+    // written first -- never a silent apply or discard, and never a lost
+    // autosave. The shell's own close event covers only the shell.
+    if (context_.session.isActive()) {
+        if (QString error; !context_.session.pause(&error)) {
+            reportError(error);
+            event->ignore();
+            return;
+        }
+        if (shell_ != nullptr) {
+            shell_->close();
+        }
+    }
+    QMainWindow::closeEvent(event);
 }
 
 void BrowserWindow::changeEvent(QEvent* event) {
