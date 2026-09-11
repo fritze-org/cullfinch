@@ -567,8 +567,8 @@ OperationRecord StagingExecutor::recover(const OperationRecord& input) {
 
             // A file in staging is only put back when it is the file that was
             // reviewed. Existence alone proves nothing after a crash.
-            const domain::FileFingerprint actual = fingerprintOf(staged);
-            if (!actual.isKnown() || actual.sizeBytes != member.expected.sizeBytes) {
+            if (const domain::FileFingerprint actual = fingerprintOf(staged);
+                !actual.isKnown() || actual.sizeBytes != member.expected.sizeBytes) {
                 problems.append(tr("'%1' is in staging but is not the file that was reviewed "
                                    "(its size differs); it was left where it is.")
                                     .arg(member.fileName));
@@ -577,8 +577,7 @@ OperationRecord StagingExecutor::recover(const OperationRecord& input) {
                 continue;
             }
 
-            QString moveError;
-            if (!renameOnly(staged, entry.sourcePath, &moveError)) {
+            if (QString moveError; !renameOnly(staged, entry.sourcePath, &moveError)) {
                 problems.append(moveError);
                 entry.stagingPath = staged;
                 ++stillStaged;

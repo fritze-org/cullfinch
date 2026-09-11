@@ -242,9 +242,8 @@ void TestBrowserWindow::aSecondInstanceOpensTheCollectionReadOnly() {
 
     // The stored inventory is browsable without a scan of our own...
     QCOMPARE(window->model()->rowCount(), 6);
-    auto* indicator = window->findChild<QLabel*>(QStringLiteral("readOnlyIndicator"));
-    QVERIFY(indicator != nullptr);
-    QVERIFY(!indicator->text().isEmpty());
+    const auto* indicator = window->findChild<QLabel*>(QStringLiteral("readOnlyIndicator"));
+    QVERIFY(indicator != nullptr && !indicator->text().isEmpty());
 
     // ...but nothing that writes is accepted: no draft, no mark, no operation.
     const domain::AssetId first = window->model()->idForRow(0);
@@ -253,18 +252,16 @@ void TestBrowserWindow::aSecondInstanceOpensTheCollectionReadOnly() {
     QVERIFY(window->activeShell() == nullptr);
     QVERIFY(!second.dispositions().applyRejections({first}, QStringLiteral("test"), &error));
     QVERIFY(!error.isEmpty());
-    auto* review = window->findChild<QAction*>(QStringLiteral("actionReviewOperations"));
-    QVERIFY(review != nullptr);
-    QVERIFY(!review->isEnabled());
-    auto* compare = window->findChild<QMenu*>(QStringLiteral("compareMenu"));
-    QVERIFY(compare != nullptr);
-    QVERIFY(!compare->isEnabled());
+    const auto* review = window->findChild<QAction*>(QStringLiteral("actionReviewOperations"));
+    QVERIFY(review != nullptr && !review->isEnabled());
+    const auto* compare = window->findChild<QMenu*>(QStringLiteral("compareMenu"));
+    QVERIFY(compare != nullptr && !compare->isEnabled());
 
     // Once the first window lets go, reopening takes the lock and scans.
     fixture_->root().collection().close();
     QVERIFY(window->openDirectory(fixture_->collection().path()));
     QVERIFY(!second.collection().isReadOnly());
-    QVERIFY(compare->isEnabled());
+    QVERIFY(compare != nullptr && compare->isEnabled());
     QVERIFY(GuiFixture::waitFor([&]() { return !second.collection().isScanning(); }));
     QCOMPARE(window->model()->rowCount(), 6);
 }

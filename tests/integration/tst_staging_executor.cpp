@@ -384,22 +384,22 @@ void TestStagingExecutor::journalsIntentBeforeAndOutcomeAfterEachMove() {
     // actually in staging, and a "planned" intent must name the destination.
     QList<application::OperationRecord> snapshots;
     QStringList violations;
-    const application::JournalWriter journal = [&](const application::OperationRecord& record,
-                                                   QString*) {
-        snapshots.append(record);
-        for (const application::OperationMemberRecord& member : record.members) {
-            if (member.stagingPath.isEmpty()) {
-                violations.append(
-                    QStringLiteral("no destination recorded for %1").arg(member.sourcePath));
+    const application::JournalWriter journal =
+        [&snapshots, &violations](const application::OperationRecord& record, QString*) {
+            snapshots.append(record);
+            for (const application::OperationMemberRecord& member : record.members) {
+                if (member.stagingPath.isEmpty()) {
+                    violations.append(
+                        QStringLiteral("no destination recorded for %1").arg(member.sourcePath));
+                }
+                if (member.lastDurableStep == QLatin1String("staged") &&
+                    !QFileInfo::exists(member.stagingPath)) {
+                    violations.append(QStringLiteral("%1 journalled as staged before it arrived")
+                                          .arg(member.stagingPath));
+                }
             }
-            if (member.lastDurableStep == QLatin1String("staged") &&
-                !QFileInfo::exists(member.stagingPath)) {
-                violations.append(QStringLiteral("%1 journalled as staged before it arrived")
-                                      .arg(member.stagingPath));
-            }
-        }
-        return true;
-    };
+            return true;
+        };
 
     const application::OperationRecord result =
         executor.executeGroup(recordFor(planning.plan), planning.plan.groups.first(), journal);
@@ -527,11 +527,11 @@ void TestStagingExecutor::recoveryConfirmsATrashOutcomeFromTheManifest() {
     // Keep the last record written *before* Trash was asked: that is what the
     // journal holds after a crash between the Trash call and its commit.
     application::OperationRecord beforeTrash;
-    const application::JournalWriter journal = [&](const application::OperationRecord& record,
-                                                   QString*) {
-        beforeTrash = record;
-        return true;
-    };
+    const application::JournalWriter journal =
+        [&beforeTrash](const application::OperationRecord& record, QString*) {
+            beforeTrash = record;
+            return true;
+        };
     const application::OperationRecord done =
         executor.executeGroup(recordFor(planning.plan), planning.plan.groups.first(), journal);
     QCOMPARE(done.state, domain::OperationState::Trashing);
@@ -541,7 +541,7 @@ void TestStagingExecutor::recoveryConfirmsATrashOutcomeFromTheManifest() {
     // The platform reported where the group went, and its manifest is there.
     beforeTrash.trashPath = done.trashPath;
     QVERIFY(!beforeTrash.trashPath.isEmpty());
-    const application::OperationRecord recovered = executor.recover(beforeTrash);
+    const auto recovered = executor.recover(beforeTrash);
     QVERIFY2(recovered.error.isEmpty(), qPrintable(recovered.error));
     QCOMPARE(recovered.state, domain::OperationState::Completed);
     QCOMPARE(stepOf(recovered, QStringLiteral("A.RAF")), QStringLiteral("trashed"));
@@ -562,11 +562,11 @@ void TestStagingExecutor::recoveryReportsAnUncertainTrashOutcome() {
     infrastructure::StagingExecutor executor(trash);
 
     application::OperationRecord beforeTrash;
-    const application::JournalWriter journal = [&](const application::OperationRecord& record,
-                                                   QString*) {
-        beforeTrash = record;
-        return true;
-    };
+    const application::JournalWriter journal =
+        [&beforeTrash](const application::OperationRecord& record, QString*) {
+            beforeTrash = record;
+            return true;
+        };
     std::ignore =
         executor.executeGroup(recordFor(planning.plan), planning.plan.groups.first(), journal);
     QVERIFY(beforeTrash.trashPath.isEmpty());

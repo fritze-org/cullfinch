@@ -559,8 +559,7 @@ void BrowserWindow::closeEvent(QCloseEvent* event) {
     // written first -- never a silent apply or discard, and never a lost
     // autosave. The shell's own close event covers only the shell.
     if (context_.session.isActive()) {
-        QString error;
-        if (!context_.session.pause(&error)) {
+        if (QString error; !context_.session.pause(&error)) {
             reportError(error);
             event->ignore();
             return;

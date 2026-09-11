@@ -117,10 +117,10 @@ bool WallSurface::acceptGesture(const domain::AssetId& id, const QPoint& pointer
     // the pointer deliberately moved to another target. Finishing a layout
     // animation alone never rearms a second click at the same coordinates.
     const int interval = QGuiApplication::styleHints()->mouseDoubleClickInterval();
-    const bool movedDeliberately =
-        lastGesturePosition_.x() >= 0 && (pointer - lastGesturePosition_).manhattanLength() >
-                                             QGuiApplication::styleHints()->startDragDistance();
-    if (!movedDeliberately) {
+    if (const bool movedDeliberately =
+            lastGesturePosition_.x() >= 0 && (pointer - lastGesturePosition_).manhattanLength() >
+                                                 QGuiApplication::styleHints()->startDragDistance();
+        !movedDeliberately) {
         for (const VanishedTile& gone : vanished_) {
             if (sinceStart_.elapsed() - gone.elapsedAtRemoval > interval) {
                 continue;
