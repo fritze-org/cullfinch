@@ -1,6 +1,13 @@
 ---
 # Reviewed check selection. Enabled diagnostics are errors in the tidy presets;
 # see cmake/StaticAnalysis.cmake. Expand deliberately, not indiscriminately.
+#
+# `#pragma once` is the convention throughout this project and is supported by
+# every compiler it is built with. Include guards would add noise to 40 headers
+# without making any supported build work that does not already, so
+# portability-avoid-pragma-once is disabled. Keep comments outside the folded
+# scalar below: inside it YAML folds them into the check list, where they
+# swallow the entry that follows them.
 Checks: >
   -*,
   clang-analyzer-*,
@@ -21,9 +28,6 @@ Checks: >
   -bugprone-easily-swappable-parameters,
   -bugprone-exception-escape,
   -performance-enum-size,
-  # `#pragma once` is the convention throughout this project and is supported
-  # by every compiler it is built with. Include guards would add noise to 40
-  # headers without making any supported build work that does not already.
   -portability-avoid-pragma-once
 
 # Analyse owned headers through their translation units. Dependency headers are
