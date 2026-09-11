@@ -97,9 +97,10 @@ void TestOperationController::executesAReviewedPlanAndJournalsEveryStep() {
     QCOMPARE(progress.size(), 3); // 0 of 2, 1 of 2, 2 of 2.
 
     // The plan, then per group: the intent, one confirmation per file,
-    // Staged, Trashing, and the group's outcome; then Completed.
+    // Staged, Trashing, the Trash outcome, and the controller's own write of
+    // the returned record; then Completed.
     const QList<application::OperationRecord>& journal = repository_->operationJournal();
-    QCOMPARE(journal.size(), 1 + (1 + 2 + 1 + 1 + 1) + (1 + 1 + 1 + 1 + 1) + 1);
+    QCOMPARE(journal.size(), 1 + (1 + 2 + 1 + 1 + 1 + 1) + (1 + 1 + 1 + 1 + 1 + 1) + 1);
     QCOMPARE(journal.first().state, domain::OperationState::Planned);
     QCOMPARE(journal.last().state, domain::OperationState::Completed);
 

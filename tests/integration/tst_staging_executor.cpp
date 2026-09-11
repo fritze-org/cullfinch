@@ -103,6 +103,7 @@ private slots:
     void recoveryConfirmsATrashOutcomeFromTheManifest();
     void recoveryReportsAnUncertainTrashOutcome();
     void preflightBlocksAGroupThatGainedACompanion();
+    void preflightIgnoresASidecarThePolicyIgnores();
     void preflightBlocksAGroupOnAnotherFilesystem();
 
     void readManifestReportsAbsentCorruptAndForeignManifests();
@@ -419,8 +420,9 @@ void TestStagingExecutor::journalsIntentBeforeAndOutcomeAfterEachMove() {
     QVERIFY2(result.error.isEmpty(), qPrintable(result.error));
     QVERIFY2(violations.isEmpty(), qPrintable(violations.join(QLatin1String("; "))));
 
-    // Intent, one confirmation per file, Staged, then the intent to Trash.
-    QCOMPARE(snapshots.size(), 5);
+    // Intent, one confirmation per file, Staged, the intent to Trash, and
+    // the Trash outcome.
+    QCOMPARE(snapshots.size(), 6);
     QCOMPARE(snapshots.at(0).state, domain::OperationState::Staging);
     QCOMPARE(stepOf(snapshots.at(0), QStringLiteral("A.JPG")), QStringLiteral("planned"));
     QCOMPARE(stepOf(snapshots.at(1), QStringLiteral("A.JPG")), QStringLiteral("staged"));
@@ -428,6 +430,9 @@ void TestStagingExecutor::journalsIntentBeforeAndOutcomeAfterEachMove() {
     QCOMPARE(stepOf(snapshots.at(2), QStringLiteral("A.RAF")), QStringLiteral("staged"));
     QCOMPARE(snapshots.at(3).state, domain::OperationState::Staged);
     QCOMPARE(snapshots.at(4).state, domain::OperationState::Trashing);
+    QCOMPARE(stepOf(snapshots.at(4), QStringLiteral("A.JPG")), QStringLiteral("staged"));
+    QCOMPARE(stepOf(snapshots.at(5), QStringLiteral("A.JPG")), QStringLiteral("trashed"));
+    QVERIFY(!snapshots.at(5).trashPath.isEmpty());
     QCOMPARE(trash.callCount(), 1);
 }
 
@@ -537,28 +542,39 @@ void TestStagingExecutor::recoveryConfirmsATrashOutcomeFromTheManifest() {
     FakeTrashAdapter trash;
     infrastructure::StagingExecutor executor(trash);
 
-    // Keep the last record written *before* Trash was asked: that is what the
-    // journal holds after a crash between the Trash call and its commit.
-    application::OperationRecord beforeTrash;
+    // Every journal write, so the test can pick the one a crash at any
+    // point would have left behind.
+    QList<application::OperationRecord> snapshots;
     const application::JournalWriter journal =
-        [&beforeTrash](const application::OperationRecord& record, QString*) {
-            beforeTrash = record;
+        [&snapshots](const application::OperationRecord& record, QString*) {
+            snapshots.append(record);
             return true;
         };
     const application::OperationRecord done =
         executor.executeGroup(recordFor(planning.plan), planning.plan.groups.first(), journal);
     QCOMPARE(done.state, domain::OperationState::Trashing);
+    QVERIFY(snapshots.size() >= 2);
+
+    // A crash after Trash returned but before the outcome was journalled:
+    // the record says Trashing, the members say staged, and the platform's
+    // reported location holds the manifest that confirms where they went.
+    application::OperationRecord beforeTrash = snapshots.at(snapshots.size() - 2);
     QCOMPARE(beforeTrash.state, domain::OperationState::Trashing);
     QCOMPARE(stepOf(beforeTrash, QStringLiteral("A.JPG")), QStringLiteral("staged"));
-
-    // The platform reported where the group went, and its manifest is there.
     beforeTrash.trashPath = done.trashPath;
     QVERIFY(!beforeTrash.trashPath.isEmpty());
-    const auto recovered = executor.recover(beforeTrash);
+    auto recovered = executor.recover(beforeTrash);
     QVERIFY2(recovered.error.isEmpty(), qPrintable(recovered.error));
     QCOMPARE(recovered.state, domain::OperationState::Completed);
     QCOMPARE(stepOf(recovered, QStringLiteral("A.RAF")), QStringLiteral("trashed"));
     QVERIFY(!QFileInfo::exists(collection.filePath(QStringLiteral("A.JPG"))));
+
+    // A crash after the outcome was journalled but before the controller's
+    // own write: the journal already says trashed, and recovery believes it.
+    const application::OperationRecord afterTrash = snapshots.last();
+    QCOMPARE(stepOf(afterTrash, QStringLiteral("A.JPG")), QStringLiteral("trashed"));
+    recovered = executor.recover(afterTrash);
+    QCOMPARE(recovered.state, domain::OperationState::Completed);
 }
 
 void TestStagingExecutor::recoveryReportsAnUncertainTrashOutcome() {
@@ -574,14 +590,18 @@ void TestStagingExecutor::recoveryReportsAnUncertainTrashOutcome() {
     trash.setReportsPath(false); // The platform is allowed to say nothing.
     infrastructure::StagingExecutor executor(trash);
 
-    application::OperationRecord beforeTrash;
+    // The record as journalled just before Trash was asked.
+    QList<application::OperationRecord> snapshots;
     const application::JournalWriter journal =
-        [&beforeTrash](const application::OperationRecord& record, QString*) {
-            beforeTrash = record;
+        [&snapshots](const application::OperationRecord& record, QString*) {
+            snapshots.append(record);
             return true;
         };
     std::ignore =
         executor.executeGroup(recordFor(planning.plan), planning.plan.groups.first(), journal);
+    QVERIFY(snapshots.size() >= 2);
+    const application::OperationRecord beforeTrash = snapshots.at(snapshots.size() - 2);
+    QCOMPARE(beforeTrash.state, domain::OperationState::Trashing);
     QVERIFY(beforeTrash.trashPath.isEmpty());
 
     // The group is gone from both places and nothing can confirm where to:
@@ -614,6 +634,35 @@ void TestStagingExecutor::preflightBlocksAGroupThatGainedACompanion() {
     QVERIFY2(error.isEmpty(), qPrintable(error));
     QVERIFY(verified.hasBlockers());
     QVERIFY(verified.blocked.first().reason.contains(QStringLiteral("A.DNG")));
+}
+
+void TestStagingExecutor::preflightIgnoresASidecarThePolicyIgnores() {
+    TempCollection collection;
+    collection.addJpeg(QStringLiteral("A.JPG"));
+    collection.addRaw(QStringLiteral("A.RAF"));
+    const domain::PhotoAssetList assets = markAll(scan(collection));
+    const domain::PlanningResult planning = domain::OperationPlanner::plan(
+        domain::CollectionId(QStringLiteral("c1")), 1, stagingRootOf(collection), assets);
+
+    // Sidecars are switched off by default, so an XMP beside the photo is
+    // not part of it -- the scan ignores it and so must preflight, or the
+    // group could never be moved.
+    collection.addFile(QStringLiteral("A.xmp"), QByteArrayLiteral("<xmp/>"));
+
+    FakeTrashAdapter trash;
+    infrastructure::StagingExecutor executor(trash);
+    executor.setAssociationConfig(domain::AssociationConfig::defaults());
+    QString error;
+    domain::PlanningResult verified = executor.preflight(planning.plan, assets, &error);
+    QVERIFY2(error.isEmpty(), qPrintable(error));
+    QVERIFY2(!verified.hasBlockers(), qPrintable(verified.blocked.value(0).reason));
+
+    // An unrecognised same-stem file is a different matter: the scan would
+    // have flagged it, and moving the rest of the group would orphan it.
+    collection.addFile(QStringLiteral("A.txt"), QByteArrayLiteral("notes"));
+    verified = executor.preflight(planning.plan, assets, &error);
+    QVERIFY(verified.hasBlockers());
+    QVERIFY(verified.blocked.first().reason.contains(QStringLiteral("A.txt")));
 }
 
 void TestStagingExecutor::preflightBlocksAGroupOnAnotherFilesystem() {

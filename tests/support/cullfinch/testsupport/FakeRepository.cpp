@@ -36,6 +36,16 @@ FakeRepository::ensureCollection(const QString& rootPath, bool recursive, QStrin
     return id;
 }
 
+std::optional<domain::CollectionId> FakeRepository::findCollection(const QString& rootPath,
+                                                                   QString* error) const {
+    const auto existing = collectionsByRoot_.constFind(rootPath);
+    if (existing == collectionsByRoot_.constEnd()) {
+        report(error, QStringLiteral("no such collection"));
+        return std::nullopt;
+    }
+    return *existing;
+}
+
 quint64 FakeRepository::collectionRevision(const domain::CollectionId& id, QString* error) const {
     Q_UNUSED(error)
     return revisions_.value(id, 0);

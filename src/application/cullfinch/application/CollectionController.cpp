@@ -74,12 +74,21 @@ bool CollectionController::open(const QString& rootPath, bool recursive, QString
     QString holder;
     const bool writable = lock_ == nullptr || lock_->acquire(rootPath, &holder);
 
+    // A read-only instance only looks the collection up: ensureCollection()
+    // creates and updates rows, and that is the writer's business.
     QString storageError;
     const std::optional<domain::CollectionId> id =
-        repository_.ensureCollection(rootPath, recursive, &storageError);
+        writable ? repository_.ensureCollection(rootPath, recursive, &storageError)
+                 : repository_.findCollection(rootPath, &storageError);
     if (!id.has_value()) {
         if (error != nullptr) {
             *error = storageError;
+        }
+        if (writable && lock_ != nullptr) {
+            // Nothing was opened, so nothing may stay locked: another
+            // instance must not be refused for a collection this one has not
+            // got.
+            lock_->release();
         }
         return false;
     }

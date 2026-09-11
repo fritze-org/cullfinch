@@ -213,6 +213,10 @@ std::optional<Manifest> StagingExecutor::readManifest(const QString& directory, 
 
 StagingExecutor::StagingExecutor(application::ITrashAdapter& trash) : trash_(trash) {}
 
+void StagingExecutor::setAssociationConfig(const domain::AssociationConfig& config) {
+    config_ = config;
+}
+
 domain::PlanningResult StagingExecutor::preflight(const domain::OperationPlan& plan,
                                                   const domain::PhotoAssetList& current,
                                                   QString* error) const {
@@ -309,6 +313,13 @@ domain::PlanningResult StagingExecutor::preflight(const domain::OperationPlan& p
             const QFileInfoList siblings = firstMember.dir().entryInfoList(
                 QDir::Files | QDir::Hidden | QDir::System, QDir::Name);
             for (const QFileInfo& sibling : siblings) {
+                // The same policy as the scan: a switched-off sidecar is not
+                // part of the photo and never was, so it cannot be left
+                // behind; an unrecognised same-stem file, on the other hand,
+                // is exactly what blocks a group.
+                if (config_.isDisabledSidecar(sibling.suffix())) {
+                    continue;
+                }
                 if (sibling.completeBaseName() == stem &&
                     !planned.contains(sibling.absoluteFilePath())) {
                     blocker = tr("'%1' appeared beside this photo after it was reviewed.")
@@ -480,6 +491,19 @@ OperationRecord StagingExecutor::executeGroup(const OperationRecord& input,
         if (index >= 0) {
             record.members[index].lastDurableStep = QLatin1String(kStepTrashed);
         }
+    }
+
+    // The outcome is journalled here, not left to the caller: a crash between
+    // this return and the controller's own write would otherwise leave a
+    // record that says "Trashing" with no Trash path, and recovery could only
+    // call the vanished group uncertain. If even this write fails, the files
+    // are in Trash but the record does not know it, which is exactly what
+    // NeedsRecovery is for.
+    if (!writeJournal(&journalError)) {
+        return withState(record, OperationState::NeedsRecovery,
+                         tr("%1 The photo reached Trash, but that could not be recorded; "
+                            "recovery will confirm it from the manifest.")
+                             .arg(journalError));
     }
 
     // The operation as a whole is only completed once every group is done; the

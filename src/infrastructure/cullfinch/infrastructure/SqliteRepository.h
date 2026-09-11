@@ -30,6 +30,8 @@ public:
     bool open(QString* error) override;
     void close() override;
 
+    [[nodiscard]] std::optional<domain::CollectionId> findCollection(const QString& rootPath,
+                                                                     QString* error) const override;
     std::optional<domain::CollectionId> ensureCollection(const QString& rootPath, bool recursive,
                                                          QString* error) override;
     [[nodiscard]] quint64 collectionRevision(const domain::CollectionId& id,

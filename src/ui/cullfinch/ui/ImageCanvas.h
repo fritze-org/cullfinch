@@ -20,6 +20,12 @@ class ImageCanvas : public QWidget {
     Q_OBJECT
 
 public:
+    /// How an elimination was asked for. A pointer gesture is judged against
+    /// what was under the pointer when it was pressed; a key has no press and
+    /// acts on the tile as it is now.
+    enum class ActivationSource { Pointer, Keyboard };
+    Q_ENUM(ActivationSource)
+
     explicit ImageCanvas(application::IImageService& images, QWidget* parent = nullptr);
 
     void setPresentation(const AssetPresentation& presentation, quint64 generation);
@@ -60,7 +66,7 @@ signals:
     /// to what was under the pointer *now*; the release reports only that
     /// the gesture completed.
     void gestureArmed(const QPoint& position);
-    void eliminateRequested();
+    void eliminateRequested(cullfinch::ui::ImageCanvas::ActivationSource source);
     void inspectToggled(bool inspecting);
     void viewChanged(const QPointF& centre, qreal zoom);
     void readinessChanged(bool ready);

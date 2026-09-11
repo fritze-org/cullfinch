@@ -39,6 +39,7 @@ private slots:
     void keyboardOnlyCullingWorks();
     void resizingBetweenPressAndReleaseDoesNotMisfire();
     void aGestureIsBoundToTheLayoutItWasPressedOn();
+    void aCancelledPointerGestureDoesNotTaintTheKeyboard();
 
 private:
     void startWallOn(int count);
@@ -372,6 +373,44 @@ void TestWallView::aGestureIsBoundToTheLayoutItWasPressedOn() {
     QCoreApplication::processEvents();
     QCOMPARE(session.summary().draftRejected.size(), 1);
     QVERIFY(session.summary().remaining.contains(pressed));
+}
+
+void TestWallView::aCancelledPointerGestureDoesNotTaintTheKeyboard() {
+    startWallOn(6);
+    application::SessionController& session = fixture_->root().session();
+
+    auto* fixed = shell_->findChild<QCheckBox*>(QStringLiteral("wallFixedPositions"));
+    QVERIFY(fixed != nullptr);
+    fixed->setChecked(true);
+    QVERIFY(GuiFixture::waitFor([&]() {
+        return flows::wall::WallFlow::layoutMode(session.state()) ==
+               flows::wall::LayoutMode::FixedPositions;
+    }));
+
+    // A press that is abandoned outside the tile decides nothing...
+    const domain::AssetId pressed = view_->surface()->order().at(4);
+    ui::ImageCanvas* tile = view_->surface()->tileFor(pressed);
+    QVERIFY(tile != nullptr);
+    QTest::mousePress(tile, Qt::LeftButton, Qt::NoModifier, tile->rect().center());
+
+    QJsonObject payload;
+    payload.insert(QStringLiteral("assetId"), view_->surface()->order().at(0).toString());
+    QString error;
+    QVERIFY2(session.dispatch(QStringLiteral("eliminate"), payload, &error), qPrintable(error));
+    QCoreApplication::processEvents();
+
+    QTest::mouseRelease(tile, Qt::LeftButton, Qt::NoModifier,
+                        tile->rect().center() + QPoint(4000, 4000));
+    QCoreApplication::processEvents();
+    QCOMPARE(session.summary().draftRejected.size(), 1);
+
+    // ...and the stale press must not be mistaken for the key that follows:
+    // Delete acts on the layout as it is now, and goes through.
+    tile->setFocus();
+    QKeyEvent del(QEvent::KeyPress, Qt::Key_Delete, Qt::NoModifier);
+    QCoreApplication::sendEvent(tile, &del);
+    QVERIFY(GuiFixture::waitFor([&]() { return session.summary().draftRejected.size() == 2; }));
+    QVERIFY(!session.summary().remaining.contains(pressed));
 }
 
 QTEST_MAIN(TestWallView)

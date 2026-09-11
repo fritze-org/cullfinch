@@ -42,6 +42,9 @@ bool CompositionRoot::initialise(QString* error) {
     lock_ = std::make_unique<infrastructure::AppLock>();
     collection_ =
         std::make_unique<application::CollectionController>(*repository_, *scanner_, lock_.get());
+    // Preflight re-enumerates directories with the same pairing policy the
+    // scan uses, or a switched-off sidecar would block every group.
+    executor_->setAssociationConfig(collection_->associationConfig());
     dispositions_ = std::make_unique<application::DispositionController>(*repository_);
     session_ =
         std::make_unique<application::SessionController>(flows_, *repository_, *dispositions_);

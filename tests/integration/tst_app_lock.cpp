@@ -2,6 +2,8 @@
 #include <cullfinch/infrastructure/AppLock.h>
 #include <cullfinch/infrastructure/Paths.h>
 
+#include <QDir>
+#include <QFile>
 #include <QFileInfo>
 #include <QTemporaryDir>
 #include <QTest>
@@ -23,6 +25,7 @@ private slots:
     void releasingLetsTheNextWriterIn();
     void differentCollectionsDoNotContend();
     void theLockLivesBesideTheDatabaseNotInTheCollection();
+    void aSymlinkToTheCollectionContendsForTheSameLock();
 
 private:
     std::unique_ptr<QTemporaryDir> dataDirectory_;
@@ -93,6 +96,24 @@ void TestAppLock::theLockLivesBesideTheDatabaseNotInTheCollection() {
     QVERIFY(QFileInfo::exists(lockFile));
     QVERIFY(lockFile.startsWith(QFileInfo(dataDirectory_->path()).absoluteFilePath()));
     QVERIFY(!lockFile.startsWith(QFileInfo(collection_->path()).absoluteFilePath()));
+}
+
+void TestAppLock::aSymlinkToTheCollectionContendsForTheSameLock() {
+    const QTemporaryDir elsewhere;
+    const QString link = QDir(elsewhere.path()).absoluteFilePath(QStringLiteral("photos-link"));
+    QVERIFY(QFile::link(collection_->path(), link));
+
+    // Two spellings of one directory are one collection; a lock that told
+    // them apart would let two writers in.
+    QCOMPARE(infrastructure::AppLock::lockFileFor(link),
+             infrastructure::AppLock::lockFileFor(collection_->path()));
+
+    infrastructure::AppLock direct;
+    QVERIFY(direct.acquire(collection_->path(), nullptr));
+    infrastructure::AppLock viaLink;
+    QString holder;
+    QVERIFY2(!viaLink.acquire(link, &holder), "the symlinked spelling must be refused");
+    QVERIFY(!holder.isEmpty());
 }
 
 QTEST_GUILESS_MAIN(TestAppLock)

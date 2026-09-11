@@ -344,7 +344,7 @@ void ImageCanvas::mouseReleaseEvent(QMouseEvent* event) {
     if (!rect().contains(event->pos())) {
         return; // Released outside: the gesture no longer refers to this photo.
     }
-    Q_EMIT eliminateRequested();
+    Q_EMIT eliminateRequested(ActivationSource::Pointer);
 }
 
 void ImageCanvas::keyPressEvent(QKeyEvent* event) {
@@ -371,7 +371,7 @@ void ImageCanvas::keyPressEvent(QKeyEvent* event) {
     case Qt::Key_Delete:
     case Qt::Key_Backspace:
         if (ready_ && !inspecting_) {
-            Q_EMIT eliminateRequested();
+            Q_EMIT eliminateRequested(ActivationSource::Keyboard);
             event->accept();
             return;
         }

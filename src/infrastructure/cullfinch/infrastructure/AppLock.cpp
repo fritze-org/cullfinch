@@ -10,9 +10,23 @@
 
 namespace cullfinch::infrastructure {
 
+namespace {
+
+/// One name per directory, however it was spelled: a symlink to the
+/// collection and the collection itself must contend for the same lock, or
+/// the lock protects nothing. Canonical form needs the path to exist, which a
+/// collection root does; anything else falls back to the absolute spelling.
+QString identityOf(const QString& collectionRoot) {
+    const QFileInfo info(collectionRoot);
+    const QString canonical = info.canonicalFilePath();
+    return canonical.isEmpty() ? info.absoluteFilePath() : canonical;
+}
+
+} // namespace
+
 QString AppLock::lockFileFor(const QString& collectionRoot) {
     QCryptographicHash hash(QCryptographicHash::Sha1);
-    hash.addData(QFileInfo(collectionRoot).absoluteFilePath().toUtf8());
+    hash.addData(identityOf(collectionRoot).toUtf8());
     const QString name = QStringLiteral("collection-%1.lock")
                              .arg(QString::fromLatin1(hash.result().toHex().left(16)));
     return QDir(Paths::applicationDataDirectory()).absoluteFilePath(name);
@@ -23,7 +37,7 @@ AppLock::~AppLock() {
 }
 
 bool AppLock::acquire(const QString& collectionRoot, QString* holder) {
-    const QString root = QFileInfo(collectionRoot).absoluteFilePath();
+    const QString root = identityOf(collectionRoot);
     if (held_ && root_ == root) {
         return true;
     }

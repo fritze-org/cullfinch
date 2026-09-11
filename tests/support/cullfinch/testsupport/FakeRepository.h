@@ -19,6 +19,8 @@ public:
 
     std::optional<domain::CollectionId> ensureCollection(const QString& rootPath, bool recursive,
                                                          QString* error) override;
+    [[nodiscard]] std::optional<domain::CollectionId> findCollection(const QString& rootPath,
+                                                                     QString* error) const override;
     [[nodiscard]] quint64 collectionRevision(const domain::CollectionId& id,
                                              QString* error) const override;
     bool reconcileAssets(const domain::CollectionId& id, const domain::PhotoAssetList& scanned,

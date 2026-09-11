@@ -436,6 +436,24 @@ bool SqliteRepository::migrate(QString* error) {
     return true;
 }
 
+std::optional<CollectionId> SqliteRepository::findCollection(const QString& rootPath,
+                                                             QString* error) const {
+    QSqlQuery lookup(database_);
+    lookup.prepare(QStringLiteral("SELECT id FROM collections WHERE root_path = :root"));
+    lookup.bindValue(QStringLiteral(":root"), text(QFileInfo(rootPath).absoluteFilePath()));
+    if (!lookup.exec()) {
+        fail(error, lookup, tr("Looking up the collection"));
+        return std::nullopt;
+    }
+    if (!lookup.next()) {
+        report(error, tr("'%1' has not been opened by the window that has it open for writing "
+                         "yet; there is nothing stored to browse.")
+                          .arg(rootPath));
+        return std::nullopt;
+    }
+    return CollectionId(lookup.value(0).toString());
+}
+
 std::optional<CollectionId> SqliteRepository::ensureCollection(const QString& rootPath,
                                                                bool recursive, QString* error) {
     const QString canonical = QFileInfo(rootPath).absoluteFilePath();

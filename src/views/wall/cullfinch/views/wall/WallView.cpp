@@ -85,17 +85,22 @@ void WallSurface::setCandidates(const QList<domain::AssetId>& positions,
             armedRevision_ = revision_;
             armedPosition_ = tile->mapTo(this, at);
         });
-        connect(tile, &ui::ImageCanvas::eliminateRequested, this, [this, id, tile]() {
-            // A pointer gesture is judged against the layout it was pressed
-            // on; the keyboard has no press, so it acts on the current one.
-            const bool pointer = armedTile_ == id;
-            const quint64 against = pointer ? armedRevision_ : revision_;
-            const QPoint at = pointer ? armedPosition_ : tile->mapTo(this, tile->rect().center());
-            armedTile_ = domain::AssetId{};
-            if (acceptGesture(id, at)) {
-                Q_EMIT eliminateRequested(id, against);
-            }
-        });
+        connect(tile, &ui::ImageCanvas::eliminateRequested, this,
+                [this, id, tile](ui::ImageCanvas::ActivationSource source) {
+                    // A pointer gesture is judged against the layout it was
+                    // pressed on. A key has no press, so it acts on the current
+                    // layout -- and never on whatever a cancelled pointer
+                    // gesture left behind.
+                    const bool pointer =
+                        source == ui::ImageCanvas::ActivationSource::Pointer && armedTile_ == id;
+                    const quint64 against = pointer ? armedRevision_ : revision_;
+                    const QPoint at =
+                        pointer ? armedPosition_ : tile->mapTo(this, tile->rect().center());
+                    armedTile_ = domain::AssetId{};
+                    if (acceptGesture(id, at)) {
+                        Q_EMIT eliminateRequested(id, against);
+                    }
+                });
         connect(tile, &ui::ImageCanvas::readinessChanged, this, [this, id](bool ready) {
             if (ready) {
                 recordAspect(id);

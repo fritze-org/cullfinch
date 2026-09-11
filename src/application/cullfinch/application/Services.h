@@ -73,6 +73,11 @@ public:
     /// Create or find the collection for a root directory.
     virtual std::optional<domain::CollectionId>
     ensureCollection(const QString& rootPath, bool recursive, QString* error) = 0;
+
+    /// Find the collection for a root directory without creating or touching
+    /// it. A read-only instance uses this: it must write nothing.
+    [[nodiscard]] virtual std::optional<domain::CollectionId>
+    findCollection(const QString& rootPath, QString* error) const = 0;
     [[nodiscard]] virtual quint64 collectionRevision(const domain::CollectionId& id,
                                                      QString* error) const = 0;
 

@@ -2,6 +2,7 @@
 #pragma once
 
 #include <cullfinch/application/Services.h>
+#include <cullfinch/domain/AssociationPolicy.h>
 
 #include <QList>
 #include <QString>
@@ -47,6 +48,10 @@ class StagingExecutor final : public application::IOperationExecutor {
 public:
     explicit StagingExecutor(application::ITrashAdapter& trash);
 
+    /// The pairing policy in force, so preflight judges a newly appeared
+    /// same-stem file the way the scan would.
+    void setAssociationConfig(const domain::AssociationConfig& config);
+
     [[nodiscard]] domain::PlanningResult preflight(const domain::OperationPlan& plan,
                                                    const domain::PhotoAssetList& current,
                                                    QString* error) const override;
@@ -68,6 +73,7 @@ public:
 
 private:
     application::ITrashAdapter& trash_;
+    domain::AssociationConfig config_ = domain::AssociationConfig::defaults();
 };
 
 } // namespace cullfinch::infrastructure
