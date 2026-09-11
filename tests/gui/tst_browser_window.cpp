@@ -9,6 +9,8 @@
 #include <QKeySequence>
 #include <QLabel>
 #include <QListView>
+#include <QMenu>
+#include <QSignalSpy>
 #include <QTest>
 
 using namespace cullfinch;
@@ -31,6 +33,7 @@ private slots:
     void wallFlowEndToEndAppliesMarksAndSelectsSurvivors();
     void unmarkRestoresEligibility();
     void reviewCountsPhysicalFilesForTheWholeGroup();
+    void aSecondInstanceOpensTheCollectionReadOnly();
 
 private:
     std::unique_ptr<GuiFixture> fixture_;
@@ -212,6 +215,56 @@ void TestBrowserWindow::reviewCountsPhysicalFilesForTheWholeGroup() {
     QVERIFY(summary->text().contains(QStringLiteral("4 files")));
     // Executing is a separate, explicit action.
     QVERIFY(!dialog.executionRequested());
+}
+
+void TestBrowserWindow::aSecondInstanceOpensTheCollectionReadOnly() {
+    // The fixture's window holds the writer lock. A second composition
+    // against the same application data root is exactly a second launch.
+    app::CompositionRoot::Options options;
+    options.dataDirectory = fixture_->dataDirectory();
+    options.cacheDirectory = fixture_->cacheDirectory();
+    options.trashAdapter = &fixture_->trash();
+    app::CompositionRoot second(options);
+    QString error;
+    QVERIFY2(second.initialise(&error), qPrintable(error));
+    std::unique_ptr<ui::BrowserWindow> window(second.createBrowserWindow());
+
+    QSignalSpy readOnly(&second.collection(),
+                        &application::CollectionController::readOnlyChanged);
+    QVERIFY2(window->openDirectory(fixture_->collection().path()),
+             "a held lock downgrades the open; it does not refuse it");
+    QVERIFY(second.collection().isReadOnly());
+    QVERIFY(!second.collection().readOnlyReason().isEmpty());
+    QCOMPARE(readOnly.size(), 1);
+    QVERIFY(readOnly.first().at(0).toBool());
+
+    // The stored inventory is browsable without a scan of our own...
+    QCOMPARE(window->model()->rowCount(), 6);
+    auto* indicator = window->findChild<QLabel*>(QStringLiteral("readOnlyIndicator"));
+    QVERIFY(indicator != nullptr);
+    QVERIFY(!indicator->text().isEmpty());
+
+    // ...but nothing that writes is accepted: no draft, no mark, no operation.
+    const domain::AssetId first = window->model()->idForRow(0);
+    window->selectAssets({first, window->model()->idForRow(1)});
+    QVERIFY(!window->startFlow(QStringLiteral("image-wall")));
+    QVERIFY(window->activeShell() == nullptr);
+    QVERIFY(!second.dispositions().applyRejections({first}, QStringLiteral("test"), &error));
+    QVERIFY(!error.isEmpty());
+    auto* review = window->findChild<QAction*>(QStringLiteral("actionReviewOperations"));
+    QVERIFY(review != nullptr);
+    QVERIFY(!review->isEnabled());
+    auto* compare = window->findChild<QMenu*>(QStringLiteral("compareMenu"));
+    QVERIFY(compare != nullptr);
+    QVERIFY(!compare->isEnabled());
+
+    // Once the first window lets go, reopening takes the lock and scans.
+    fixture_->root().collection().close();
+    QVERIFY(window->openDirectory(fixture_->collection().path()));
+    QVERIFY(!second.collection().isReadOnly());
+    QVERIFY(compare->isEnabled());
+    QVERIFY(GuiFixture::waitFor([&]() { return !second.collection().isScanning(); }));
+    QCOMPARE(window->model()->rowCount(), 6);
 }
 
 QTEST_MAIN(TestBrowserWindow)

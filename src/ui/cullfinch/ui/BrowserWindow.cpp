@@ -87,6 +87,18 @@ BrowserWindow::BrowserWindow(const AppContext& context, QWidget* parent)
             [this](bool scanning) {
                 statusBar()->showMessage(scanning ? tr("Scanning…") : tr("Ready"), 4000);
             });
+    connect(&context_.collection, &application::CollectionController::readOnlyChanged, this,
+            [this](bool readOnly, const QString& reason) {
+                // Browsing stays available; everything that writes is
+                // refused and says why, rather than failing at the first
+                // click.
+                readOnlyLabel_->setText(readOnly ? tr("Read-only") : QString());
+                readOnlyLabel_->setToolTip(reason);
+                if (readOnly) {
+                    reportError(tr("Opened read-only: %1").arg(reason));
+                }
+                refreshStatus();
+            });
     connect(&context_.collection, &application::CollectionController::diagnosticsChanged, this,
             [this](const QStringList& diagnostics) {
                 diagnosticsLabel_->setText(
@@ -103,7 +115,7 @@ BrowserWindow::BrowserWindow(const AppContext& context, QWidget* parent)
     connect(&context_.dispositions, &application::DispositionController::errorOccurred, this,
             &BrowserWindow::reportError);
     connect(&context_.dispositions, &application::DispositionController::markingEnabledChanged,
-            this, [this](bool enabled) { unmarkAction_->setEnabled(enabled); });
+            this, [this](bool) { refreshStatus(); });
 
     connect(&context_.session, &application::SessionController::errorOccurred, this,
             [this](const QString& message) { statusBar()->showMessage(message, 6000); });
@@ -155,6 +167,9 @@ void BrowserWindow::buildCentralWidget() {
     diagnosticsLabel_ = new QLabel(status);
     diagnosticsLabel_->setObjectName(QStringLiteral("diagnosticsCount"));
     status->addPermanentWidget(diagnosticsLabel_);
+    readOnlyLabel_ = new QLabel(status);
+    readOnlyLabel_->setObjectName(QStringLiteral("readOnlyIndicator"));
+    status->addPermanentWidget(readOnlyLabel_);
 }
 
 void BrowserWindow::buildMenus() {
@@ -279,9 +294,11 @@ void BrowserWindow::refreshAssets() {
 }
 
 void BrowserWindow::refreshStatus() {
+    const bool writable = !context_.collection.isReadOnly();
     const int rejected = context_.collection.rejectedCount();
     rejectionLabel_->setText(tr("%1 marked for deletion").arg(rejected));
-    reviewAction_->setEnabled(rejected > 0);
+    reviewAction_->setEnabled(writable && rejected > 0);
+    compareMenu_->setEnabled(writable);
 
     const QList<domain::AssetId> selected = selectedAssetIds();
     bool anyRejectedSelected = false;
@@ -292,7 +309,8 @@ void BrowserWindow::refreshStatus() {
             break;
         }
     }
-    unmarkAction_->setEnabled(anyRejectedSelected && context_.dispositions.isMarkingEnabled());
+    unmarkAction_->setEnabled(writable && anyRejectedSelected &&
+                              context_.dispositions.isMarkingEnabled());
 }
 
 QList<domain::AssetId> BrowserWindow::selectedAssetIds() const {
@@ -420,6 +438,11 @@ void BrowserWindow::unmarkSelection() {
 }
 
 void BrowserWindow::reviewFileOperations() {
+    if (context_.collection.isReadOnly()) {
+        reportError(tr("This collection is open read-only; file operations belong to the window "
+                       "that has it open for writing."));
+        return;
+    }
     const domain::PhotoAssetList rejected = context_.collection.rejectedAssets();
     if (rejected.isEmpty()) {
         statusBar()->showMessage(tr("Nothing is marked for deletion."), 4000);
@@ -485,8 +508,10 @@ bool BrowserWindow::resumeSession(const application::StoredSession& stored, QStr
 }
 
 void BrowserWindow::offerResume() {
-    if (!resumePrompt_) {
-        return; // Nobody to ask; the draft stays saved and untouched.
+    if (!resumePrompt_ || context_.collection.isReadOnly()) {
+        // Nobody to ask, or nobody entitled to answer: the draft stays saved
+        // and untouched for the writer.
+        return;
     }
 
     QString error;

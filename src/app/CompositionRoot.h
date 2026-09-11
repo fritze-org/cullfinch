@@ -6,6 +6,7 @@
 #include <cullfinch/application/FlowRegistry.h>
 #include <cullfinch/application/OperationController.h>
 #include <cullfinch/application/SessionController.h>
+#include <cullfinch/infrastructure/AppLock.h>
 #include <cullfinch/infrastructure/DirectoryScanner.h>
 #include <cullfinch/infrastructure/QtImageService.h>
 #include <cullfinch/infrastructure/SqliteRepository.h>
@@ -74,6 +75,7 @@ private:
     std::unique_ptr<infrastructure::QtImageService> images_;
     std::unique_ptr<infrastructure::QtTrashAdapter> ownedTrash_;
     std::unique_ptr<infrastructure::StagingExecutor> executor_;
+    std::unique_ptr<infrastructure::AppLock> lock_;
 
     application::FlowRegistry flows_;
     ui::FlowViewRegistry flowViews_;

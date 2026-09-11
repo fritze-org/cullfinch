@@ -133,6 +133,7 @@ private:
     QLabel* pathLabel_ = nullptr;
     QLabel* rejectionLabel_ = nullptr;
     QLabel* diagnosticsLabel_ = nullptr;
+    QLabel* readOnlyLabel_ = nullptr;
     QMenu* compareMenu_ = nullptr;
     QAction* recursiveAction_ = nullptr;
     QAction* reviewAction_ = nullptr;

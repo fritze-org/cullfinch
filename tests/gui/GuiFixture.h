@@ -74,6 +74,10 @@ public:
     }
 
     [[nodiscard]] testsupport::TempCollection& collection() { return collection_; }
+    /// The application data root this composition writes to. A second
+    /// composition against the same root is what a second launch is.
+    [[nodiscard]] QString dataDirectory() const { return dataDirectory_->path(); }
+    [[nodiscard]] QString cacheDirectory() const { return cacheDirectory_->path(); }
     [[nodiscard]] testsupport::FakeTrashAdapter& trash() { return trash_; }
     [[nodiscard]] app::CompositionRoot& root() { return *root_; }
     [[nodiscard]] ui::BrowserWindow* window() { return window_.get(); }

@@ -72,6 +72,15 @@ bool SessionController::start(const QString& flowId, const domain::SelectionSnap
         }
         return false;
     }
+    if (dispositions_.isReadOnly()) {
+        // A draft is written to the collection's database, and finishing it
+        // would change marks: neither belongs to a read-only instance.
+        if (error != nullptr) {
+            *error = tr("This collection is open read-only because another Cullfinch window has "
+                        "it open; comparisons cannot start here.");
+        }
+        return false;
+    }
 
     std::unique_ptr<domain::IComparisonFlow> flow = registry_.create(flowId);
     if (flow == nullptr) {
@@ -138,6 +147,13 @@ bool SessionController::resume(const StoredSession& stored,
     if (isActive()) {
         if (error != nullptr) {
             *error = tr("A comparison is already running.");
+        }
+        return false;
+    }
+    if (dispositions_.isReadOnly()) {
+        if (error != nullptr) {
+            *error = tr("This collection is open read-only because another Cullfinch window has "
+                        "it open; the saved comparison is left for that window.");
         }
         return false;
     }

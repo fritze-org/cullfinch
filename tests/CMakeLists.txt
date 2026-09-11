@@ -81,6 +81,13 @@ cullfinch_add_test(
   TIMEOUT 300)
 
 cullfinch_add_test(
+  tst_app_lock
+  SOURCES integration/tst_app_lock.cpp
+  DEPS cullfinch::cullfinch_infrastructure
+  LABELS integration PLATFORM offscreen
+  TIMEOUT 120)
+
+cullfinch_add_test(
   tst_staging_executor
   SOURCES integration/tst_staging_executor.cpp
   DEPS cullfinch::cullfinch_infrastructure cullfinch::cullfinch_testsupport

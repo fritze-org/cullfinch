@@ -106,6 +106,31 @@ public:
     unfinishedOperations(const domain::CollectionId& id, QString* error) const = 0;
 };
 
+/// Guards a collection against simultaneous cullfinch *writers*.
+///
+/// A second instance that cannot take the lock may still open the collection
+/// read-only. External tools are outside this lock entirely, which is exactly
+/// why every file operation revalidates its preconditions immediately before
+/// execution. Implemented in the infrastructure layer.
+class ICollectionLock {
+public:
+    ICollectionLock() = default;
+    virtual ~ICollectionLock() = default;
+    ICollectionLock(const ICollectionLock&) = delete;
+    ICollectionLock& operator=(const ICollectionLock&) = delete;
+    ICollectionLock(ICollectionLock&&) = delete;
+    ICollectionLock& operator=(ICollectionLock&&) = delete;
+
+    /// Take the writer lock for `collectionRoot`, releasing any other root
+    /// this lock currently holds.
+    ///
+    /// @param holder on false, describes the process that holds the lock,
+    ///        where the platform reports it.
+    virtual bool acquire(const QString& collectionRoot, QString* holder) = 0;
+    virtual void release() = 0;
+    [[nodiscard]] virtual bool isHeld() const = 0;
+};
+
 /// Moving a group to Trash. Behind an adapter so GUI tests can use a fake one
 /// and never touch the user's real Trash.
 class ITrashAdapter {
