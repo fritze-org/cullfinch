@@ -36,6 +36,13 @@ constexpr auto kKeyNode = "node";
 constexpr auto kKeyEliminated = "eliminated";
 constexpr auto kKeyAssetId = "assetId";
 
+/// The largest bracketSize totalRoundsFor()/findPending() can compute a round
+/// index for without a shift beyond bit 30: 1U << 31 no longer fits in a
+/// positive int, and this is a real collection size, not a network input, so
+/// rejecting it here is cheaper than proving every downstream shift safe for
+/// an arbitrarily large one.
+constexpr int kMaxBracketSize = static_cast<int>(1U << 30U);
+
 int nextPowerOfTwo(int value) {
     int size = 1;
     while (size < value) {
@@ -64,7 +71,7 @@ Bracket parse(const FlowState& state) {
 
     const int bracketSize = payload.value(QLatin1String(kKeyBracketSize)).toInt(0);
     const QJsonArray positions = payload.value(QLatin1String(kKeySlots)).toArray();
-    if (bracketSize <= 0 || positions.size() != bracketSize) {
+    if (bracketSize <= 0 || bracketSize > kMaxBracketSize || positions.size() != bracketSize) {
         return bracket;
     }
 
@@ -165,7 +172,10 @@ Outcome resolveNode(const Bracket& bracket, int node) {
 
 int totalRoundsFor(int bracketSize) {
     int rounds = 0;
-    while ((1 << rounds) < bracketSize) {
+    // bugprone-signed-bitwise flags a signed shift count as well as a signed
+    // value being shifted, so both operands are widened; the cast back to int
+    // keeps the comparison below from mixing signedness instead.
+    while (static_cast<int>(1U << static_cast<unsigned>(rounds)) < bracketSize) {
         ++rounds;
     }
     return rounds;
@@ -182,8 +192,8 @@ MatchView findPending(const Bracket& bracket) {
     pending.totalRounds = rounds;
 
     for (int depth = rounds - 1; depth >= 0; --depth) {
-        const int first = (1 << depth) - 1;
-        const int last = (1 << (depth + 1)) - 2;
+        const int first = static_cast<int>(1U << static_cast<unsigned>(depth)) - 1;
+        const int last = static_cast<int>(1U << static_cast<unsigned>(depth + 1)) - 2;
         for (int node = first; node <= last; ++node) {
             if (node >= bracket.internalNodeCount() || bracket.decisions.contains(node)) {
                 continue;
@@ -353,32 +363,18 @@ FlowSummary VersusFlow::summarise(const FlowState& state) const {
 }
 
 RestoreResult VersusFlow::restore(const VersionedFlowState& saved) const {
-    if (saved.flowId != QLatin1String(kFlowId)) {
-        return RestoreResult::failure(
-            tr("Saved state belongs to flow '%1', not the versus tree.").arg(saved.flowId));
+    RestoreResult result = domain::restoreFlowState(
+        saved, QLatin1String(kFlowId), kStateSchemaVersion,
+        tr("Saved state belongs to flow '%1', not the versus tree.").arg(saved.flowId),
+        tr("Saved versus state uses schema version %1; this build supports version %2.")
+            .arg(saved.schemaVersion)
+            .arg(kStateSchemaVersion));
+    if (!result.restored) {
+        return result;
     }
-    if (saved.schemaVersion != kStateSchemaVersion) {
-        // An unknown or newer state version must never be interpreted. The
-        // record is preserved and reported as incompatible instead.
-        return RestoreResult::failure(
-            tr("Saved versus state uses schema version %1; this build supports version %2.")
-                .arg(saved.schemaVersion)
-                .arg(kStateSchemaVersion));
-    }
-
-    FlowState state;
-    state.flowId = saved.flowId;
-    state.schemaVersion = saved.schemaVersion;
-    state.revision = saved.revision;
-    state.payload = saved.payload;
-
-    if (!parse(state).valid) {
+    if (!parse(result.state).valid) {
         return RestoreResult::failure(tr("The saved bracket is not internally consistent."));
     }
-
-    RestoreResult result;
-    result.restored = true;
-    result.state = state;
     return result;
 }
 

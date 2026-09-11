@@ -135,6 +135,15 @@ struct RestoreResult {
     }
 };
 
+/// The identity and schema checks every flow's restore() repeats, plus the
+/// assembly of the persisted fields into a fresh FlowState. A flow still
+/// validates its own payload afterwards: this only rules out a state that
+/// does not belong to it or that a newer build wrote.
+[[nodiscard]] RestoreResult restoreFlowState(const VersionedFlowState& saved, const QString& flowId,
+                                             int stateSchemaVersion,
+                                             const QString& wrongFlowMessage,
+                                             const QString& wrongSchemaMessage);
+
 /// A comparison flow: a pure, deterministic reducer over its own state.
 ///
 /// Implementations receive asset identifiers and display metadata, never

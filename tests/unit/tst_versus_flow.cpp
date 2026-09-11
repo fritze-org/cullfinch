@@ -1,6 +1,7 @@
 // SPDX-License-Identifier: GPL-3.0-or-later
 #include <cullfinch/flows/versus/VersusFlow.h>
 
+#include <QJsonArray>
 #include <QJsonObject>
 #include <QSet>
 #include <QTest>
@@ -68,6 +69,7 @@ private slots:
     void refusesAnActionAfterTheBracketIsComplete();
     void bracketIsPersistedNotRegenerated();
     void restoreRejectsAnUnknownStateVersion();
+    void restoreRejectsABracketSizeBeyondWhatRoundIndexingCanShift();
     void finishingEarlyMarksOnlyDecidedLosers();
 };
 
@@ -264,6 +266,25 @@ void TestVersusFlow::restoreRejectsAnUnknownStateVersion() {
     saved.flowId = QStringLiteral("image-wall");
     saved.schemaVersion = flows::versus::kStateSchemaVersion;
     QVERIFY(!flow.restore(saved).restored);
+}
+
+void TestVersusFlow::restoreRejectsABracketSizeBeyondWhatRoundIndexingCanShift() {
+    // A bracketSize this large would need over a billion "slots" entries to
+    // pass the length check that follows it, so the bound is checked first:
+    // this stays cheap to test and never depends on constructing that array.
+    QJsonObject payload;
+    payload.insert(QStringLiteral("bracketSize"), static_cast<int>(1U << 30U) + 1);
+    payload.insert(QStringLiteral("slots"), QJsonArray{});
+
+    domain::VersionedFlowState saved;
+    saved.flowId = QLatin1String(flows::versus::kFlowId);
+    saved.schemaVersion = flows::versus::kStateSchemaVersion;
+    saved.payload = payload;
+
+    const VersusFlow flow;
+    const domain::RestoreResult result = flow.restore(saved);
+    QVERIFY(!result.restored);
+    QVERIFY(result.message.contains(QStringLiteral("not internally consistent")));
 }
 
 void TestVersusFlow::finishingEarlyMarksOnlyDecidedLosers() {

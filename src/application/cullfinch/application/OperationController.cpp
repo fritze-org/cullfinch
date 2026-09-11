@@ -4,6 +4,8 @@
 #include <QCoreApplication>
 #include <QDateTime>
 
+#include <utility>
+
 namespace cullfinch::application {
 OperationController::OperationController(IAssetRepository& repository, IOperationExecutor& executor,
                                          QObject* parent)
@@ -41,7 +43,7 @@ bool OperationController::execute(const domain::OperationPlan& plan,
     const domain::PlanningResult verified = executor_.preflight(plan, current, &preflightError);
     if (!preflightError.isEmpty()) {
         if (error != nullptr) {
-            *error = preflightError;
+            *error = std::move(preflightError);
         }
         return false;
     }
@@ -102,7 +104,7 @@ bool OperationController::execute(const domain::OperationPlan& plan,
             // so a failure to record it stops the run.
             Q_EMIT errorOccurred(storageError);
             if (error != nullptr) {
-                *error = storageError;
+                *error = std::move(storageError);
             }
             return false;
         }

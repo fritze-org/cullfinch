@@ -58,55 +58,56 @@ install(
 
 # Qt's deployment-script generator handles the plugin and library layout for a non-QML application.
 # Its results are validated against the pinned vcpkg build by the packaged-application smoke test.
-qt_generate_deploy_app_script(
-  TARGET
-  cullfinch_app
-  OUTPUT_SCRIPT
-  cullfinch_deploy_script
-  NO_UNSUPPORTED_PLATFORM_ERROR)
-install(SCRIPT ${cullfinch_deploy_script})
-
-# Qt's deployment helper installs only the platform plugin it considers the default, which on Linux
-# is XCB. Native Wayland is the primary Linux backend, so its QPA plugin has to be requested
-# explicitly: without it the installed package silently runs through XWayland, which the design
-# rules out. The wayland-shell-integration and wayland-graphics-integration plugins the helper
-# already deploys are useless on their own.
 #
-# The macOS bundle showed the same gap from the other direction: it received libQt6Sql and the
-# Cocoa, image-format and style plugins, but no sqldrivers directory at all, so the application
-# could not open its own database:
+# The helper is not complete on either platform, and the gaps differ.
+#
+# On Linux the generic deployment tool ships every plugin family a linked Qt module needs -- the
+# SQLite driver arrives together with the sqlite3 library it links -- but only the platform plugin
+# it considers the default, which is XCB. Native Wayland is the primary Linux backend, so its QPA
+# plugin is requested explicitly below: without it the installed package silently runs through
+# XWayland, which the design rules out. The wayland-shell-integration and
+# wayland-graphics-integration plugins the tool does deploy are useless on their own.
+#
+# On macOS, macdeployqt deploys the Cocoa, image-format and style plugins unconditionally but
+# decides about sqldrivers from the file names of the Qt libraries it deployed for the executable,
+# where it expects libQt6Sql.6.dylib. vcpkg rewrites the install names of the libraries it builds to
+# their fully versioned file names, so the executable links libQt6Sql.6.11.1.dylib, QtSql is never
+# recognised as being in use, and the bundle got no sqldrivers directory at all:
 #
 # QSqlDatabase: can not load requested driver 'QSQLITE', available drivers:
 #
-# Each plugin is added only where the helper leaves it out, so the ones it does deploy keep the load
-# paths it rewrote for them.
+# A hand-installed copy of the driver was not enough either. The driver links vcpkg's sqlite3
+# library and the unversioned Qt names, none of which had been placed in Contents/Frameworks, so it
+# was found but could not be loaded:
+#
+# QSqlDatabase: can not load requested driver 'QSQLITE', available drivers: QSQLITE
+#
+# So the driver is installed into the bundle before the deployment script runs and handed to
+# macdeployqt as an additional binary. macdeployqt then deploys the driver's dependencies next to
+# the executable's and rewrites its load paths the same way it does for the plugins it chose itself.
+# Each plugin is added only where the helper leaves it out.
 if(APPLE)
   if(NOT TARGET Qt6::QSQLiteDriverPlugin)
     message(
       FATAL_ERROR "cullfinch: the Qt SQLite driver plugin is missing from this Qt build. "
                   "cullfinch stores all of its metadata in SQLite and cannot start " "without it.")
   endif()
-  install(FILES $<TARGET_FILE:Qt6::QSQLiteDriverPlugin>
-          DESTINATION "cullfinch.app/Contents/PlugIns/sqldrivers")
-
-  # The helper deploys what the executable links, under the names the executable asks for, and
-  # rewrites only the plugins it deploys itself. The driver above was linked inside the Qt build,
-  # before vcpkg rewrote the install names, so it asks for libQt6Sql by its soname
-  # (libQt6Sql.6.dylib) where the bundle holds only the executable's spelling
-  # (libQt6Sql.6.11.1.dylib), and for vcpkg's sqlite3, which nothing else in the bundle needs. The
-  # packaged smoke test showed the result: "can not load requested driver 'QSQLITE', available
-  # drivers: QSQLITE". Both travel by hand under the names the driver asks for; the rpath the helper
-  # gives the executable makes Contents/Frameworks visible to every plugin it loads.
-  find_package(unofficial-sqlite3 CONFIG REQUIRED)
-  foreach(dependency IN ITEMS unofficial::sqlite3::sqlite3 Qt6::Sql)
-    install(
-      FILES $<TARGET_FILE:${dependency}>
-      DESTINATION "cullfinch.app/Contents/Frameworks"
-      RENAME
-        $<IF:$<BOOL:$<TARGET_SONAME_FILE_NAME:${dependency}>>,$<TARGET_SONAME_FILE_NAME:${dependency}>,$<TARGET_FILE_NAME:${dependency}>>
-    )
-  endforeach()
+  set(CULLFINCH_SQLDRIVER_DIR "cullfinch.app/Contents/PlugIns/sqldrivers")
+  install(FILES $<TARGET_FILE:Qt6::QSQLiteDriverPlugin> DESTINATION "${CULLFINCH_SQLDRIVER_DIR}")
+  # The path is relative to the install prefix, which is the working directory macdeployqt runs in.
+  set(CULLFINCH_DEPLOY_TOOL_OPTIONS
+      DEPLOY_TOOL_OPTIONS
+      "-executable=${CULLFINCH_SQLDRIVER_DIR}/$<TARGET_FILE_NAME:Qt6::QSQLiteDriverPlugin>")
 endif()
+
+qt_generate_deploy_app_script(
+  TARGET
+  cullfinch_app
+  OUTPUT_SCRIPT
+  cullfinch_deploy_script
+  NO_UNSUPPORTED_PLATFORM_ERROR
+  ${CULLFINCH_DEPLOY_TOOL_OPTIONS})
+install(SCRIPT ${cullfinch_deploy_script})
 
 if(CMAKE_SYSTEM_NAME STREQUAL "Linux")
   if(NOT TARGET Qt6::QWaylandIntegrationPlugin)

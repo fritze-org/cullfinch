@@ -4,6 +4,8 @@
 #include <QJsonArray>
 #include <QJsonValue>
 
+#include <utility>
+
 namespace cullfinch::domain {
 
 bool FlowOptions::boolean(const QString& key, bool fallback) const {
@@ -38,6 +40,30 @@ QList<AssetId> assetIdsFromJson(const QJsonArray& array) {
         }
     }
     return ids;
+}
+
+RestoreResult restoreFlowState(const VersionedFlowState& saved, const QString& flowId,
+                               int stateSchemaVersion, const QString& wrongFlowMessage,
+                               const QString& wrongSchemaMessage) {
+    if (saved.flowId != flowId) {
+        return RestoreResult::failure(wrongFlowMessage);
+    }
+    if (saved.schemaVersion != stateSchemaVersion) {
+        // An unknown or newer state version must never be interpreted. The
+        // record is preserved and reported as incompatible instead.
+        return RestoreResult::failure(wrongSchemaMessage);
+    }
+
+    FlowState state;
+    state.flowId = saved.flowId;
+    state.schemaVersion = saved.schemaVersion;
+    state.revision = saved.revision;
+    state.payload = saved.payload;
+
+    RestoreResult result;
+    result.restored = true;
+    result.state = std::move(state);
+    return result;
 }
 
 } // namespace cullfinch::domain

@@ -113,7 +113,7 @@ QString writeManifest(const PlannedGroup& group, const QString& directory,
     manifest.insert(QLatin1String("displayName"), group.displayName);
     manifest.insert(QLatin1String("members"), entries);
 
-    const QString path = QDir(directory).absoluteFilePath(StagingExecutor::manifestFileName());
+    QString path = QDir(directory).absoluteFilePath(StagingExecutor::manifestFileName());
     QSaveFile file(path);
     if (!file.open(QIODevice::WriteOnly)) {
         *error = tr("The recovery manifest could not be created: %1").arg(file.errorString());
@@ -198,7 +198,7 @@ std::optional<Manifest> StagingExecutor::readManifest(const QString& directory, 
     manifest.assetId = domain::AssetId(object.value(QLatin1String("assetId")).toString());
     manifest.displayName = object.value(QLatin1String("displayName")).toString();
     const QJsonArray entries = object.value(QLatin1String("members")).toArray();
-    for (const QJsonValue& value : entries) {
+    for (const auto& value : entries) {
         const QJsonObject item = value.toObject();
         ManifestEntry entry;
         entry.memberId = domain::MemberId(item.value(QLatin1String("memberId")).toString());

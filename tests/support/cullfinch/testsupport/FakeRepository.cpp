@@ -29,7 +29,7 @@ FakeRepository::ensureCollection(const QString& rootPath, bool recursive, QStrin
     if (existing != collectionsByRoot_.constEnd()) {
         return *existing;
     }
-    const domain::CollectionId id(QString::fromLatin1(
+    domain::CollectionId id(QString::fromLatin1(
         QCryptographicHash::hash(rootPath.toUtf8(), QCryptographicHash::Sha1).toHex()));
     collectionsByRoot_.insert(rootPath, id);
     revisions_.insert(id, 1);

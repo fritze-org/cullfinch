@@ -79,7 +79,11 @@ void TestSessionController::init() {
     registerFlows();
 
     QString error;
-    collection_ = *repository_->ensureCollection(QStringLiteral("/photos"), false, &error);
+    const auto ensured = repository_->ensureCollection(QStringLiteral("/photos"), false, &error);
+    if (!ensured.has_value()) {
+        QFAIL(qPrintable(error));
+    }
+    collection_ = *ensured;
     assets_ = AssetBuilder::resolvedSeries(8);
     repository_->setAssets(collection_, assets_);
     dispositions_->setCollection(collection_,
@@ -302,7 +306,9 @@ void TestSessionController::pauseSavesTheDraftAndResumeRestoresIt() {
     }
 
     const std::optional<application::StoredSession> stored = repository_->loadSession(id, &error);
-    QVERIFY(stored.has_value());
+    if (!stored.has_value()) {
+        QFAIL(qPrintable(error));
+    }
     QCOMPARE(stored->lifecycle, application::SessionLifecycle::Paused);
 
     QVERIFY2(session_->resume(*stored, assets_, &error), qPrintable(error));
@@ -323,7 +329,9 @@ void TestSessionController::resumeRefusesWhenAGroupChangedUnderneath() {
     changed[3].membershipRevision = 999; // A RAW appeared or vanished.
 
     const std::optional<application::StoredSession> stored = repository_->loadSession(id, &error);
-    QVERIFY(stored.has_value());
+    if (!stored.has_value()) {
+        QFAIL(qPrintable(error));
+    }
     QVERIFY2(!session_->resume(*stored, changed, &error),
              "a changed file group must not silently continue a comparison");
     QVERIFY(!error.isEmpty());

@@ -207,6 +207,10 @@ jobs:
           # the smoke test both selects and asserts.
           CULLFINCH_EXPECTED_PLATFORM: ${{ matrix.display }}
           CULLFINCH_ARTIFACT_DIR: ${{ github.workspace }}/session-artifacts
+          # A plugin that is present but cannot be loaded fails with a bare
+          # "Driver not loaded"; the loader's own diagnostics name the missing
+          # library. The test shows the output only when the run fails.
+          QT_DEBUG_PLUGINS: '1'
         run: |
           if [ "${{ runner.os }}" = "macOS" ]; then
             binary="${{ github.workspace }}/stage/cullfinch.app/Contents/MacOS/cullfinch"
@@ -220,29 +224,29 @@ jobs:
 
       # Which plugins actually reached the package is the whole point of the
       # smoke test, so the inventory is recorded either way -- a missing one is
-      # far easier to see here than to infer from a runtime failure.
+      # far easier to see here than to infer from a runtime failure. On macOS
+      # the load commands of the executable and of the SQL driver are recorded
+      # too: whether a deployed plugin can be loaded depends on the names it
+      # references and the paths it searches, which the file list cannot show.
       - name: Record the deployed plugin inventory
         if: always()
         run: |
+          stage="${{ github.workspace }}/stage"
           {
             echo "# deployed plugins (${{ matrix.name }})"
-            find "${{ github.workspace }}/stage" \
-              \( -name '*.so' -o -name '*.dylib' \) -print 2>/dev/null \
-              | sed "s|${{ github.workspace }}/stage/||" | sort
-          } > "plugins-${{ matrix.preset }}.txt"
-          if [ "${{ runner.os }}" = macOS ]; then
-            # What the hand-installed SQL driver asks for, and where the executable lets it look.
-            {
-              echo "# sqldrivers load commands"
-              for plugin in "${{ github.workspace }}"/stage/cullfinch.app/Contents/PlugIns/sqldrivers/*.dylib; do
-                otool -L "$plugin" || true
-                otool -l "$plugin" | grep -A 2 LC_RPATH || true
+            find "${stage}" \( -name '*.so' -o -name '*.dylib' \) -print 2>/dev/null \
+              | sed "s|${stage}/||" | sort
+            if [ "${{ runner.os }}" = "macOS" ]; then
+              for binary in "${stage}/cullfinch.app/Contents/MacOS/cullfinch" \
+                "${stage}"/cullfinch.app/Contents/PlugIns/sqldrivers/*.dylib; do
+                [ -e "${binary}" ] || continue
+                echo
+                echo "## ${binary#"${stage}"/}"
+                otool -L "${binary}"
+                otool -l "${binary}" | grep -A 2 'LC_RPATH' || true
               done
-              echo "# executable rpaths"
-              otool -l "${{ github.workspace }}/stage/cullfinch.app/Contents/MacOS/cullfinch" \
-                | grep -A 2 LC_RPATH || true
-            } >> "plugins-${{ matrix.preset }}.txt"
-          fi
+            fi
+          } > "plugins-${{ matrix.preset }}.txt"
           cat "plugins-${{ matrix.preset }}.txt"
 
       - name: Upload test results and failure artifacts

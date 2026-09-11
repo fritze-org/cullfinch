@@ -115,7 +115,10 @@ quint64 QtImageService::request(const application::ImageRequest& request) {
         QMutexLocker locker(&mutex_);
         const auto cached = cache_.constFind(key);
         if (cached != cache_.constEnd()) {
-            const QImage image = *cached;
+            // A real copy, not a reference: the mutex unlocks right below and
+            // cache_ is mutable from other threads after that, so a reference
+            // into it would dangle for the rest of this function.
+            const QImage image = *cached; // NOLINT(performance-unnecessary-copy-initialization)
             cacheOrder_.removeAll(key);
             cacheOrder_.append(key);
             locker.unlock();
