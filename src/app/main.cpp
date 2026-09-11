@@ -7,6 +7,7 @@
 #include <QDebug>
 #include <QDir>
 #include <QElapsedTimer>
+#include <QIcon>
 #include <QMessageBox>
 #include <QSqlDatabase>
 #include <QTextStream>
@@ -183,6 +184,7 @@ int main(int argc, char* argv[]) {
     // The identifiers above stay lowercase because paths derive from them;
     // what people read is the confirmed product name.
     QGuiApplication::setApplicationDisplayName(QStringLiteral("Cullfinch"));
+    QGuiApplication::setWindowIcon(QIcon(QStringLiteral(":/icons/org.fritze.cullfinch.png")));
 
     // Matches the installed .desktop basename so the desktop can identify
     // Cullfinch for window grouping, the task switcher and its icon. Wayland
