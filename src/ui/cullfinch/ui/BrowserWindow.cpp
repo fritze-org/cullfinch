@@ -269,6 +269,20 @@ void BrowserWindow::buildMenus() {
 }
 
 bool BrowserWindow::openDirectory(const QString& path) {
+    // A comparison belongs to the collection it was started on. Opening a
+    // directory pauses it first, with the draft written while that collection
+    // is still the writable one; a draft that cannot be written keeps the
+    // current collection open rather than leaving the comparison stranded on
+    // a collection that may open read-only.
+    if (context_.session.isActive()) {
+        if (QString pauseError; !context_.session.pause(&pauseError)) {
+            reportError(pauseError);
+            return false;
+        }
+        if (shell_ != nullptr) {
+            shell_->close();
+        }
+    }
     QString error;
     if (!context_.collection.open(path, recursiveAction_->isChecked(), &error)) {
         reportError(error);

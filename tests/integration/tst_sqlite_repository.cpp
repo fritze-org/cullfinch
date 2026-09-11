@@ -2,6 +2,8 @@
 #include <cullfinch/infrastructure/SqliteRepository.h>
 #include <cullfinch/testsupport/AssetBuilder.h>
 
+#include <QDir>
+#include <QFile>
 #include <QSqlDatabase>
 #include <QTemporaryDir>
 #include <QTest>
@@ -22,6 +24,8 @@ private slots:
     void createsItsSchemaOnFirstOpen();
     void reopeningIsIdempotent();
     void reusesTheCollectionIdentityForTheSameRoot();
+    void aSymlinkToTheRootIsTheSameCollection();
+    void aRootStoredBeforeItExistedIsStillFound();
     void storesAndReloadsAssetsWithTheirMembers();
     void keepsMarksWhenMembershipIsUnchanged();
     void invalidatesMarksWhenMembershipChanges();
@@ -83,6 +87,50 @@ void TestSqliteRepository::reusesTheCollectionIdentityForTheSameRoot() {
 
     QCOMPARE(first->toString(), second->toString());
     QVERIFY(other->toString() != first->toString());
+}
+
+void TestSqliteRepository::aSymlinkToTheRootIsTheSameCollection() {
+    const QString real = directory_.filePath(QStringLiteral("photos"));
+    const QString link = directory_.filePath(QStringLiteral("photos-link"));
+    QVERIFY(QDir().mkpath(real));
+    QVERIFY(QFile::link(real, link));
+
+    // The writer opened the real path. A read-only instance that opened the
+    // symlink is looking at the same directory and must find the same row;
+    // the lock already treats the two spellings as one collection.
+    QString error;
+    const auto stored = repository_->ensureCollection(real, false, &error);
+    QVERIFY2(stored.has_value(), qPrintable(error));
+    const auto viaLink = repository_->findCollection(link, &error);
+    QVERIFY2(viaLink.has_value(), qPrintable(error));
+    QCOMPARE(viaLink->toString(), stored->toString());
+
+    // And once the writer is gone, opening through the symlink for writing
+    // reconciles onto that row instead of creating a second one.
+    const auto ensured = repository_->ensureCollection(link, true, &error);
+    QVERIFY2(ensured.has_value(), qPrintable(error));
+    QCOMPARE(ensured->toString(), stored->toString());
+}
+
+void TestSqliteRepository::aRootStoredBeforeItExistedIsStillFound() {
+    // A row written under the absolute spelling -- which is what a root that
+    // could not be resolved at the time got, and what every row written
+    // before the identity was canonical has -- is still found once the
+    // spelling resolves elsewhere.
+    const QString real = directory_.filePath(QStringLiteral("photos-later"));
+    const QString link = directory_.filePath(QStringLiteral("photos-later-link"));
+    QString error;
+    const auto stored = repository_->ensureCollection(link, false, &error);
+    QVERIFY2(stored.has_value(), qPrintable(error));
+
+    QVERIFY(QDir().mkpath(real));
+    QVERIFY(QFile::link(real, link));
+    const auto found = repository_->findCollection(link, &error);
+    QVERIFY2(found.has_value(), qPrintable(error));
+    QCOMPARE(found->toString(), stored->toString());
+    const auto ensured = repository_->ensureCollection(link, false, &error);
+    QVERIFY2(ensured.has_value(), qPrintable(error));
+    QCOMPARE(ensured->toString(), stored->toString());
 }
 
 void TestSqliteRepository::storesAndReloadsAssetsWithTheirMembers() {

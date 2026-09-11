@@ -13,6 +13,7 @@
 #include <QListView>
 #include <QMenu>
 #include <QSignalSpy>
+#include <QTemporaryDir>
 #include <QTest>
 
 using namespace cullfinch;
@@ -37,6 +38,7 @@ private slots:
     void reviewCountsPhysicalFilesForTheWholeGroup();
     void aSecondInstanceOpensTheCollectionReadOnly();
     void closingTheBrowserPausesAnActiveComparison();
+    void openingAnotherDirectoryPausesAnActiveComparison();
     void theListModelSatisfiesTheModelTester();
 
 private:
@@ -318,6 +320,37 @@ void TestBrowserWindow::closingTheBrowserPausesAnActiveComparison() {
 
     const QList<application::StoredSession> saved = fixture_->root().repository().resumableSessions(
         fixture_->root().collection().collectionId(), &error);
+    QCOMPARE(saved.size(), 1);
+    QCOMPARE(saved.first().lifecycle, application::SessionLifecycle::Paused);
+    QCOMPARE(saved.first().draftRejected.size(), 1);
+}
+
+void TestBrowserWindow::openingAnotherDirectoryPausesAnActiveComparison() {
+    fixture_->window()->selectAssets({fixture_->window()->model()->idForRow(0),
+                                      fixture_->window()->model()->idForRow(1),
+                                      fixture_->window()->model()->idForRow(2)});
+    QVERIFY(fixture_->window()->startFlow(QStringLiteral("image-wall")));
+    application::SessionController& session = fixture_->root().session();
+    const domain::CollectionId original = fixture_->root().collection().collectionId();
+
+    QJsonObject payload;
+    payload.insert(QStringLiteral("assetId"), session.summary().remaining.at(1).toString());
+    QString error;
+    QVERIFY2(session.dispatch(QStringLiteral("eliminate"), payload, &error), qPrintable(error));
+    QVERIFY(session.hasUnsavedChanges());
+
+    // The comparison belongs to the collection it started on. Opening a
+    // different directory pauses it, draft written, before the collection
+    // changes underneath it; a comparison must never outlive its collection
+    // or carry on against one that may have opened read-only.
+    const QTemporaryDir elsewhere;
+    QVERIFY(elsewhere.isValid());
+    QVERIFY(fixture_->window()->openDirectory(elsewhere.path()));
+    QVERIFY(!session.isActive());
+    QVERIFY(fixture_->root().collection().collectionId().toString() != original.toString());
+
+    const QList<application::StoredSession> saved =
+        fixture_->root().repository().resumableSessions(original, &error);
     QCOMPARE(saved.size(), 1);
     QCOMPARE(saved.first().lifecycle, application::SessionLifecycle::Paused);
     QCOMPARE(saved.first().draftRejected.size(), 1);

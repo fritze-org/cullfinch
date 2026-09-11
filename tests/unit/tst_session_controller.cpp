@@ -46,6 +46,7 @@ private slots:
     void pauseSavesTheDraftAndResumeRestoresIt();
     void resumeRefusesWhenAGroupChangedUnderneath();
     void aFailedDraftWriteKeepsTheInMemoryDraft();
+    void aReadOnlyCollectionRefusesToSaveTheDraft();
     void aFailedMarkWriteLeavesMarksUnchanged();
     void aFailedUndoWriteDropsTheHistoryWithoutTouchingMarks();
     void marksCannotChangeWhileAComparisonIsActive();
@@ -342,6 +343,28 @@ void TestSessionController::aFailedDraftWriteKeepsTheInMemoryDraft() {
     // The draft survives in memory and a retry is possible.
     QCOMPARE(session_->summary().draftRejected.size(), 1);
     QVERIFY(session_->hasUnsavedChanges());
+}
+
+void TestSessionController::aReadOnlyCollectionRefusesToSaveTheDraft() {
+    QString error;
+    session_->start(QLatin1String(ConformanceFlow::kId), snapshotFor(assets_, collection_),
+                    domain::FlowOptions{}, &error);
+    session_->dispatch(QStringLiteral("drop"), QJsonObject{}, &error);
+
+    // The collection became read-only underneath a running comparison. No
+    // write reaches storage -- not the autosave, not a pause -- and the draft
+    // waits in memory until the collection is writable again.
+    dispositions_->setReadOnly(true);
+    QVERIFY2(!session_->flushPendingSave(&error), "a read-only collection must refuse the save");
+    QVERIFY(error.contains(QStringLiteral("read-only")));
+    QVERIFY(!session_->pause(&error));
+    QVERIFY(session_->isActive());
+    QCOMPARE(session_->summary().draftRejected.size(), 1);
+    QVERIFY(session_->hasUnsavedChanges());
+
+    dispositions_->setReadOnly(false);
+    QVERIFY2(session_->flushPendingSave(&error), qPrintable(error));
+    QVERIFY(!session_->hasUnsavedChanges());
 }
 
 void TestSessionController::aFailedMarkWriteLeavesMarksUnchanged() {

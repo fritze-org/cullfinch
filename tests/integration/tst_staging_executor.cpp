@@ -7,6 +7,7 @@
 #include <cullfinch/infrastructure/DirectoryScanner.h>
 
 #include <QCryptographicHash>
+#include <QDateTime>
 #include <QDir>
 #include <QFile>
 #include <QFileInfo>
@@ -15,6 +16,7 @@
 #include <QTest>
 
 #include <tuple>
+#include <utility>
 
 #include <unistd.h>
 
@@ -100,7 +102,9 @@ private slots:
     void aRefusedJournalWriteStopsTheGroupBeforeAnythingMoves();
     void recoveryFindsFilesTheJournalNeverConfirmed();
     void recoveryLeavesAStagedFileThatDoesNotMatchTheReview();
+    void recoveryLeavesAStagedFileRewrittenAtTheSameSize();
     void recoveryConfirmsATrashOutcomeFromTheManifest();
+    void eachGroupRecordsItsOwnTrashPath();
     void recoveryReportsAnUncertainTrashOutcome();
     void preflightBlocksAGroupThatGainedACompanion();
     void preflightIgnoresASidecarThePolicyIgnores();
@@ -530,6 +534,45 @@ void TestStagingExecutor::recoveryLeavesAStagedFileThatDoesNotMatchTheReview() {
     QVERIFY(QFileInfo::exists(collection.filePath(QStringLiteral("A.JPG"))));
 }
 
+void TestStagingExecutor::recoveryLeavesAStagedFileRewrittenAtTheSameSize() {
+    TempCollection collection;
+    collection.addJpeg(QStringLiteral("A.JPG"));
+    collection.addRaw(QStringLiteral("A.RAF"), QByteArrayLiteral("original"));
+
+    const domain::PhotoAssetList assets = markAll(scan(collection));
+    const domain::PlanningResult planning = domain::OperationPlanner::plan(
+        domain::CollectionId(QStringLiteral("c1")), 1, stagingRootOf(collection), assets);
+
+    FakeTrashAdapter trash;
+    trash.failNextCalls(1);
+    infrastructure::StagingExecutor executor(trash);
+    const application::OperationRecord staged =
+        executor.executeGroup(recordFor(planning.plan), planning.plan.groups.first(), {});
+    QCOMPARE(staged.state, domain::OperationState::NeedsRecovery);
+
+    // Rewritten byte for byte at the same length: the size alone would call
+    // this the reviewed file. The modification time is part of the identity.
+    const QString directory =
+        QDir(stagingRootOf(collection))
+            .absoluteFilePath(planning.plan.groups.first().stagingDirectoryName);
+    const QString stagedRaw = QDir(directory).absoluteFilePath(QStringLiteral("A.RAF"));
+    {
+        QFile file(stagedRaw);
+        QVERIFY(file.open(QIODevice::ReadWrite));
+        QCOMPARE(file.write(QByteArrayLiteral("modified")), 8);
+        QVERIFY(file.setFileTime(QDateTime::currentDateTimeUtc().addSecs(120),
+                                 QFileDevice::FileModificationTime));
+    }
+    QCOMPARE(QFileInfo(stagedRaw).size(), 8);
+
+    const application::OperationRecord recovered = executor.recover(staged);
+    QCOMPARE(recovered.state, domain::OperationState::NeedsRecovery);
+    QVERIFY2(recovered.error.contains(QStringLiteral("A.RAF")), qPrintable(recovered.error));
+    QVERIFY(QFileInfo::exists(stagedRaw));
+    QVERIFY(!QFileInfo::exists(collection.filePath(QStringLiteral("A.RAF"))));
+    QVERIFY(QFileInfo::exists(collection.filePath(QStringLiteral("A.JPG"))));
+}
+
 void TestStagingExecutor::recoveryConfirmsATrashOutcomeFromTheManifest() {
     TempCollection collection;
     collection.addJpeg(QStringLiteral("A.JPG"));
@@ -542,38 +585,104 @@ void TestStagingExecutor::recoveryConfirmsATrashOutcomeFromTheManifest() {
     FakeTrashAdapter trash;
     infrastructure::StagingExecutor executor(trash);
 
-    // Every journal write, so the test can pick the one a crash at any
-    // point would have left behind.
+    // Every journal write lands except the one after Trash returned: the
+    // write a crash at the worst moment loses, and the one the executor
+    // reports rather than swallows.
+    QList<application::OperationRecord> snapshots;
+    const application::JournalWriter journal =
+        [&snapshots](const application::OperationRecord& record, QString* error) {
+            if (stepOf(record, QStringLiteral("A.JPG")) == QStringLiteral("trashed")) {
+                if (error != nullptr) {
+                    *error = QStringLiteral("journal refused after Trash");
+                }
+                return false;
+            }
+            snapshots.append(record);
+            return true;
+        };
+    const application::OperationRecord done =
+        executor.executeGroup(recordFor(planning.plan), planning.plan.groups.first(), journal);
+    QCOMPARE(done.state, domain::OperationState::NeedsRecovery);
+    QVERIFY2(done.error.contains(QStringLiteral("reached Trash")), qPrintable(done.error));
+    QVERIFY(!done.trashPath.isEmpty());
+    QCOMPARE(stepOf(done, QStringLiteral("A.JPG")), QStringLiteral("trashed"));
+
+    // What the journal holds is the record as written just before Trash was
+    // asked: no location yet, members staged. From that alone nothing can be
+    // confirmed, and recovery says so instead of guessing.
+    const application::OperationRecord beforeTrash = snapshots.last();
+    QCOMPARE(beforeTrash.state, domain::OperationState::Trashing);
+    QVERIFY(beforeTrash.trashPath.isEmpty());
+    QCOMPARE(stepOf(beforeTrash, QStringLiteral("A.JPG")), QStringLiteral("staged"));
+    application::OperationRecord recovered = executor.recover(beforeTrash);
+    QCOMPARE(recovered.state, domain::OperationState::NeedsRecovery);
+    QVERIFY2(recovered.error.contains(QStringLiteral("Trash")), qPrintable(recovered.error));
+    QVERIFY(!QFileInfo::exists(collection.filePath(QStringLiteral("A.JPG"))));
+
+    // The record the executor handed back knows the members reached Trash,
+    // and recovery believes that journal step.
+    recovered = executor.recover(done);
+    QVERIFY2(recovered.error.isEmpty(), qPrintable(recovered.error));
+    QCOMPARE(recovered.state, domain::OperationState::Completed);
+
+    // A record that knows the platform's location but whose members are one
+    // step behind is confirmed from the manifest inside that location.
+    application::OperationRecord locationOnly = beforeTrash;
+    locationOnly.trashPath = done.trashPath;
+    recovered = executor.recover(locationOnly);
+    QVERIFY2(recovered.error.isEmpty(), qPrintable(recovered.error));
+    QCOMPARE(recovered.state, domain::OperationState::Completed);
+    QCOMPARE(stepOf(recovered, QStringLiteral("A.RAF")), QStringLiteral("trashed"));
+    QCOMPARE(trash.callCount(), 1);
+}
+
+void TestStagingExecutor::eachGroupRecordsItsOwnTrashPath() {
+    TempCollection collection;
+    collection.addJpeg(QStringLiteral("A.JPG"));
+    collection.addJpeg(QStringLiteral("B.JPG"));
+
+    const domain::PhotoAssetList assets = markAll(scan(collection));
+    const domain::PlanningResult planning = domain::OperationPlanner::plan(
+        domain::CollectionId(QStringLiteral("c1")), 1, stagingRootOf(collection), assets);
+    QCOMPARE(planning.plan.groups.size(), 2);
+
+    FakeTrashAdapter trash;
+    infrastructure::StagingExecutor executor(trash);
+
     QList<application::OperationRecord> snapshots;
     const application::JournalWriter journal =
         [&snapshots](const application::OperationRecord& record, QString*) {
             snapshots.append(record);
             return true;
         };
-    const application::OperationRecord done =
+    const application::OperationRecord first =
         executor.executeGroup(recordFor(planning.plan), planning.plan.groups.first(), journal);
-    QCOMPARE(done.state, domain::OperationState::Trashing);
-    QVERIFY(snapshots.size() >= 2);
+    QCOMPARE(first.state, domain::OperationState::Trashing);
+    QVERIFY(!first.trashPath.isEmpty());
 
-    // A crash after Trash returned but before the outcome was journalled:
-    // the record says Trashing, the members say staged, and the platform's
-    // reported location holds the manifest that confirms where they went.
-    application::OperationRecord beforeTrash = snapshots.at(snapshots.size() - 2);
-    QCOMPARE(beforeTrash.state, domain::OperationState::Trashing);
-    QCOMPARE(stepOf(beforeTrash, QStringLiteral("A.JPG")), QStringLiteral("staged"));
-    beforeTrash.trashPath = done.trashPath;
-    QVERIFY(!beforeTrash.trashPath.isEmpty());
-    auto recovered = executor.recover(beforeTrash);
+    // The second group starts from the first group's record, as the
+    // controller runs them. Its "Trash is about to be asked" entry must not
+    // still carry the first group's location: recovery from that entry would
+    // check the wrong manifest and confirm nothing.
+    snapshots.clear();
+    const application::OperationRecord second =
+        executor.executeGroup(first, planning.plan.groups.last(), journal);
+    QCOMPARE(second.state, domain::OperationState::Trashing);
+    QVERIFY(!second.trashPath.isEmpty());
+    QVERIFY(second.trashPath != first.trashPath);
+
+    bool sawTrashing = false;
+    for (const application::OperationRecord& snapshot : std::as_const(snapshots)) {
+        if (snapshot.state == domain::OperationState::Trashing &&
+            stepOf(snapshot, QStringLiteral("B.JPG")) == QStringLiteral("staged")) {
+            sawTrashing = true;
+            QVERIFY(snapshot.trashPath.isEmpty());
+        }
+    }
+    QVERIFY(sawTrashing);
+
+    const application::OperationRecord recovered = executor.recover(second);
     QVERIFY2(recovered.error.isEmpty(), qPrintable(recovered.error));
-    QCOMPARE(recovered.state, domain::OperationState::Completed);
-    QCOMPARE(stepOf(recovered, QStringLiteral("A.RAF")), QStringLiteral("trashed"));
-    QVERIFY(!QFileInfo::exists(collection.filePath(QStringLiteral("A.JPG"))));
-
-    // A crash after the outcome was journalled but before the controller's
-    // own write: the journal already says trashed, and recovery believes it.
-    const application::OperationRecord afterTrash = snapshots.last();
-    QCOMPARE(stepOf(afterTrash, QStringLiteral("A.JPG")), QStringLiteral("trashed"));
-    recovered = executor.recover(afterTrash);
     QCOMPARE(recovered.state, domain::OperationState::Completed);
 }
 

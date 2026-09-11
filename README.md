@@ -112,6 +112,9 @@ ruleset definitions, so what protects `main` is reviewed like everything else:
 `Required checks` is the one job that depends on every required CI job (pre-commit on both
 platforms, every build-and-test entry, clang-tidy and coverage), so it is the single Actions
 context a ruleset needs to name; `codecov/patch` stays informational, as `codecov.yml` records.
+Each required check is bound to the GitHub App that reports it (`integration_id` 15368 for
+Actions, 12526 for SonarCloud), so a status with the same name from any other source does not
+satisfy it.
 The main ruleset requires no approving review because the project currently has one maintainer;
 raise `required_approving_review_count` to 1 once a second maintainer can review.
 

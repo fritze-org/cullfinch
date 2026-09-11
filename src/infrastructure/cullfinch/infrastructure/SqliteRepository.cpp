@@ -13,10 +13,13 @@
 #include <QJsonDocument>
 #include <QJsonObject>
 #include <QSet>
+#include <QSqlDatabase>
 #include <QSqlError>
 #include <QSqlQuery>
 #include <QUuid>
 #include <QVariant>
+
+#include <utility>
 
 namespace cullfinch::infrastructure {
 namespace {
@@ -436,37 +439,78 @@ bool SqliteRepository::migrate(QString* error) {
     return true;
 }
 
+namespace {
+
+/// The stored identity of a directory: its canonical path, or the absolute
+/// spelling when there is nothing to resolve yet. It is the identity AppLock
+/// uses, so the writer that opened the real path and a read-only instance
+/// that opened a symlink to it agree on which row is theirs.
+QString collectionIdentity(const QString& rootPath) {
+    const QFileInfo info(rootPath);
+    const QString canonical = info.canonicalFilePath();
+    return canonical.isEmpty() ? info.absoluteFilePath() : canonical;
+}
+
+/// Looks the collection up under its identity and, for rows written before
+/// the identity was canonical, under the absolute spelling as given.
+///
+/// Returns the row found, or nullopt; `*queryFailed` tells a failed query
+/// from a row that is not there.
+std::optional<CollectionId> lookupCollection(const QSqlDatabase& database, const QString& rootPath,
+                                             QString* error, bool* queryFailed) {
+    *queryFailed = false;
+    QStringList spellings{collectionIdentity(rootPath)};
+    if (const QString absolute = QFileInfo(rootPath).absoluteFilePath();
+        absolute != spellings.constFirst()) {
+        spellings.append(absolute);
+    }
+    for (const QString& spelling : std::as_const(spellings)) {
+        QSqlQuery lookup(database);
+        lookup.prepare(QStringLiteral("SELECT id FROM collections WHERE root_path = :root"));
+        lookup.bindValue(QStringLiteral(":root"), text(spelling));
+        if (!lookup.exec()) {
+            fail(error, lookup, tr("Looking up the collection"));
+            *queryFailed = true;
+            return std::nullopt;
+        }
+        if (lookup.next()) {
+            return CollectionId(lookup.value(0).toString());
+        }
+    }
+    return std::nullopt;
+}
+
+} // namespace
+
 std::optional<CollectionId> SqliteRepository::findCollection(const QString& rootPath,
                                                              QString* error) const {
-    QSqlQuery lookup(database_);
-    lookup.prepare(QStringLiteral("SELECT id FROM collections WHERE root_path = :root"));
-    lookup.bindValue(QStringLiteral(":root"), text(QFileInfo(rootPath).absoluteFilePath()));
-    if (!lookup.exec()) {
-        fail(error, lookup, tr("Looking up the collection"));
+    bool queryFailed = false;
+    const std::optional<CollectionId> id =
+        lookupCollection(database_, rootPath, error, &queryFailed);
+    if (queryFailed) {
         return std::nullopt;
     }
-    if (!lookup.next()) {
+    if (!id.has_value()) {
         report(error, tr("'%1' has not been opened by the window that has it open for writing "
                          "yet; there is nothing stored to browse.")
                           .arg(rootPath));
         return std::nullopt;
     }
-    return CollectionId(lookup.value(0).toString());
+    return id;
 }
 
 std::optional<CollectionId> SqliteRepository::ensureCollection(const QString& rootPath,
                                                                bool recursive, QString* error) {
-    const QString canonical = QFileInfo(rootPath).absoluteFilePath();
+    const QString canonical = collectionIdentity(rootPath);
 
-    QSqlQuery lookup(database_);
-    lookup.prepare(QStringLiteral("SELECT id FROM collections WHERE root_path = :root"));
-    lookup.bindValue(QStringLiteral(":root"), text(canonical));
-    if (!lookup.exec()) {
-        fail(error, lookup, tr("Looking up the collection"));
+    bool queryFailed = false;
+    const std::optional<CollectionId> existing =
+        lookupCollection(database_, rootPath, error, &queryFailed);
+    if (queryFailed) {
         return std::nullopt;
     }
-    if (lookup.next()) {
-        const CollectionId id(lookup.value(0).toString());
+    if (existing.has_value()) {
+        const CollectionId id = *existing;
         QSqlQuery update(database_);
         update.prepare(
             QStringLiteral("UPDATE collections SET recursive = :recursive WHERE id = :id"));

@@ -443,7 +443,8 @@ OperationRecord StagingExecutor::executeGroup(const OperationRecord& input,
     for (const PlannedMember& member : group.members) {
         const QString staged = QDir(directory).absoluteFilePath(member.fileName);
         const domain::FileFingerprint actual = fingerprintOf(staged);
-        if (!actual.isKnown() || actual.sizeBytes != member.expected.sizeBytes) {
+        if (!actual.isKnown() || actual.sizeBytes != member.expected.sizeBytes ||
+            actual.modifiedMsecsUtc != member.expected.modifiedMsecsUtc) {
             return withState(record, OperationState::NeedsRecovery,
                              tr("'%1' did not arrive in staging as expected. The files are kept "
                                 "for recovery and nothing was sent to Trash.")
@@ -464,7 +465,9 @@ OperationRecord StagingExecutor::executeGroup(const OperationRecord& input,
     // Trash is about to be asked. Recording that first is what lets recovery
     // tell "the group vanished because Trash took it" from "the group was
     // lost": after this point a missing directory is a probable Trash
-    // outcome, never something to repeat.
+    // outcome, never something to repeat. The path is per group: one left
+    // over from the previous group would send recovery to the wrong manifest.
+    record.trashPath.clear();
     record.state = OperationState::Trashing;
     if (!writeJournal(&journalError)) {
         return withState(record, OperationState::NeedsRecovery, journalError);
@@ -483,9 +486,7 @@ OperationRecord StagingExecutor::executeGroup(const OperationRecord& input,
 
     // The platform need not report a Trash path, so recovery relies on the
     // manifest inside the group directory rather than on this value.
-    if (record.trashPath.isEmpty()) {
-        record.trashPath = trashPath;
-    }
+    record.trashPath = trashPath;
     for (const PlannedMember& member : group.members) {
         const int index = indexOfMember(record, member.memberId);
         if (index >= 0) {
@@ -592,9 +593,11 @@ OperationRecord StagingExecutor::recover(const OperationRecord& input) {
             // A file in staging is only put back when it is the file that was
             // reviewed. Existence alone proves nothing after a crash.
             if (const domain::FileFingerprint actual = fingerprintOf(staged);
-                !actual.isKnown() || actual.sizeBytes != member.expected.sizeBytes) {
+                !actual.isKnown() || actual.sizeBytes != member.expected.sizeBytes ||
+                actual.modifiedMsecsUtc != member.expected.modifiedMsecsUtc) {
                 problems.append(tr("'%1' is in staging but is not the file that was reviewed "
-                                   "(its size differs); it was left where it is.")
+                                   "(its size or modification time differs); it was left "
+                                   "where it is.")
                                     .arg(member.fileName));
                 entry.stagingPath = staged;
                 ++stillStaged;

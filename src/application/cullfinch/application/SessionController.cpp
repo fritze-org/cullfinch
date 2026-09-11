@@ -352,6 +352,17 @@ bool SessionController::writeSession(SessionLifecycle lifecycle, QString* error)
     if (!isActive()) {
         return true;
     }
+    if (dispositions_.isReadOnly()) {
+        // Starting and resuming already refuse a read-only collection; this
+        // covers a comparison that was running when the collection became
+        // read-only underneath it. The draft stays in memory for a retry.
+        savePending_ = true;
+        if (error != nullptr) {
+            *error = tr("The comparison draft could not be saved: the collection is open "
+                        "read-only.");
+        }
+        return false;
+    }
     saving_ = true;
     Q_EMIT savingChanged(saving_, unsaved_);
 

@@ -230,6 +230,19 @@ jobs:
               \( -name '*.so' -o -name '*.dylib' \) -print 2>/dev/null \
               | sed "s|${{ github.workspace }}/stage/||" | sort
           } > "plugins-${{ matrix.preset }}.txt"
+          if [ "${{ runner.os }}" = macOS ]; then
+            # What the hand-installed SQL driver asks for, and where the executable lets it look.
+            {
+              echo "# sqldrivers load commands"
+              for plugin in "${{ github.workspace }}"/stage/cullfinch.app/Contents/PlugIns/sqldrivers/*.dylib; do
+                otool -L "$plugin" || true
+                otool -l "$plugin" | grep -A 2 LC_RPATH || true
+              done
+              echo "# executable rpaths"
+              otool -l "${{ github.workspace }}/stage/cullfinch.app/Contents/MacOS/cullfinch" \
+                | grep -A 2 LC_RPATH || true
+            } >> "plugins-${{ matrix.preset }}.txt"
+          fi
           cat "plugins-${{ matrix.preset }}.txt"
 
       - name: Upload test results and failure artifacts
