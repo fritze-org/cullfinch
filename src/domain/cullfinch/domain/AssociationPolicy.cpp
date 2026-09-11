@@ -237,7 +237,7 @@ AssociationResult StemAssociationResolver::resolve(const CollectionId& collectio
         } else if (rawCount > 0) {
             asset.pairingState = PairingState::RawOnly;
             asset.diagnostics.append(
-                tr("No JPG preview accompanies this RAW file. cullfinch does not render RAW "
+                tr("No JPG preview accompanies this RAW file. Cullfinch does not render RAW "
                    "embedded previews."));
         } else {
             asset.pairingState = PairingState::Ambiguous;

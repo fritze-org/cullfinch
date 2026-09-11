@@ -119,7 +119,7 @@ struct CommandLine {
     QCommandLineOption dataDirectory{
         QStringLiteral("data-dir"),
         QCoreApplication::translate("cullfinch",
-                                    "Use an alternative directory for the cullfinch database."),
+                                    "Use an alternative directory for the Cullfinch database."),
         QStringLiteral("path")};
     QCommandLineOption cacheDirectory{
         QStringLiteral("cache-dir"),
@@ -180,6 +180,9 @@ int main(int argc, char* argv[]) {
 
     QApplication application(argc, argv);
     setApplicationIdentity();
+    // The identifiers above stay lowercase because paths derive from them;
+    // what people read is the confirmed product name.
+    QGuiApplication::setApplicationDisplayName(QStringLiteral("Cullfinch"));
 
     // Matches the installed .desktop basename so the desktop can identify
     // Cullfinch for window grouping, the task switcher and its icon. Wayland
@@ -204,12 +207,26 @@ int main(int argc, char* argv[]) {
             QTextStream(stderr) << "smoke: failed - " << error << Qt::endl;
             return 2;
         }
-        QMessageBox::critical(nullptr, QCoreApplication::translate("cullfinch", "cullfinch"),
+        QMessageBox::critical(nullptr, QCoreApplication::translate("cullfinch", "Cullfinch"),
                               error);
         return 1;
     }
 
     cullfinch::ui::BrowserWindow* window = root.createBrowserWindow();
+
+    // Clean shutdown waits for the draft. A quit that does not pass through
+    // the shell's close event -- the File menu, a session logout, SIGTERM
+    // handled by Qt -- would otherwise drop a coalesced autosave that had
+    // not fired yet. The autosave is synchronous (decision 0005), so this
+    // completes before exec() returns.
+    QObject::connect(&application, &QCoreApplication::aboutToQuit, &application, [&root]() {
+        QString flushError;
+        if (!root.session().flushPendingSave(&flushError)) {
+            qWarning().noquote()
+                << QStringLiteral("cullfinch: the comparison draft could not be saved on exit: %1")
+                       .arg(flushError);
+        }
+    });
 
     // Dialogs belong to the composition root: the browser reports, the
     // application decides how loudly. Automated runs install neither and so
@@ -217,7 +234,7 @@ int main(int argc, char* argv[]) {
     QObject::connect(window, &cullfinch::ui::BrowserWindow::errorOccurred, window,
                      [window](const QString& message) {
                          QMessageBox::warning(window,
-                                              QCoreApplication::translate("cullfinch", "cullfinch"),
+                                              QCoreApplication::translate("cullfinch", "Cullfinch"),
                                               message);
                      });
 

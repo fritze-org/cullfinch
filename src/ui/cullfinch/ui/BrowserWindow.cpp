@@ -7,6 +7,7 @@
 #include <QAction>
 #include <QActionGroup>
 #include <QApplication>
+#include <QCloseEvent>
 #include <QComboBox>
 #include <QFileDialog>
 #include <QItemSelectionModel>
@@ -73,7 +74,7 @@ bool AssetFilterProxy::filterAcceptsRow(int sourceRow, const QModelIndex& source
 BrowserWindow::BrowserWindow(const AppContext& context, QWidget* parent)
     : QMainWindow(parent), context_(context) {
     setObjectName(QStringLiteral("browserWindow"));
-    setWindowTitle(tr("cullfinch"));
+    setWindowTitle(tr("Cullfinch"));
     resize(1100, 760);
 
     buildCentralWidget();
@@ -275,7 +276,7 @@ bool BrowserWindow::openDirectory(const QString& path) {
     }
     ++presentationGeneration_;
     pathLabel_->setText(path);
-    setWindowTitle(tr("cullfinch — %1").arg(path));
+    setWindowTitle(tr("Cullfinch — %1").arg(path));
     offerResume();
     return true;
 }
@@ -550,6 +551,25 @@ void BrowserWindow::reportError(const QString& message) {
     statusBar()->showMessage(message, 8000);
     statusBar()->setToolTip(message);
     Q_EMIT errorOccurred(message);
+}
+
+void BrowserWindow::closeEvent(QCloseEvent* event) {
+    // The comparison shell is this window's child, so closing the browser
+    // takes the comparison down with it. That is a pause -- the draft is
+    // written first -- never a silent apply or discard, and never a lost
+    // autosave. The shell's own close event covers only the shell.
+    if (context_.session.isActive()) {
+        QString error;
+        if (!context_.session.pause(&error)) {
+            reportError(error);
+            event->ignore();
+            return;
+        }
+        if (shell_ != nullptr) {
+            shell_->close();
+        }
+    }
+    QMainWindow::closeEvent(event);
 }
 
 void BrowserWindow::changeEvent(QEvent* event) {

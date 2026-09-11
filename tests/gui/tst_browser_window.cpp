@@ -3,6 +3,7 @@
 
 #include <cullfinch/ui/ReviewDialog.h>
 
+#include <QAbstractItemModelTester>
 #include <QAction>
 #include <QItemSelectionModel>
 #include <QJsonObject>
@@ -34,6 +35,8 @@ private slots:
     void unmarkRestoresEligibility();
     void reviewCountsPhysicalFilesForTheWholeGroup();
     void aSecondInstanceOpensTheCollectionReadOnly();
+    void closingTheBrowserPausesAnActiveComparison();
+    void theListModelSatisfiesTheModelTester();
 
 private:
     std::unique_ptr<GuiFixture> fixture_;
@@ -264,6 +267,57 @@ void TestBrowserWindow::aSecondInstanceOpensTheCollectionReadOnly() {
     QVERIFY(compare->isEnabled());
     QVERIFY(GuiFixture::waitFor([&]() { return !second.collection().isScanning(); }));
     QCOMPARE(window->model()->rowCount(), 6);
+}
+
+void TestBrowserWindow::closingTheBrowserPausesAnActiveComparison() {
+    fixture_->window()->selectAssets({fixture_->window()->model()->idForRow(0),
+                                      fixture_->window()->model()->idForRow(1),
+                                      fixture_->window()->model()->idForRow(2)});
+    QVERIFY(fixture_->window()->startFlow(QStringLiteral("image-wall")));
+    application::SessionController& session = fixture_->root().session();
+
+    QJsonObject payload;
+    payload.insert(QStringLiteral("assetId"), session.summary().remaining.at(1).toString());
+    QString error;
+    QVERIFY2(session.dispatch(QStringLiteral("eliminate"), payload, &error), qPrintable(error));
+    // The autosave is coalesced; the write has not happened yet.
+    QVERIFY(session.hasUnsavedChanges());
+
+    // Closing the browser takes the comparison with it. That is a pause with
+    // the draft written first -- never a silent apply, discard, or a lost
+    // autosave.
+    QVERIFY(fixture_->window()->close());
+    QVERIFY(!session.isActive());
+    QCOMPARE(fixture_->root().collection().rejectedCount(), 0);
+
+    const QList<application::StoredSession> saved = fixture_->root().repository().resumableSessions(
+        fixture_->root().collection().collectionId(), &error);
+    QCOMPARE(saved.size(), 1);
+    QCOMPARE(saved.first().lifecycle, application::SessionLifecycle::Paused);
+    QCOMPARE(saved.first().draftRejected.size(), 1);
+}
+
+void TestBrowserWindow::theListModelSatisfiesTheModelTester() {
+    // Qt's own contract checker for QAbstractItemModel: every signal the
+    // model emits while assets, marks and generations change is validated
+    // against what the views are entitled to assume.
+    QAbstractItemModelTester tester(fixture_->window()->model(),
+                                    QAbstractItemModelTester::FailureReportingMode::QtTest);
+
+    const domain::AssetId target = fixture_->window()->model()->idForRow(0);
+    QString error;
+    QVERIFY(
+        fixture_->root().dispositions().applyRejections({target}, QStringLiteral("test"), &error));
+    QVERIFY(
+        GuiFixture::waitFor([&]() { return fixture_->root().collection().rejectedCount() == 1; }));
+    QVERIFY(fixture_->root().dispositions().unmark({target}, &error));
+    QVERIFY(
+        GuiFixture::waitFor([&]() { return fixture_->root().collection().rejectedCount() == 0; }));
+
+    // A rescan republishes the whole set.
+    fixture_->collection().addJpeg(QStringLiteral("IMG_7.JPG"));
+    QVERIFY(fixture_->openCollection(7));
+    QCOMPARE(fixture_->window()->model()->rowCount(), 7);
 }
 
 QTEST_MAIN(TestBrowserWindow)
