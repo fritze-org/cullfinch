@@ -91,11 +91,16 @@ jobs:
             preset: ci-linux-gcc
             display: wayland
             session: tests/support/with-wayland.sh
+            package: true
+          # Sanitizers cover the application, not the shipped artefact: the
+          # package that ships is not instrumented, so a smoke test against a
+          # sanitized binary would prove nothing about it.
           - name: Linux Clang sanitizers
             runner: ubuntu-24.04
             preset: ci-linux-asan
             display: wayland
             session: tests/support/with-wayland.sh
+            package: false
           # Secondary compatibility: the XCB path must keep working, but it is
           # never a substitute for the Wayland job above.
           - name: Linux X11 compatibility
@@ -103,16 +108,19 @@ jobs:
             preset: ci-linux-gcc-x11
             display: xcb
             session: tests/support/with-x11.sh
+            package: true
           - name: macOS Apple Silicon
             runner: macos-15
             preset: ci-macos
             display: cocoa
             session: ''
+            package: true
           - name: macOS Intel
             runner: macos-15-intel
             preset: ci-macos
             display: cocoa
             session: ''
+            package: true
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
 
@@ -184,6 +192,7 @@ jobs:
             --output-junit "${{ github.workspace }}/ctest-gui.xml"
 
       - name: Install into a staging prefix
+        if: matrix.package
         run: cmake --install build/${{ matrix.preset }} --prefix "${{ github.workspace }}/stage"
 
       # Linked unit tests cannot catch a missing runtime dependency; launching
@@ -191,6 +200,7 @@ jobs:
       # selected and X11 genuinely unavailable, because a package that works
       # only through XCB does not satisfy the primary Linux target.
       - name: Packaged application smoke test
+        if: matrix.package
         env:
           QT_QPA_PLATFORM: ${{ matrix.display }}
           # Names the backend the installed binary must actually load, which

@@ -32,7 +32,7 @@ QJsonArray toJsonArray(const QList<AssetId>& ids) {
 QList<AssetId> assetIdsFromJson(const QJsonArray& array) {
     QList<AssetId> ids;
     ids.reserve(array.size());
-    for (const QJsonValue& value : array) {
+    for (const auto& value : array) {
         if (value.isString()) {
             ids.append(AssetId(value.toString()));
         }

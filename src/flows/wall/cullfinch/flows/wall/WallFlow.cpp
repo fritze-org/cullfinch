@@ -49,7 +49,7 @@ Wall parse(const FlowState& state) {
     }
 
     const QJsonArray positions = payload.value(QLatin1String(kKeySlots)).toArray();
-    for (const QJsonValue& value : positions) {
+    for (const auto& value : positions) {
         if (value.isNull()) {
             wall.positions.append(WallSlot{});
         } else if (value.isString()) {
