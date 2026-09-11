@@ -40,8 +40,8 @@ bool CompositionRoot::initialise(QString* error) {
     // One writer per collection. A second instance opens read-only rather
     // than sharing the database and the staging directory with the first.
     lock_ = std::make_unique<infrastructure::AppLock>();
-    collection_ = std::make_unique<application::CollectionController>(*repository_, *scanner_,
-                                                                      lock_.get());
+    collection_ =
+        std::make_unique<application::CollectionController>(*repository_, *scanner_, lock_.get());
     dispositions_ = std::make_unique<application::DispositionController>(*repository_);
     session_ =
         std::make_unique<application::SessionController>(flows_, *repository_, *dispositions_);
@@ -62,9 +62,9 @@ bool CompositionRoot::initialise(QString* error) {
 
     // A collection another instance is writing to accepts no marks or drafts
     // from this one.
-    QObject::connect(collection_.get(), &application::CollectionController::readOnlyChanged,
-                     dispositions_.get(),
-                     [this](bool readOnly, const QString&) { dispositions_->setReadOnly(readOnly); });
+    QObject::connect(
+        collection_.get(), &application::CollectionController::readOnlyChanged, dispositions_.get(),
+        [this](bool readOnly, const QString&) { dispositions_->setReadOnly(readOnly); });
 
     registerFlows();
     return true;

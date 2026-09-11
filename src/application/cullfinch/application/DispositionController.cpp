@@ -127,8 +127,7 @@ bool DispositionController::persist(const QHash<AssetId, Disposition>& targets, 
     return true;
 }
 
-void DispositionController::applyFromHistory(
-    const QHash<AssetId, Disposition>& targets) {
+void DispositionController::applyFromHistory(const QHash<AssetId, Disposition>& targets) {
     QString error;
     applyingFromHistory_ = true;
     const bool written = persist(targets, &error);

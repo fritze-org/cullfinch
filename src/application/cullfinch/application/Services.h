@@ -11,6 +11,7 @@
 #include <QList>
 #include <QString>
 
+#include <functional>
 #include <optional>
 
 namespace cullfinch::application {
@@ -150,6 +151,12 @@ public:
     virtual bool moveToTrash(const QString& path, QString* resultingPath, QString* error) = 0;
 };
 
+/// Makes an operation record durable. The executor calls it before and after
+/// every step that moves a file, so an interruption at any point leaves a
+/// journal that says what was intended and what is known to have happened.
+/// @return false when the record could not be written; the run then stops.
+using JournalWriter = std::function<bool(const OperationRecord& record, QString* error)>;
+
 /// Executes a reviewed plan: recoverable same-filesystem staging, then one
 /// Trash call on the completed group directory.
 class IOperationExecutor {
@@ -170,8 +177,12 @@ public:
                                                            QString* error) const = 0;
 
     /// Run one group to completion or to a recorded recoverable state.
+    ///
+    /// `journal` is invoked with the record as each step is about to happen
+    /// and again once it has; a journal write that fails stops the group.
     virtual OperationRecord executeGroup(const OperationRecord& record,
-                                         const domain::PlannedGroup& group) = 0;
+                                         const domain::PlannedGroup& group,
+                                         const JournalWriter& journal) = 0;
 
     /// Reconcile a journal after a crash or an interrupted run.
     virtual OperationRecord recover(const OperationRecord& record) = 0;

@@ -79,8 +79,21 @@ bool OperationController::execute(const domain::OperationPlan& plan,
     const int total = plan.logicalPhotoCount();
     Q_EMIT progressChanged(completed, total);
 
+    // Every rename is bracketed by a journal write: the intent before the
+    // move, the outcome after it. A crash between the two leaves a record
+    // that names the intended destination, which is what recovery inspects.
+    const application::JournalWriter journal = [this](OperationRecord snapshot,
+                                                      QString* journalError) {
+        snapshot.updatedUtc = QDateTime::currentDateTimeUtc();
+        if (!persist(snapshot, journalError)) {
+            return false;
+        }
+        Q_EMIT recordChanged(snapshot);
+        return true;
+    };
+
     for (const domain::PlannedGroup& group : plan.groups) {
-        record = executor_.executeGroup(record, group);
+        record = executor_.executeGroup(record, group, journal);
         record.updatedUtc = QDateTime::currentDateTimeUtc();
 
         QString storageError;

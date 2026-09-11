@@ -229,8 +229,7 @@ void TestBrowserWindow::aSecondInstanceOpensTheCollectionReadOnly() {
     QVERIFY2(second.initialise(&error), qPrintable(error));
     std::unique_ptr<ui::BrowserWindow> window(second.createBrowserWindow());
 
-    QSignalSpy readOnly(&second.collection(),
-                        &application::CollectionController::readOnlyChanged);
+    QSignalSpy readOnly(&second.collection(), &application::CollectionController::readOnlyChanged);
     QVERIFY2(window->openDirectory(fixture_->collection().path()),
              "a held lock downgrades the open; it does not refuse it");
     QVERIFY(second.collection().isReadOnly());
