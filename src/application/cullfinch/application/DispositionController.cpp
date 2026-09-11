@@ -4,6 +4,8 @@
 #include <QCoreApplication>
 #include <QUndoCommand>
 
+#include <utility>
+
 namespace cullfinch::application {
 namespace {
 
@@ -103,7 +105,7 @@ bool DispositionController::persist(const QHash<AssetId, Disposition>& targets, 
     if (!repository_.applyDispositions(collectionId_, revision_, reject, neutral, &newRevision,
                                        &storageError)) {
         if (error != nullptr) {
-            *error = storageError;
+            *error = std::move(storageError);
         }
         if (!blocked_) {
             blocked_ = true;

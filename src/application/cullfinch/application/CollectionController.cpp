@@ -4,6 +4,8 @@
 #include <QCoreApplication>
 #include <QHash>
 
+#include <utility>
+
 namespace cullfinch::application {
 CollectionController::CollectionController(IAssetRepository& repository, IScanService& scanner,
                                            ICollectionLock* lock, QObject* parent)
@@ -82,7 +84,7 @@ bool CollectionController::open(const QString& rootPath, bool recursive, QString
                  : repository_.findCollection(rootPath, &storageError);
     if (!id.has_value()) {
         if (error != nullptr) {
-            *error = storageError;
+            *error = std::move(storageError);
         }
         if (writable && lock_ != nullptr) {
             // Nothing was opened, so nothing may stay locked: another
