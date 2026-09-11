@@ -206,7 +206,7 @@ domain::OperationPlan planFromJson(const QJsonObject& object) {
         object.value(QLatin1String("collectionRevision")).toString().toULongLong();
     plan.stagingRoot = object.value(QLatin1String("stagingRoot")).toString();
 
-    for (const QJsonValue& groupValue : object.value(QLatin1String("groups")).toArray()) {
+    for (const auto& groupValue : object.value(QLatin1String("groups")).toArray()) {
         const QJsonObject groupObject = groupValue.toObject();
         domain::PlannedGroup group;
         group.assetId = AssetId(groupObject.value(QLatin1String("assetId")).toString());
@@ -214,8 +214,7 @@ domain::OperationPlan planFromJson(const QJsonObject& object) {
         group.stagingDirectoryName =
             groupObject.value(QLatin1String("stagingDirectoryName")).toString();
 
-        for (const QJsonValue& memberValue :
-             groupObject.value(QLatin1String("members")).toArray()) {
+        for (const auto& memberValue : groupObject.value(QLatin1String("members")).toArray()) {
             const QJsonObject entry = memberValue.toObject();
             domain::PlannedMember member;
             member.memberId = MemberId(entry.value(QLatin1String("memberId")).toString());
@@ -485,8 +484,7 @@ std::optional<CollectionId> lookupCollection(const QSqlDatabase& database, const
 std::optional<CollectionId> SqliteRepository::findCollection(const QString& rootPath,
                                                              QString* error) const {
     bool queryFailed = false;
-    const std::optional<CollectionId> id =
-        lookupCollection(database_, rootPath, error, &queryFailed);
+    std::optional<CollectionId> id = lookupCollection(database_, rootPath, error, &queryFailed);
     if (queryFailed) {
         return std::nullopt;
     }
@@ -510,7 +508,7 @@ std::optional<CollectionId> SqliteRepository::ensureCollection(const QString& ro
         return std::nullopt;
     }
     if (existing.has_value()) {
-        const CollectionId id = *existing;
+        const CollectionId& id = *existing;
         QSqlQuery update(database_);
         update.prepare(
             QStringLiteral("UPDATE collections SET recursive = :recursive WHERE id = :id"));
@@ -527,7 +525,7 @@ std::optional<CollectionId> SqliteRepository::ensureCollection(const QString& ro
     // same stored collection.
     QCryptographicHash hash(QCryptographicHash::Sha1);
     hash.addData(canonical.toUtf8());
-    const CollectionId id(QString::fromLatin1(hash.result().toHex()));
+    CollectionId id(QString::fromLatin1(hash.result().toHex()));
 
     QSqlQuery insert(database_);
     insert.prepare(QStringLiteral(
