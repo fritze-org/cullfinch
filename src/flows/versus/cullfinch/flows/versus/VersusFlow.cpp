@@ -9,6 +9,7 @@
 #include <QSet>
 
 #include <algorithm>
+#include <utility>
 
 namespace cullfinch::flows::versus {
 namespace {
@@ -165,7 +166,10 @@ Outcome resolveNode(const Bracket& bracket, int node) {
 
 int totalRoundsFor(int bracketSize) {
     int rounds = 0;
-    while ((1 << rounds) < bracketSize) {
+    // bugprone-signed-bitwise flags a signed shift count as well as a signed
+    // value being shifted, so both operands are widened; the cast back to int
+    // keeps the comparison below from mixing signedness instead.
+    while (static_cast<int>(1U << static_cast<unsigned>(rounds)) < bracketSize) {
         ++rounds;
     }
     return rounds;
@@ -182,8 +186,8 @@ MatchView findPending(const Bracket& bracket) {
     pending.totalRounds = rounds;
 
     for (int depth = rounds - 1; depth >= 0; --depth) {
-        const int first = (1 << depth) - 1;
-        const int last = (1 << (depth + 1)) - 2;
+        const int first = static_cast<int>(1U << static_cast<unsigned>(depth)) - 1;
+        const int last = static_cast<int>(1U << static_cast<unsigned>(depth + 1)) - 2;
         for (int node = first; node <= last; ++node) {
             if (node >= bracket.internalNodeCount() || bracket.decisions.contains(node)) {
                 continue;
@@ -378,7 +382,7 @@ RestoreResult VersusFlow::restore(const VersionedFlowState& saved) const {
 
     RestoreResult result;
     result.restored = true;
-    result.state = state;
+    result.state = std::move(state);
     return result;
 }
 

@@ -7,6 +7,8 @@
 #include <QJsonValue>
 #include <QSet>
 
+#include <utility>
+
 namespace cullfinch::flows::wall {
 namespace {
 
@@ -272,7 +274,7 @@ RestoreResult WallFlow::restore(const VersionedFlowState& saved) const {
 
     RestoreResult result;
     result.restored = true;
-    result.state = state;
+    result.state = std::move(state);
     return result;
 }
 
