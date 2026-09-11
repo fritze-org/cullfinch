@@ -208,6 +208,20 @@ jobs:
             ctest --preset ${{ matrix.preset }} --label-regex package \
             --output-junit "${{ github.workspace }}/ctest-package.xml"
 
+      # Which plugins actually reached the package is the whole point of the
+      # smoke test, so the inventory is recorded either way -- a missing one is
+      # far easier to see here than to infer from a runtime failure.
+      - name: Record the deployed plugin inventory
+        if: always()
+        run: |
+          {
+            echo "# deployed plugins (${{ matrix.name }})"
+            find "${{ github.workspace }}/stage" \
+              \( -name '*.so' -o -name '*.dylib' \) -print 2>/dev/null \
+              | sed "s|${{ github.workspace }}/stage/||" | sort
+          } > "plugins-${{ matrix.preset }}.txt"
+          cat "plugins-${{ matrix.preset }}.txt"
+
       - name: Upload test results and failure artifacts
         if: always()
         uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
@@ -216,6 +230,7 @@ jobs:
           path: |
             ctest-*.xml
             deps-inventory.txt
+            plugins-*.txt
             build/${{ matrix.preset }}/Testing/**
             build/${{ matrix.preset }}/clang-tidy-enabled-checks.txt
             session-artifacts/**
@@ -262,11 +277,30 @@ jobs:
 
       # A matched upstream Clang/clang-tidy toolchain: the Apple toolchain does
       # not ship clang-tidy, and mixing versions changes the diagnostics.
+      # ubuntu-24.04 ships clang-tidy 18, below the supported minimum, and the
+      # version guard rightly refuses it. apt.llvm.org is the documented
+      # provisioning path for a pinned toolchain; 23 matches both the
+      # clang-format hook and Homebrew's llvm@23 on macOS, so one LLVM version
+      # produces every diagnostic this project enforces.
       - name: Install the pinned LLVM (Linux)
         if: runner.os == 'Linux'
+        env:
+          CULLFINCH_LLVM_VERSION: '23'
         run: |
-          sudo apt-get install --no-install-recommends -y clang clang-tidy lld
-          echo "CULLFINCH_CLANG_TIDY_EXECUTABLE=$(command -v clang-tidy)" >> "$GITHUB_ENV"
+          curl -fsSL -o /tmp/llvm.sh https://apt.llvm.org/llvm.sh
+          chmod +x /tmp/llvm.sh
+          sudo /tmp/llvm.sh "${CULLFINCH_LLVM_VERSION}"
+          tidy="$(command -v "clang-tidy-${CULLFINCH_LLVM_VERSION}" || true)"
+          if [ -z "${tidy}" ]; then
+            echo "apt.llvm.org did not provide clang-tidy-${CULLFINCH_LLVM_VERSION}" >&2
+            exit 1
+          fi
+          "${tidy}" --version
+          {
+            echo "CULLFINCH_CLANG_TIDY_EXECUTABLE=${tidy}"
+            echo "CC=clang-${CULLFINCH_LLVM_VERSION}"
+            echo "CXX=clang++-${CULLFINCH_LLVM_VERSION}"
+          } >> "$GITHUB_ENV"
 
       - name: Locate the pinned LLVM (macOS)
         if: runner.os == 'macOS'

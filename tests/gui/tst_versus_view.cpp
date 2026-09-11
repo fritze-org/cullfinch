@@ -57,7 +57,7 @@ void TestVersusView::init() {
     }
 
     QVERIFY(fixture_->showWindow() != nullptr);
-    QVERIFY(QTest::qWaitForWindowExposed(fixture_->window()));
+    guitests::settleWindow(fixture_->window());
     QVERIFY(fixture_->openCollection(4));
     view_ = nullptr;
     shell_ = nullptr;
@@ -79,7 +79,7 @@ void TestVersusView::startVersusOn(int count) {
 
     shell_ = fixture_->window()->activeShell();
     QVERIFY(shell_ != nullptr);
-    QVERIFY(QTest::qWaitForWindowExposed(shell_));
+    guitests::settleWindow(shell_);
     view_ = dynamic_cast<views::versus::VersusView*>(shell_->view());
     QVERIFY(view_ != nullptr);
 

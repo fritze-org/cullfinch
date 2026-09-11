@@ -51,7 +51,7 @@ void TestBrowserWindow::init() {
     }
 
     QVERIFY(fixture_->showWindow() != nullptr);
-    QVERIFY(QTest::qWaitForWindowExposed(fixture_->window()));
+    guitests::settleWindow(fixture_->window());
     QVERIFY2(fixture_->openCollection(6), "the scan did not publish six photos");
 }
 
@@ -131,7 +131,7 @@ void TestBrowserWindow::wallFlowEndToEndAppliesMarksAndSelectsSurvivors() {
 
     ui::ComparisonShell* shell = fixture_->window()->activeShell();
     QVERIFY(shell != nullptr);
-    QVERIFY(QTest::qWaitForWindowExposed(shell));
+    guitests::settleWindow(shell);
 
     application::SessionController& session = fixture_->root().session();
     const domain::AssetId victim = session.summary().remaining.at(1);

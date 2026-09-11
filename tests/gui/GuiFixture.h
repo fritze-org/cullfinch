@@ -16,6 +16,7 @@
 #include <QTest>
 
 #include <memory>
+#include <tuple>
 
 namespace cullfinch::guitests {
 
@@ -96,6 +97,21 @@ private:
     std::unique_ptr<app::CompositionRoot> root_;
     std::unique_ptr<ui::BrowserWindow> window_;
 };
+
+/// Give a window a bounded chance to be exposed, without requiring it.
+///
+/// Exposure depends on the compositor or window manager granting it, and a
+/// headless reference session may never do so -- the same reason these suites
+/// do not assert keyboard focus. The widget behaviour under test does not need
+/// a mapped window, and QTest delivers events to widgets regardless. Tests that
+/// genuinely depend on presentation belong in the compositor integration suite.
+inline void settleWindow(QWidget* window) {
+    if (window == nullptr) {
+        return;
+    }
+    std::ignore = QTest::qWaitForWindowExposed(window, 5000);
+    QCoreApplication::processEvents();
+}
 
 /// Assert the Qt platform plugin actually in use, so an accidental fallback to
 /// offscreen never passes as a desktop-backend run.

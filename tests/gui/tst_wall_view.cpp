@@ -62,7 +62,7 @@ void TestWallView::init() {
     }
 
     QVERIFY(fixture_->showWindow() != nullptr);
-    QVERIFY(QTest::qWaitForWindowExposed(fixture_->window()));
+    guitests::settleWindow(fixture_->window());
     QVERIFY(fixture_->openCollection(6));
 }
 
@@ -83,7 +83,7 @@ void TestWallView::startWallOn(int count) {
     shell_ = fixture_->window()->activeShell();
     QVERIFY(shell_ != nullptr);
     shell_->resize(1000, 700);
-    QVERIFY(QTest::qWaitForWindowExposed(shell_));
+    guitests::settleWindow(shell_);
     view_ = dynamic_cast<views::wall::WallView*>(shell_->view());
     QVERIFY(view_ != nullptr);
 
