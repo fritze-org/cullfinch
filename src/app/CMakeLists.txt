@@ -14,9 +14,9 @@ target_include_directories(cullfinch_composition PUBLIC "${CMAKE_CURRENT_SOURCE_
 
 qt_add_executable(cullfinch_app main.cpp)
 
-# The raster icon travels inside the binary for QGuiApplication::setWindowIcon(): X11 and the
-# task switcher on compatibility desktops take the icon from the window, not from the theme.
-# The PNG is used rather than the SVG because the pinned Qt build carries no SVG icon engine.
+# The raster icon travels inside the binary for QGuiApplication::setWindowIcon(): X11 and the task
+# switcher on compatibility desktops take the icon from the window, not from the theme. The PNG is
+# used rather than the SVG because the pinned Qt build carries no SVG icon engine.
 qt_add_resources(
   cullfinch_app
   "cullfinch_icons"

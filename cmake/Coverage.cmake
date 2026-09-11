@@ -102,8 +102,8 @@ add_custom_target(
     --gcov-executable "${CULLFINCH_GCOV_EXECUTABLE}" --txt-summary --cobertura
     "${CULLFINCH_COVERAGE_DIR}/coverage.xml" --cobertura-pretty --html-details
     "${CULLFINCH_COVERAGE_DIR}/html/index.html"
-    # The build tree is gcovr's positional search path for .gcda/.gcno files; `--txt-summary`
-    # itself is a flag and takes no argument.
+    # The build tree is gcovr's positional search path for .gcda/.gcno files; `--txt-summary` itself
+    # is a flag and takes no argument.
     "${PROJECT_BINARY_DIR}"
   WORKING_DIRECTORY "${PROJECT_SOURCE_DIR}"
   COMMENT "Generating Cobertura XML and HTML coverage reports"
