@@ -16,12 +16,41 @@
 #include <QMenu>
 #include <QMenuBar>
 #include <QStatusBar>
+#include <QStyledItemDelegate>
 #include <QToolBar>
 #include <QVBoxLayout>
 
 #include <algorithm>
 
 namespace cullfinch::ui {
+namespace {
+
+/// Tile geometry. The decode size is larger than the drawn icon so a tile
+/// stays sharp when the screen scales it.
+constexpr QSize kThumbnailDecodeSize{192, 192};
+constexpr QSize kTileIconSize{160, 160};
+constexpr QSize kTileSize{196, 210};
+
+/// A tile is always the same size, whether or not its thumbnail has arrived.
+///
+/// Thumbnails decode asynchronously, so every tile is laid out before it has
+/// an image. QListView's uniform-item-size optimisation samples one delegate
+/// size hint when it lays out and never asks again, and it repaints exactly
+/// the rectangle that sampling produced -- so a hint measured from a
+/// not-yet-decoded tile leaves every photo drawn as a sliver a few scanlines
+/// tall, until an unrelated full relayout happens to fix it. Stating the size
+/// up front is what makes the optimisation's promise true.
+class TileDelegate final : public QStyledItemDelegate {
+public:
+    using QStyledItemDelegate::QStyledItemDelegate;
+
+    [[nodiscard]] QSize sizeHint(const QStyleOptionViewItem& /*option*/,
+                                 const QModelIndex& /*index*/) const override {
+        return kTileSize;
+    }
+};
+
+} // namespace
 
 AssetFilterProxy::AssetFilterProxy(QObject* parent) : QSortFilterProxyModel(parent) {
     setDynamicSortFilter(true);
@@ -136,6 +165,7 @@ void BrowserWindow::buildCentralWidget() {
     layout->addWidget(pathLabel_);
 
     model_ = new AssetListModel(context_.images, this);
+    model_->setThumbnailSize(kThumbnailDecodeSize);
     proxy_ = new AssetFilterProxy(this);
     proxy_->setSourceModel(model_);
 
@@ -146,8 +176,9 @@ void BrowserWindow::buildCentralWidget() {
     grid_->setResizeMode(QListView::Adjust);
     grid_->setUniformItemSizes(true);
     grid_->setWordWrap(true);
-    grid_->setIconSize(QSize(160, 160));
-    grid_->setGridSize(QSize(196, 210));
+    grid_->setItemDelegate(new TileDelegate(grid_));
+    grid_->setIconSize(kTileIconSize);
+    grid_->setGridSize(kTileSize);
     grid_->setSpacing(6);
     // Standard platform selection: Shift for ranges, Ctrl/Command to toggle,
     // and the platform Select All shortcut.

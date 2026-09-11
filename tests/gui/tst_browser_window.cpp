@@ -40,6 +40,7 @@ private slots:
     void closingTheBrowserPausesAnActiveComparison();
     void openingAnotherDirectoryPausesAnActiveComparison();
     void theListModelSatisfiesTheModelTester();
+    void tilesKeepTheirFullSizeWhileThumbnailsAreStillDecoding();
 
 private:
     std::unique_ptr<GuiFixture> fixture_;
@@ -377,6 +378,32 @@ void TestBrowserWindow::theListModelSatisfiesTheModelTester() {
     fixture_->collection().addJpeg(QStringLiteral("IMG_7.JPG"));
     QVERIFY(fixture_->openCollection(7));
     QCOMPARE(fixture_->window()->model()->rowCount(), 7);
+}
+
+void TestBrowserWindow::tilesKeepTheirFullSizeWhileThumbnailsAreStillDecoding() {
+    // Decoding is asynchronous, so a tile is laid out before its thumbnail
+    // exists. The grid's uniform-item-size optimisation samples one size hint
+    // at layout time and never asks again, and it repaints exactly the tile
+    // rectangle that sampling produced -- so a hint that only grows once the
+    // image arrives leaves every photo drawn as a sliver a few scanlines tall
+    // until something forces a full relayout.
+    QListView* grid = fixture_->window()->grid();
+    const QModelIndex first = grid->model()->index(0, 0);
+    QVERIFY(first.isValid());
+
+    const QRect beforeDecode = grid->visualRect(first);
+    QVERIFY2(beforeDecode.height() >= grid->iconSize().height(),
+             qPrintable(QStringLiteral("tile is %1px tall before the thumbnail arrives, too short "
+                                       "for a %2px icon")
+                            .arg(beforeDecode.height())
+                            .arg(grid->iconSize().height())));
+
+    // Asking for the decoration is what the view does when it paints, and what
+    // starts the decode.
+    QVERIFY(GuiFixture::waitFor([&]() { return first.data(Qt::DecorationRole).isValid(); }));
+
+    // The arriving thumbnail must not move or resize the tile it lands in.
+    QCOMPARE(grid->visualRect(first), beforeDecode);
 }
 
 QTEST_MAIN(TestBrowserWindow)
