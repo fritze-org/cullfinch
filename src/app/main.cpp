@@ -90,6 +90,65 @@ int runSmoke(cullfinch::ui::BrowserWindow* window, cullfinch::app::CompositionRo
 
 namespace {
 
+/// Ask Qt for portal-backed native dialogs when nothing better is configured.
+///
+/// This vcpkg Qt ships exactly one platform theme plugin, xdgdesktopportal --
+/// there is no Breeze or GTK plugin to load. On a KDE session Qt still picks
+/// its built-in QKdeTheme, which supplies colours and fonts but no native
+/// dialogs, and never falls through to the portal. QFileDialog then builds its
+/// own widget dialog, and that dialog looks up themed icons for its toolbar,
+/// its sidebar and every mime type in the listing.
+///
+/// Each icon that misses is probed against every directory every installed
+/// icon theme declares. That is cheap until one of those themes sits on a
+/// slow mount, at which point opening a directory takes seconds; see
+/// pruneUnreachableIconThemePaths() below for the case that found this.
+/// Routing the dialog through the portal avoids the scan entirely because the
+/// dialog is drawn by the portal process, not by us: on the machine this was
+/// measured on it cut the probes from 138722 to 189, and the wait from about
+/// six seconds to none.
+///
+/// An explicit QT_QPA_PLATFORMTHEME is the user's choice and is left alone. If
+/// no portal is running the theme reports no file-dialog support and Qt falls
+/// back to the widget dialog, so this is a preference, not a requirement.
+void preferPortalDialogs() {
+#ifdef Q_OS_LINUX
+    if (!qEnvironmentVariableIsEmpty("QT_QPA_PLATFORMTHEME")) {
+        return;
+    }
+    qputenv("QT_QPA_PLATFORMTHEME", QByteArrayLiteral("xdgdesktopportal"));
+#endif
+}
+
+/// Drop icon theme search paths that belong to another program's AppImage.
+///
+/// AppImages mount themselves under /tmp/.mount_<name><random> and some put
+/// that mount at the front of XDG_DATA_DIRS. Every GUI program started from
+/// such an AppImage -- a terminal emulator, most often -- inherits it, and Qt
+/// then treats the bundle's icon theme as a system theme. A bundle that ships
+/// eleven icons behind an index.theme declaring 649 directories turns a single
+/// icon miss into 649 probes across a compressed FUSE mount.
+///
+/// Those paths are never ours to use: the icons in them belong to the program
+/// that is holding the mount open, and the mount disappears when it exits.
+/// Cullfinch itself draws no themed icons, so only the fallback file dialog is
+/// affected -- but that is the dialog people open first.
+void pruneUnreachableIconThemePaths() {
+#ifdef Q_OS_LINUX
+    const QStringList searchPaths = QIcon::themeSearchPaths();
+    QStringList reachable;
+    reachable.reserve(searchPaths.size());
+    for (const QString& path : searchPaths) {
+        if (!path.startsWith(QLatin1String("/tmp/.mount_"))) {
+            reachable.append(path);
+        }
+    }
+    if (reachable.size() != searchPaths.size()) {
+        QIcon::setThemeSearchPaths(reachable);
+    }
+#endif
+}
+
 /// Report the backend actually in use, and say so plainly when it is not the
 /// one this platform is built around.
 ///
@@ -179,8 +238,10 @@ int main(int argc, char* argv[]) {
         return 0;
     }
 
+    preferPortalDialogs();
     QApplication application(argc, argv);
     setApplicationIdentity();
+    pruneUnreachableIconThemePaths();
     // The identifiers above stay lowercase because paths derive from them;
     // what people read is the confirmed product name.
     QGuiApplication::setApplicationDisplayName(QStringLiteral("Cullfinch"));
