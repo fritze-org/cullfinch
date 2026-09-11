@@ -52,3 +52,19 @@ qt_generate_deploy_app_script(
   cullfinch_deploy_script
   NO_UNSUPPORTED_PLATFORM_ERROR)
 install(SCRIPT ${cullfinch_deploy_script})
+
+# Qt's deployment helper installs only the platform plugin it considers the default, which on Linux
+# is XCB. Native Wayland is the primary Linux backend, so its QPA plugin has to be requested
+# explicitly: without it the installed package silently runs through XWayland, which the design
+# rules out. The wayland-shell-integration and wayland-graphics-integration plugins the helper
+# already deploys are useless on their own.
+if(CMAKE_SYSTEM_NAME STREQUAL "Linux")
+  if(NOT TARGET Qt6::QWaylandIntegrationPlugin)
+    message(
+      FATAL_ERROR
+        "cullfinch: the Qt Wayland platform plugin is missing from this Qt "
+        "build. Native Wayland is the primary Linux backend; enable the "
+        "'wayland' qtbase feature in vcpkg.json.")
+  endif()
+  install(FILES $<TARGET_FILE:Qt6::QWaylandIntegrationPlugin> DESTINATION Qt6/plugins/platforms)
+endif()

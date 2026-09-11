@@ -193,6 +193,9 @@ jobs:
       - name: Packaged application smoke test
         env:
           QT_QPA_PLATFORM: ${{ matrix.display }}
+          # Names the backend the installed binary must actually load, which
+          # the smoke test both selects and asserts.
+          CULLFINCH_EXPECTED_PLATFORM: ${{ matrix.display }}
           CULLFINCH_ARTIFACT_DIR: ${{ github.workspace }}/session-artifacts
         run: |
           if [ "${{ runner.os }}" = "macOS" ]; then

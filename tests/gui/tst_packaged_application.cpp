@@ -50,12 +50,21 @@ QProcessEnvironment TestPackagedApplication::cleanEnvironment(const QString& dat
     environment.insert(QStringLiteral("CULLFINCH_SMOKE_DATA_DIR"), dataDirectory);
     environment.insert(QStringLiteral("CULLFINCH_SMOKE_CACHE_DIR"), cacheDirectory);
 
-    // Whatever backend the caller selected is the one under test, so it is
-    // left alone. Only a genuinely displayless Unix session falls back to
-    // offscreen -- and never on macOS, where Cocoa is always available and the
-    // deployed bundle rightly ships no offscreen plugin.
-    if (!qEnvironmentVariableIsSet("QT_QPA_PLATFORM")) {
+    // This test process runs offscreen -- it only spawns other processes and
+    // needs no display of its own -- but the packaged binary under test must
+    // run on the backend the job is actually exercising. CTest's ENVIRONMENT
+    // property overrides the session helper's QT_QPA_PLATFORM for this process,
+    // so inheriting it would hand the child "offscreen", a plugin a deployed
+    // package has no reason to ship.
+    environment.remove(QStringLiteral("QT_QPA_PLATFORM"));
+
+    const QString expected = qEnvironmentVariable("CULLFINCH_EXPECTED_PLATFORM");
+    if (!expected.isEmpty()) {
+        environment.insert(QStringLiteral("QT_QPA_PLATFORM"), expected);
+    } else {
 #if !defined(Q_OS_MACOS)
+        // No session helper and no display: nothing but offscreen can work.
+        // Never on macOS, where Cocoa is always available.
         if (!qEnvironmentVariableIsSet("DISPLAY") &&
             !qEnvironmentVariableIsSet("WAYLAND_DISPLAY")) {
             environment.insert(QStringLiteral("QT_QPA_PLATFORM"), QStringLiteral("offscreen"));
