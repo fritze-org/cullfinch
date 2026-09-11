@@ -52,7 +52,11 @@ void TestOperationController::init() {
 
     repository_ = std::make_unique<FakeRepository>();
     QString error;
-    collectionId_ = *repository_->ensureCollection(collection_->path(), false, &error);
+    const auto ensured = repository_->ensureCollection(collection_->path(), false, &error);
+    if (!ensured.has_value()) {
+        QFAIL(qPrintable(error));
+    }
+    collectionId_ = *ensured;
     trash_ = std::make_unique<FakeTrashAdapter>();
     executor_ = std::make_unique<infrastructure::StagingExecutor>(*trash_);
     controller_ = std::make_unique<application::OperationController>(*repository_, *executor_);
@@ -118,7 +122,9 @@ void TestOperationController::executesAReviewedPlanAndJournalsEveryStep() {
     QVERIFY(stagedSeen > 0);
 
     const auto stored = repository_->loadOperation(plan.id, &error);
-    QVERIFY(stored.has_value());
+    if (!stored.has_value()) {
+        QFAIL(qPrintable(error));
+    }
     QCOMPARE(stored->state, domain::OperationState::Completed);
     QVERIFY(repository_->unfinishedOperations(collectionId_, &error).isEmpty());
 }
@@ -142,7 +148,9 @@ void TestOperationController::aRefusedJournalWriteStopsTheRunBeforeAnythingMoves
     // The refusal itself is journalled once the repository accepts writes
     // again, so the record does not stay "planned" forever.
     const auto stored = repository_->loadOperation(plan.id, &error);
-    QVERIFY(stored.has_value());
+    if (!stored.has_value()) {
+        QFAIL(qPrintable(error));
+    }
     QCOMPARE(stored->state, domain::OperationState::Failed);
 }
 
@@ -175,7 +183,9 @@ void TestOperationController::recoverPutsAnInterruptedOperationBack() {
     QVERIFY(QFileInfo::exists(collection_->filePath(QStringLiteral("A.JPG"))));
     QVERIFY(QFileInfo::exists(collection_->filePath(QStringLiteral("A.RAF"))));
     const auto stored = repository_->loadOperation(plan.id, &error);
-    QVERIFY(stored.has_value());
+    if (!stored.has_value()) {
+        QFAIL(qPrintable(error));
+    }
     QCOMPARE(stored->state, domain::OperationState::Planned);
 
     // An operation that still needs a person is reported as such.

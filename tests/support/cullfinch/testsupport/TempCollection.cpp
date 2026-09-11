@@ -27,7 +27,7 @@ QString TempCollection::filePath(const QString& relative) const {
 }
 
 QString TempCollection::addJpeg(const QString& relative, const QSize& size) {
-    const QString target = filePath(relative);
+    QString target = filePath(relative);
     QDir().mkpath(QFileInfo(target).absolutePath());
 
     // A deterministic colour per name, so a test can tell the photos apart.
@@ -54,7 +54,7 @@ QString TempCollection::addRaw(const QString& relative, const QByteArray& conten
 }
 
 QString TempCollection::addFile(const QString& relative, const QByteArray& contents) {
-    const QString target = filePath(relative);
+    QString target = filePath(relative);
     QDir().mkpath(QFileInfo(target).absolutePath());
     QFile file(target);
     if (!file.open(QIODevice::WriteOnly)) {
@@ -66,7 +66,7 @@ QString TempCollection::addFile(const QString& relative, const QByteArray& conte
 }
 
 QString TempCollection::addCorruptJpeg(const QString& relative) {
-    const QString source = addJpeg(relative);
+    QString source = addJpeg(relative);
     if (source.isEmpty()) {
         return QString();
     }

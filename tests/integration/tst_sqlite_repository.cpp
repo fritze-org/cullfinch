@@ -62,7 +62,9 @@ void TestSqliteRepository::cleanup() {
 void TestSqliteRepository::createsItsSchemaOnFirstOpen() {
     QString error;
     const auto id = repository_->ensureCollection(QStringLiteral("/photos/a"), false, &error);
-    QVERIFY2(id.has_value(), qPrintable(error));
+    if (!id.has_value()) {
+        QFAIL(qPrintable(error));
+    }
     QVERIFY(id->isValid());
     QVERIFY(repository_->collectionRevision(*id, &error) > 0);
 }
@@ -70,12 +72,17 @@ void TestSqliteRepository::createsItsSchemaOnFirstOpen() {
 void TestSqliteRepository::reopeningIsIdempotent() {
     QString error;
     const auto id = repository_->ensureCollection(QStringLiteral("/photos/a"), false, &error);
+    if (!id.has_value()) {
+        QFAIL(qPrintable(error));
+    }
     repository_->close();
 
     infrastructure::SqliteRepository reopened(databaseFile_);
     QVERIFY2(reopened.open(&error), qPrintable(error));
     const auto again = reopened.ensureCollection(QStringLiteral("/photos/a"), false, &error);
-    QVERIFY(again.has_value());
+    if (!again.has_value()) {
+        QFAIL(qPrintable(error));
+    }
     QCOMPARE(again->toString(), id->toString());
 }
 
@@ -84,6 +91,9 @@ void TestSqliteRepository::reusesTheCollectionIdentityForTheSameRoot() {
     const auto first = repository_->ensureCollection(QStringLiteral("/photos/a"), false, &error);
     const auto second = repository_->ensureCollection(QStringLiteral("/photos/a"), true, &error);
     const auto other = repository_->ensureCollection(QStringLiteral("/photos/b"), false, &error);
+    if (!first.has_value() || !second.has_value() || !other.has_value()) {
+        QFAIL(qPrintable(error));
+    }
 
     QCOMPARE(first->toString(), second->toString());
     QVERIFY(other->toString() != first->toString());
@@ -100,15 +110,21 @@ void TestSqliteRepository::aSymlinkToTheRootIsTheSameCollection() {
     // the lock already treats the two spellings as one collection.
     QString error;
     const auto stored = repository_->ensureCollection(real, false, &error);
-    QVERIFY2(stored.has_value(), qPrintable(error));
+    if (!stored.has_value()) {
+        QFAIL(qPrintable(error));
+    }
     const auto viaLink = repository_->findCollection(link, &error);
-    QVERIFY2(viaLink.has_value(), qPrintable(error));
+    if (!viaLink.has_value()) {
+        QFAIL(qPrintable(error));
+    }
     QCOMPARE(viaLink->toString(), stored->toString());
 
     // And once the writer is gone, opening through the symlink for writing
     // reconciles onto that row instead of creating a second one.
     const auto ensured = repository_->ensureCollection(link, true, &error);
-    QVERIFY2(ensured.has_value(), qPrintable(error));
+    if (!ensured.has_value()) {
+        QFAIL(qPrintable(error));
+    }
     QCOMPARE(ensured->toString(), stored->toString());
 }
 
@@ -121,21 +137,30 @@ void TestSqliteRepository::aRootStoredBeforeItExistedIsStillFound() {
     const QString link = directory_.filePath(QStringLiteral("photos-later-link"));
     QString error;
     const auto stored = repository_->ensureCollection(link, false, &error);
-    QVERIFY2(stored.has_value(), qPrintable(error));
+    if (!stored.has_value()) {
+        QFAIL(qPrintable(error));
+    }
 
     QVERIFY(QDir().mkpath(real));
     QVERIFY(QFile::link(real, link));
     const auto found = repository_->findCollection(link, &error);
-    QVERIFY2(found.has_value(), qPrintable(error));
+    if (!found.has_value()) {
+        QFAIL(qPrintable(error));
+    }
     QCOMPARE(found->toString(), stored->toString());
     const auto ensured = repository_->ensureCollection(link, false, &error);
-    QVERIFY2(ensured.has_value(), qPrintable(error));
+    if (!ensured.has_value()) {
+        QFAIL(qPrintable(error));
+    }
     QCOMPARE(ensured->toString(), stored->toString());
 }
 
 void TestSqliteRepository::storesAndReloadsAssetsWithTheirMembers() {
     QString error;
     const auto id = repository_->ensureCollection(QStringLiteral("/photos"), false, &error);
+    if (!id.has_value()) {
+        QFAIL(qPrintable(error));
+    }
     const domain::PhotoAssetList assets = AssetBuilder::resolvedSeries(4);
 
     domain::PhotoAssetList merged;
@@ -158,6 +183,9 @@ void TestSqliteRepository::storesAndReloadsAssetsWithTheirMembers() {
 void TestSqliteRepository::keepsMarksWhenMembershipIsUnchanged() {
     QString error;
     const auto id = repository_->ensureCollection(QStringLiteral("/photos"), false, &error);
+    if (!id.has_value()) {
+        QFAIL(qPrintable(error));
+    }
     const domain::PhotoAssetList assets = AssetBuilder::resolvedSeries(3);
 
     quint64 revision = 0;
@@ -180,6 +208,9 @@ void TestSqliteRepository::keepsMarksWhenMembershipIsUnchanged() {
 void TestSqliteRepository::invalidatesMarksWhenMembershipChanges() {
     QString error;
     const auto id = repository_->ensureCollection(QStringLiteral("/photos"), false, &error);
+    if (!id.has_value()) {
+        QFAIL(qPrintable(error));
+    }
     domain::PhotoAssetList assets = AssetBuilder::resolvedSeries(2);
 
     quint64 revision = 0;
@@ -204,6 +235,9 @@ void TestSqliteRepository::invalidatesMarksWhenMembershipChanges() {
 void TestSqliteRepository::marksAnAssetStaleWhenAMemberDisappears() {
     QString error;
     const auto id = repository_->ensureCollection(QStringLiteral("/photos"), false, &error);
+    if (!id.has_value()) {
+        QFAIL(qPrintable(error));
+    }
     const domain::PhotoAsset paired =
         AssetBuilder(QStringLiteral("A")).withJpeg().withRaw().build();
 
@@ -228,6 +262,9 @@ void TestSqliteRepository::marksAnAssetStaleWhenAMemberDisappears() {
 void TestSqliteRepository::refusesAMarkChangeAgainstAStaleRevision() {
     QString error;
     const auto id = repository_->ensureCollection(QStringLiteral("/photos"), false, &error);
+    if (!id.has_value()) {
+        QFAIL(qPrintable(error));
+    }
     const domain::PhotoAssetList assets = AssetBuilder::resolvedSeries(2);
 
     quint64 revision = 0;
@@ -248,6 +285,9 @@ void TestSqliteRepository::refusesAMarkChangeAgainstAStaleRevision() {
 void TestSqliteRepository::roundTripsASessionDraft() {
     QString error;
     const auto id = repository_->ensureCollection(QStringLiteral("/photos"), false, &error);
+    if (!id.has_value()) {
+        QFAIL(qPrintable(error));
+    }
     const domain::PhotoAssetList assets = AssetBuilder::resolvedSeries(3);
 
     application::StoredSession session;
@@ -264,7 +304,9 @@ void TestSqliteRepository::roundTripsASessionDraft() {
     QVERIFY2(repository_->saveSession(session, &error), qPrintable(error));
 
     const auto reloaded = repository_->loadSession(session.id, &error);
-    QVERIFY(reloaded.has_value());
+    if (!reloaded.has_value()) {
+        QFAIL(qPrintable(error));
+    }
     QCOMPARE(reloaded->draft.flowId, session.draft.flowId);
     QCOMPARE(reloaded->draft.revision, 9U);
     QCOMPARE(reloaded->draft.payload.value(QStringLiteral("bracketSize")).toInt(), 4);
@@ -277,6 +319,9 @@ void TestSqliteRepository::roundTripsASessionDraft() {
 void TestSqliteRepository::listsOnlyResumableSessions() {
     QString error;
     const auto id = repository_->ensureCollection(QStringLiteral("/photos"), false, &error);
+    if (!id.has_value()) {
+        QFAIL(qPrintable(error));
+    }
 
     const auto store = [&](application::SessionLifecycle lifecycle) {
         application::StoredSession session;
@@ -302,6 +347,9 @@ void TestSqliteRepository::listsOnlyResumableSessions() {
 void TestSqliteRepository::roundTripsAnOperationJournal() {
     QString error;
     const auto id = repository_->ensureCollection(QStringLiteral("/photos"), false, &error);
+    if (!id.has_value()) {
+        QFAIL(qPrintable(error));
+    }
     const domain::PhotoAsset asset = AssetBuilder(QStringLiteral("A"))
                                          .withJpeg()
                                          .withRaw()
@@ -327,7 +375,9 @@ void TestSqliteRepository::roundTripsAnOperationJournal() {
     QVERIFY2(repository_->saveOperation(record, &error), qPrintable(error));
 
     const auto reloaded = repository_->loadOperation(planning.plan.id, &error);
-    QVERIFY(reloaded.has_value());
+    if (!reloaded.has_value()) {
+        QFAIL(qPrintable(error));
+    }
     QCOMPARE(reloaded->state, domain::OperationState::Staging);
     QCOMPARE(reloaded->plan.groups.size(), 1);
     QCOMPARE(reloaded->plan.physicalFileCount(), 2);
