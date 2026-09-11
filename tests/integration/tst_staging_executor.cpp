@@ -474,6 +474,13 @@ void TestStagingExecutor::recoveryLeavesAStagedFileThatDoesNotMatchTheReview() {
         QFile file(stagedRaw);
         QVERIFY(file.open(QIODevice::WriteOnly | QIODevice::Truncate));
         QCOMPARE(file.write(rewritten), rewritten.size());
+        // The bytes have to reach the file before its modification time is
+        // stamped. setFileTime() does not flush, so without this the buffered
+        // write lands on close() -- after the stamp -- and the kernel puts the
+        // modification time back to now, which is the very timestamp the
+        // review recorded. The rewrite then still looks like the reviewed
+        // file and recovery restores it.
+        QVERIFY(file.flush());
         if (touched) {
             QVERIFY(file.setFileTime(QDateTime::currentDateTimeUtc().addSecs(120),
                                      QFileDevice::FileModificationTime));
