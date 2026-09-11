@@ -5,6 +5,7 @@
 #include <cullfinch/views/versus/VersusView.h>
 
 #include <QAction>
+#include <QFocusEvent>
 #include <QLabel>
 #include <QPointF>
 #include <QPushButton>
@@ -238,8 +239,15 @@ void TestVersusView::losingFocusMidGestureDecidesNothing() {
     // Alt-Tab, a workspace switch, a dialog or the lock screen all arrive as a
     // focus loss between press and release. The half-finished gesture must not
     // become a decision about a photo the user stopped looking at.
+    //
+    // The focus-out event is delivered directly rather than by moving focus to
+    // another widget: a headless compositor can have no input seat, so whether
+    // setFocus() is honoured depends on the backend. What this suite owns is
+    // the widget's response to losing focus. Real focus routing belongs to the
+    // compositor integration suite.
     QTest::mousePress(left, Qt::LeftButton, Qt::NoModifier, centre);
-    view_->rightCanvas()->setFocus(Qt::OtherFocusReason);
+    QFocusEvent focusOut(QEvent::FocusOut, Qt::OtherFocusReason);
+    QCoreApplication::sendEvent(left, &focusOut);
     QTest::mouseRelease(left, Qt::LeftButton, Qt::NoModifier, centre);
 
     QCoreApplication::processEvents();
