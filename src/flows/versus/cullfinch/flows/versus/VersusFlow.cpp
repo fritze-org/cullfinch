@@ -36,6 +36,13 @@ constexpr auto kKeyNode = "node";
 constexpr auto kKeyEliminated = "eliminated";
 constexpr auto kKeyAssetId = "assetId";
 
+/// The largest bracketSize totalRoundsFor()/findPending() can compute a round
+/// index for without a shift beyond bit 30: 1U << 31 no longer fits in a
+/// positive int, and this is a real collection size, not a network input, so
+/// rejecting it here is cheaper than proving every downstream shift safe for
+/// an arbitrarily large one.
+constexpr int kMaxBracketSize = static_cast<int>(1U << 30U);
+
 int nextPowerOfTwo(int value) {
     int size = 1;
     while (size < value) {
@@ -64,7 +71,7 @@ Bracket parse(const FlowState& state) {
 
     const int bracketSize = payload.value(QLatin1String(kKeyBracketSize)).toInt(0);
     const QJsonArray positions = payload.value(QLatin1String(kKeySlots)).toArray();
-    if (bracketSize <= 0 || positions.size() != bracketSize) {
+    if (bracketSize <= 0 || bracketSize > kMaxBracketSize || positions.size() != bracketSize) {
         return bracket;
     }
 
