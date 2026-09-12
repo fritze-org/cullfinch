@@ -8,6 +8,8 @@
 #include <QStyleHints>
 #include <QVBoxLayout>
 
+#include <algorithm>
+
 namespace cullfinch::views::wall {
 namespace {
 
@@ -26,20 +28,29 @@ WallSurface::WallSurface(application::IImageService& images, QWidget* parent)
 
 QList<domain::AssetId> WallSurface::order() const {
     QList<domain::AssetId> candidates;
-    for (const domain::AssetId& id : positions_) {
-        if (id.isValid()) {
-            candidates.append(id);
+    for (const flows::wall::WallSlot& slot : positions_) {
+        if (!slot.isPlaceholder()) {
+            candidates.append(slot.id);
         }
     }
     return candidates;
 }
 
-void WallSurface::recordVanishedTiles(const QList<domain::AssetId>& positions) {
-    for (const domain::AssetId& id : positions_) {
-        if (!id.isValid() || positions.contains(id)) {
+bool WallSurface::isOnTheWall(const domain::AssetId& id) const {
+    return std::ranges::any_of(positions_,
+                               [&id](const flows::wall::WallSlot& slot) { return slot.id == id; });
+}
+
+void WallSurface::recordVanishedTiles(const QList<flows::wall::WallSlot>& positions) {
+    for (const flows::wall::WallSlot& slot : positions_) {
+        const bool stays = std::ranges::any_of(
+            positions, [&slot](const flows::wall::WallSlot& next) { return next.id == slot.id; });
+        if (!slot.id.isValid() || stays) {
+            // An eliminated candidate whose cell is being held has not
+            // vanished: its tile is still there, marked as eliminated.
             continue;
         }
-        if (const ui::ImageCanvas* tile = tiles_.value(id, nullptr); tile != nullptr) {
+        if (const ui::ImageCanvas* tile = tiles_.value(slot.id, nullptr); tile != nullptr) {
             vanished_.append(VanishedTile{tile->geometry(), sinceStart_.elapsed()});
         }
     }
@@ -48,7 +59,7 @@ void WallSurface::recordVanishedTiles(const QList<domain::AssetId>& positions) {
 void WallSurface::removeDepartedTiles() {
     const QList<domain::AssetId> existing = tiles_.keys();
     for (const domain::AssetId& id : existing) {
-        if (!positions_.contains(id)) {
+        if (!isOnTheWall(id)) {
             tiles_.take(id)->deleteLater();
         }
     }
@@ -60,12 +71,21 @@ void WallSurface::addTile(const domain::AssetId& id) {
     tile->setPresentation(presentations_.value(id), revision_);
     tile->setCaption(presentations_.value(id).displayName);
     connect(tile, &ui::ImageCanvas::gestureArmed, this, [this, id, tile](const QPoint& at) {
+        if (tile->isRejected()) {
+            return; // Already eliminated: not a decision target until Undo.
+        }
         armedTile_ = id;
         armedRevision_ = revision_;
         armedPosition_ = tile->mapTo(this, at);
     });
     connect(tile, &ui::ImageCanvas::eliminateRequested, this,
             [this, id, tile](ui::ImageCanvas::ActivationSource source) {
+                if (tile->isRejected()) {
+                    // Fixed-position mode keeps the tile on the wall so the
+                    // user can see what the cell is being held for. Clicking it
+                    // again, or pressing Delete on it, decides nothing.
+                    return;
+                }
                 // A pointer gesture is judged against the layout it was pressed
                 // on. A key has no press, so it acts on the current layout --
                 // and never on whatever a cancelled pointer gesture left behind.
@@ -88,7 +108,7 @@ void WallSurface::addTile(const domain::AssetId& id) {
     tiles_.insert(id, tile);
 }
 
-void WallSurface::setCandidates(const QList<domain::AssetId>& positions,
+void WallSurface::setCandidates(const QList<flows::wall::WallSlot>& positions,
                                 const ui::AssetPresentationMap& presentations, quint64 revision) {
     presentations_ = presentations;
     recordVanishedTiles(positions);
@@ -99,20 +119,26 @@ void WallSurface::setCandidates(const QList<domain::AssetId>& positions,
 
     // Add tiles that are new, and fill in any created before its presentation
     // was known.
-    for (const domain::AssetId& id : positions_) {
-        if (!id.isValid()) {
-            continue; // A placeholder holds a cell but has no tile.
+    for (const flows::wall::WallSlot& slot : positions_) {
+        if (!slot.id.isValid()) {
+            continue; // A draft from before placeholders kept their candidate.
         }
-        if (!tiles_.contains(id)) {
-            addTile(id);
-            continue;
+        if (!tiles_.contains(slot.id)) {
+            addTile(slot.id);
+        } else {
+            ui::ImageCanvas* placed = tiles_.value(slot.id);
+            if (const ui::AssetPresentation& known = presentations_[slot.id];
+                !placed->presentation().previewMemberId.isValid() &&
+                known.previewMemberId.isValid()) {
+                placed->setPresentation(known, revision_);
+                placed->setCaption(known.displayName);
+            }
         }
-        ui::ImageCanvas* placed = tiles_.value(id);
-        if (const ui::AssetPresentation& known = presentations_[id];
-            !placed->presentation().previewMemberId.isValid() && known.previewMemberId.isValid()) {
-            placed->setPresentation(known, revision_);
-            placed->setCaption(known.displayName);
-        }
+        // An eliminated candidate keeps its cell in fixed-position mode, shown
+        // as eliminated rather than as an anonymous gap: that is what makes the
+        // placeholder readable instead of merely reserved. Undo clears the mark
+        // again, and Compact takes the tile away.
+        tiles_.value(slot.id)->setRejected(slot.rejected);
     }
 
     relayout();
@@ -178,12 +204,12 @@ void WallSurface::relayout() {
     // where the user last saw it until they ask to compact.
     QList<flows::wall::LayoutItem> items;
     items.reserve(positions_.size());
-    for (const domain::AssetId& id : positions_) {
+    for (const flows::wall::WallSlot& slot : positions_) {
         flows::wall::LayoutItem item;
-        item.id = id;
+        item.id = slot.id;
         // A placeholder aspect until the preview decodes, so tiles do not jump
         // the moment an image arrives.
-        item.imageSize = aspects_.value(id);
+        item.imageSize = aspects_.value(slot.id);
         items.append(item);
     }
 
@@ -266,20 +292,12 @@ void WallView::setPresentations(const ui::AssetPresentationMap& presentations) {
 void WallView::setState(const domain::FlowState& state, const domain::FlowSummary& summary) {
     revision_ = state.revision;
 
-    // Placeholders are represented by absence here: the surface lays out the
-    // real candidates, and fixed-position mode simply keeps their indices
-    // stable because the flow does not remove the slot.
-    // Placeholders are forwarded as invalid identifiers rather than filtered
-    // out: dropping them here would shrink the grid on every elimination and
-    // move the survivors, which is precisely what fixed-position mode exists to
-    // prevent.
-    QList<domain::AssetId> positions;
-    const QList<flows::wall::WallSlot> wallPositions = flows::wall::WallFlow::positions(state);
-    positions.reserve(wallPositions.size());
-    for (const flows::wall::WallSlot& slot : wallPositions) {
-        positions.append(slot.id);
-    }
-    surface_->setCandidates(positions, presentations_, revision_);
+    // Every wall position is forwarded, placeholders included: dropping them
+    // here would shrink the grid on every elimination and move the survivors,
+    // which is precisely what fixed-position mode exists to prevent. The
+    // surface also needs the placeholder's candidate to draw its tile as
+    // eliminated instead of leaving a blank cell.
+    surface_->setCandidates(flows::wall::WallFlow::positions(state), presentations_, revision_);
 
     updatingControls_ = true;
     fixedPositions_->setChecked(flows::wall::WallFlow::layoutMode(state) ==

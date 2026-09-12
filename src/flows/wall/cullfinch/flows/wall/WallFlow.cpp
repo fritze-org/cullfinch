@@ -53,9 +53,18 @@ Wall parse(const FlowState& state) {
     const QJsonArray positions = payload.value(QLatin1String(kKeySlots)).toArray();
     for (const auto& value : positions) {
         if (value.isNull()) {
-            wall.positions.append(WallSlot{});
+            // A draft written before placeholders kept their candidate. The
+            // cell is held, but nothing is known about what used to fill it.
+            wall.positions.append(WallSlot{AssetId{}, true});
         } else if (value.isString()) {
-            wall.positions.append(WallSlot{AssetId(value.toString())});
+            wall.positions.append(WallSlot{AssetId(value.toString()), false});
+        } else if (value.isObject()) {
+            const QJsonObject placeholder = value.toObject();
+            const AssetId held(placeholder.value(QLatin1String(kKeyAssetId)).toString());
+            if (!held.isValid() || !placeholder.value(QLatin1String(kKeyRejected)).toBool()) {
+                return Wall{}; // A surviving candidate is a plain identifier.
+            }
+            wall.positions.append(WallSlot{held, true});
         } else {
             return Wall{};
         }
@@ -72,10 +81,18 @@ Wall parse(const FlowState& state) {
 QJsonObject serialise(const Wall& wall) {
     QJsonArray positions;
     for (const WallSlot& slot : wall.positions) {
-        if (slot.isPlaceholder()) {
-            positions.append(QJsonValue(QJsonValue::Null));
-        } else {
+        if (!slot.isPlaceholder()) {
             positions.append(slot.id.toString());
+        } else if (slot.id.isValid()) {
+            // The schema version is deliberately unchanged: this is additive,
+            // every older payload still reads, and bumping it would make every
+            // paused wall session unresumable for the sake of one extra field.
+            QJsonObject placeholder;
+            placeholder.insert(QLatin1String(kKeyAssetId), slot.id.toString());
+            placeholder.insert(QLatin1String(kKeyRejected), true);
+            positions.append(placeholder);
+        } else {
+            positions.append(QJsonValue(QJsonValue::Null));
         }
     }
 
@@ -176,7 +193,11 @@ TransitionResult WallFlow::reduce(const FlowState& state, const FlowAction& acti
 
         int position = -1;
         for (int index = 0; index < wall.positions.size(); ++index) {
-            if (wall.positions.at(index).id == target) {
+            const WallSlot& slot = wall.positions.at(index);
+            // A placeholder is skipped rather than matched: in fixed-position
+            // mode its tile is still on screen, and a second gesture on an
+            // already eliminated photo must not duplicate the rejection.
+            if (!slot.isPlaceholder() && slot.id == target) {
                 position = index;
                 break;
             }
@@ -188,7 +209,7 @@ TransitionResult WallFlow::reduce(const FlowState& state, const FlowAction& acti
         }
 
         if (wall.mode == LayoutMode::FixedPositions) {
-            wall.positions[position] = WallSlot{};
+            wall.positions[position] = WallSlot{target, true};
         } else {
             wall.positions.removeAt(position);
         }

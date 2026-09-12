@@ -27,11 +27,14 @@ class WallSurface : public QWidget {
 public:
     explicit WallSurface(application::IImageService& images, QWidget* parent = nullptr);
 
-    /// @param positions one entry per wall position, in display order. An
-    ///        invalid identifier is a placeholder left by fixed-position mode:
-    ///        it occupies a cell so the survivors around it do not move.
-    void setCandidates(const QList<domain::AssetId>& positions,
+    /// @param positions one entry per wall position, in display order,
+    ///        placeholders included: a placeholder occupies a cell so the
+    ///        survivors around it do not move, and its tile stays on the wall
+    ///        marked as eliminated.
+    void setCandidates(const QList<flows::wall::WallSlot>& positions,
                        const ui::AssetPresentationMap& presentations, quint64 revision);
+    /// The tile showing this candidate, placeholders included: an eliminated
+    /// candidate whose cell is being held still has one.
     [[nodiscard]] ui::ImageCanvas* tileFor(const domain::AssetId& id) const;
     /// The candidates actually on the wall, without placeholders.
     [[nodiscard]] QList<domain::AssetId> order() const;
@@ -50,7 +53,10 @@ private:
     [[nodiscard]] bool acceptGesture(const domain::AssetId& id, const QPoint& pointer);
     /// Remember where tiles that are about to leave used to be, so a repeat
     /// click at those coordinates does not hit whatever moves in.
-    void recordVanishedTiles(const QList<domain::AssetId>& positions);
+    void recordVanishedTiles(const QList<flows::wall::WallSlot>& positions);
+    /// True while any wall position still refers to this candidate, whether it
+    /// survives there or is held as an eliminated placeholder.
+    [[nodiscard]] bool isOnTheWall(const domain::AssetId& id) const;
     /// Drop the tiles whose candidates are no longer on the wall.
     void removeDepartedTiles();
     /// Create the tile for one candidate and wire its gestures.
@@ -58,7 +64,7 @@ private:
 
     application::IImageService& images_;
     /// Every wall position, placeholders included.
-    QList<domain::AssetId> positions_;
+    QList<flows::wall::WallSlot> positions_;
     ui::AssetPresentationMap presentations_;
     QHash<domain::AssetId, ui::ImageCanvas*> tiles_;
     /// Oriented image size per candidate, learned once its preview decodes.

@@ -7,9 +7,11 @@
 #include <QAction>
 #include <QCheckBox>
 #include <QGuiApplication>
+#include <QImage>
 #include <QJsonObject>
 #include <QKeyEvent>
 #include <QLabel>
+#include <QPixmap>
 #include <QPushButton>
 #include <QSet>
 #include <QStyleHints>
@@ -44,6 +46,7 @@ private slots:
     void repeatClicksInTheVacatedRegionDoNotRejectTheNextPhoto();
     void keyRepeatDoesNotRejectASequence();
     void fixedPositionsKeepSurvivorsInPlaceUntilCompact();
+    void anEliminatedTileStaysInItsCellMarkedEliminated();
     void undoReinstatesThePhotoAndItsPosition();
     void anEmptyWallStillOffersUndoAndFinish();
     void keyboardOnlyCullingWorks();
@@ -250,6 +253,63 @@ void TestWallView::fixedPositionsKeepSurvivorsInPlaceUntilCompact() {
     QTest::mouseClick(compact, Qt::LeftButton);
     QVERIFY(GuiFixture::waitFor(
         [&]() { return !flows::wall::WallFlow::hasPlaceholders(session.state()); }));
+}
+
+void TestWallView::anEliminatedTileStaysInItsCellMarkedEliminated() {
+    startWallOn(6);
+    application::SessionController& session = fixture_->root().session();
+
+    auto* fixed = shell_->findChild<QCheckBox*>(QStringLiteral("wallFixedPositions"));
+    auto* compact = shell_->findChild<QPushButton*>(QStringLiteral("wallCompact"));
+    QVERIFY(fixed != nullptr);
+    QVERIFY(compact != nullptr);
+
+    fixed->setChecked(true);
+    QVERIFY(GuiFixture::waitFor([&]() {
+        return flows::wall::WallFlow::layoutMode(session.state()) ==
+               flows::wall::LayoutMode::FixedPositions;
+    }));
+
+    // Both renderings have to be taken at the same surface size, for the reason
+    // the other fixed-position case states.
+    QVERIFY(guitests::settleWindowSize(shell_, kWallWindowSize));
+    const domain::AssetId victim = view_->surface()->order().at(2);
+    ui::ImageCanvas* tile = view_->surface()->tileFor(victim);
+    QVERIFY(tile != nullptr);
+    QVERIFY(!tile->isRejected());
+    const QRect cell = tile->geometry();
+    const QImage surviving = tile->grab().toImage();
+    const QString survivingName = tile->accessibleName();
+
+    QTest::mouseClick(tile, Qt::LeftButton, Qt::NoModifier, tile->rect().center());
+    QVERIFY(GuiFixture::waitFor([&]() { return session.summary().remaining.size() == 5; }));
+    QCoreApplication::processEvents();
+
+    // The placeholder is a *rejected* placeholder: the photo stays in its cell,
+    // marked as eliminated, so the user can see what the cell is being held
+    // for. It is no longer a survivor.
+    QVERIFY2(view_->surface()->tileFor(victim) == tile, "the eliminated tile was replaced");
+    QVERIFY(tile->isRejected());
+    QVERIFY(tile->isVisible());
+    QVERIFY(!view_->surface()->order().contains(victim));
+
+    QVERIFY(guitests::settleWindowSize(shell_, kWallWindowSize));
+    QCOMPARE(tile->geometry(), cell);
+    QVERIFY2(tile->grab().toImage() != surviving, "an eliminated tile paints identically");
+    // State reaches assistive technology as text, not as colour alone.
+    QVERIFY2(tile->accessibleName() != survivingName,
+             "an eliminated tile has the accessible name of a survivor");
+
+    // Its tile is reachable, so both a click and a key can still land on it.
+    // One photo is one decision.
+    QTest::mouseClick(tile, Qt::LeftButton, Qt::NoModifier, tile->rect().center());
+    QTest::keyClick(tile, Qt::Key_Delete);
+    QCoreApplication::processEvents();
+    QCOMPARE(session.summary().draftRejected.size(), 1);
+
+    // Compacting takes the cell, and the tile with it.
+    QTest::mouseClick(compact, Qt::LeftButton);
+    QVERIFY(GuiFixture::waitFor([&]() { return view_->surface()->tileFor(victim) == nullptr; }));
 }
 
 void TestWallView::undoReinstatesThePhotoAndItsPosition() {

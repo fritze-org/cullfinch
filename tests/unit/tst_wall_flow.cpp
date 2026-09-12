@@ -1,7 +1,9 @@
 // SPDX-License-Identifier: GPL-3.0-or-later
 #include <cullfinch/flows/wall/WallFlow.h>
 
+#include <QJsonArray>
 #include <QJsonObject>
+#include <QJsonValue>
 #include <QSet>
 #include <QTest>
 
@@ -47,6 +49,9 @@ private slots:
     void eliminatingRemovesOnlyTheNamedPhoto();
     void reflowPreservesRelativeOrder();
     void fixedPositionsLeaveAPlaceholderUntilCompact();
+    void aPlaceholderKeepsTheEliminatedCandidate();
+    void refusesASecondEliminationOfAHeldPlaceholder();
+    void restoresADraftWhosePlaceholdersAreAnonymous();
     void switchingBackToReflowCompacts();
     void finishesWithAnyNumberOfSurvivorsIncludingZero();
     void refusesARepeatEliminationOfAVanishedTile();
@@ -127,6 +132,97 @@ void TestWallFlow::fixedPositionsLeaveAPlaceholderUntilCompact() {
     QVERIFY(!flow.reduce(state, action(QLatin1String(flows::wall::kActionCompact), QJsonObject{},
                                        state.revision))
                  .accepted);
+}
+
+void TestWallFlow::aPlaceholderKeepsTheEliminatedCandidate() {
+    const WallFlow flow;
+    const domain::SelectionSnapshot selection = snapshotOf(4);
+    domain::FlowState state = flow.initialise(selection, domain::FlowOptions{});
+
+    QJsonObject mode;
+    mode.insert(QStringLiteral("mode"), QStringLiteral("fixed"));
+    state = flow.reduce(state, action(QLatin1String(flows::wall::kActionSetLayoutMode), mode,
+                                      state.revision))
+                .state;
+
+    const domain::AssetId target = selection.orderedAssetIds.at(1);
+    state = flow.reduce(state, eliminate(target, state.revision)).state;
+
+    // The placeholder names the photo whose cell it is holding, which is what
+    // lets the wall leave that photo in place marked as eliminated instead of
+    // showing an anonymous gap.
+    const flows::wall::WallSlot held = WallFlow::positions(state).at(1);
+    QVERIFY(held.isPlaceholder());
+    QVERIFY(held.rejected);
+    QCOMPARE(held.id, target);
+
+    // It is still not a survivor, and the identity survives a save and reload.
+    QVERIFY(!WallFlow::candidates(state).contains(target));
+    QVERIFY(!flow.summarise(state).remaining.contains(target));
+
+    domain::VersionedFlowState saved;
+    saved.flowId = state.flowId;
+    saved.schemaVersion = state.schemaVersion;
+    saved.revision = state.revision;
+    saved.payload = state.payload;
+    const domain::RestoreResult restored = flow.restore(saved);
+    QVERIFY(restored.restored);
+    QCOMPARE(WallFlow::positions(restored.state).at(1).id, target);
+    QVERIFY(WallFlow::positions(restored.state).at(1).rejected);
+}
+
+void TestWallFlow::refusesASecondEliminationOfAHeldPlaceholder() {
+    const WallFlow flow;
+    const domain::SelectionSnapshot selection = snapshotOf(3);
+    domain::FlowState state = flow.initialise(selection, domain::FlowOptions{});
+
+    QJsonObject mode;
+    mode.insert(QStringLiteral("mode"), QStringLiteral("fixed"));
+    state = flow.reduce(state, action(QLatin1String(flows::wall::kActionSetLayoutMode), mode,
+                                      state.revision))
+                .state;
+
+    const domain::AssetId target = selection.orderedAssetIds.first();
+    const domain::FlowState after = flow.reduce(state, eliminate(target, state.revision)).state;
+
+    // Its tile is still on the wall, so a second gesture can reach it. One
+    // photo is one decision: the repeat is refused rather than duplicated.
+    QVERIFY(!flow.reduce(after, eliminate(target, after.revision)).accepted);
+    QCOMPARE(flow.summarise(after).draftRejected.size(), 1);
+}
+
+void TestWallFlow::restoresADraftWhosePlaceholdersAreAnonymous() {
+    const WallFlow flow;
+    const domain::SelectionSnapshot selection = snapshotOf(3);
+
+    // A draft written before placeholders kept their candidate: the cell is a
+    // bare null. It still restores, and the cell is still held -- there is
+    // simply no photo to show in it.
+    QJsonArray positions;
+    positions.append(selection.orderedAssetIds.at(0).toString());
+    positions.append(QJsonValue(QJsonValue::Null));
+    positions.append(selection.orderedAssetIds.at(2).toString());
+
+    QJsonObject payload;
+    payload.insert(QStringLiteral("slots"), positions);
+    payload.insert(QStringLiteral("rejected"),
+                   QJsonArray{selection.orderedAssetIds.at(1).toString()});
+    payload.insert(QStringLiteral("input"), domain::toJsonArray(selection.orderedAssetIds));
+    payload.insert(QStringLiteral("layoutMode"), QStringLiteral("fixed"));
+
+    domain::VersionedFlowState saved;
+    saved.flowId = QLatin1String(flows::wall::kFlowId);
+    saved.schemaVersion = flows::wall::kStateSchemaVersion;
+    saved.revision = 7;
+    saved.payload = payload;
+
+    const domain::RestoreResult restored = flow.restore(saved);
+    QVERIFY(restored.restored);
+    QCOMPARE(WallFlow::positions(restored.state).size(), 3);
+    QVERIFY(WallFlow::positions(restored.state).at(1).isPlaceholder());
+    QVERIFY(!WallFlow::positions(restored.state).at(1).id.isValid());
+    QVERIFY(WallFlow::hasPlaceholders(restored.state));
+    QCOMPARE(WallFlow::candidates(restored.state).size(), 2);
 }
 
 void TestWallFlow::switchingBackToReflowCompacts() {

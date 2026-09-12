@@ -77,6 +77,17 @@ VersusView::VersusView(application::IImageService& images) : root_(new QWidget) 
         right_, &ui::ImageCanvas::viewChanged, root_,
         [this](const QPointF& centre, qreal zoom) { applyLinkedView(centre, zoom, right_); });
 
+    QObject::connect(linkViews_, &QCheckBox::toggled, root_, [this](bool linked) {
+        if (!linked) {
+            return;
+        }
+        // Linking has to take effect when it is asked for. Waiting for the next
+        // pan would leave two differently framed photos while the box says they
+        // are linked. The left pane is the reference, so what the panes converge
+        // on does not depend on which one happened to be touched last.
+        applyLinkedView(left_->normalisedCentre(), left_->zoom(), left_);
+    });
+
     const auto* keepLeftShortcut = new QShortcut(QKeySequence(Qt::Key_Left), root_);
     QObject::connect(keepLeftShortcut, &QShortcut::activated, root_,
                      [this]() { eliminate(rightId_); });
@@ -117,15 +128,34 @@ void VersusView::setState(const domain::FlowState& state, const domain::FlowSumm
     matchNode_ = match.node;
 
     if (!match.isValid()) {
-        leftId_ = domain::AssetId();
-        rightId_ = domain::AssetId();
-        left_->clearPresentation();
-        right_->clearPresentation();
-
         const domain::AssetId winner = flows::versus::VersusFlow::survivor(state);
+        const ui::AssetPresentation survivor = presentations_.value(winner);
+
+        // Completion shows the survivor, and showing a photo means the photo:
+        // the left pane keeps it, marked as the selection the flow is keeping,
+        // and the opposing pane goes away instead of sitting there empty. It is
+        // the same screen the single-candidate case lands on.
+        //
+        // The identity guard matters as much here as it does for a match: this
+        // runs again whenever the session reports state, and re-presenting the
+        // same photo would restart its decode.
+        if (!(leftId_ == winner)) {
+            leftId_ = winner;
+            rightId_ = domain::AssetId();
+            right_->clearPresentation();
+            if (winner.isValid()) {
+                left_->setPresentation(survivor, revision_);
+                left_->setCaption(tr("%1 · kept").arg(survivor.displayName));
+                left_->setSelectionHighlighted(true);
+            } else {
+                left_->clearPresentation();
+            }
+        }
+        right_->setVisible(false);
+
         survivorLabel_->setVisible(true);
         survivorLabel_->setText(tr("Survivor: %1 · %2 eliminated")
-                                    .arg(presentations_.value(winner).displayName)
+                                    .arg(survivor.displayName)
                                     .arg(summary.draftRejected.size()));
         matchLabel_->setText(tr("Comparison complete. Finish to apply the eliminations."));
         // Finish and Undo remain available on the completed screen.
@@ -134,6 +164,10 @@ void VersusView::setState(const domain::FlowState& state, const domain::FlowSumm
     }
 
     survivorLabel_->setVisible(false);
+    // Undo can come back from the completed screen, which is where the second
+    // pane and the survivor mark were left behind.
+    right_->setVisible(true);
+    left_->setSelectionHighlighted(false);
     matchLabel_->setText(tr("Round %1, match %2 — click the photo to eliminate it")
                              .arg(match.round)
                              .arg(match.positionInRound + 1));
