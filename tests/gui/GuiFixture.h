@@ -51,7 +51,7 @@ public:
     [[nodiscard]] bool initialise(QString* error) { return root_->initialise(error); }
 
     [[nodiscard]] ui::BrowserWindow* showWindow() {
-        window_.reset(root_->createBrowserWindow());
+        window_ = root_->createBrowserWindow();
         window_->setStagingRoot(collection_.filePath(QStringLiteral(".cullfinch-staging")));
         window_->show();
         return window_.get();

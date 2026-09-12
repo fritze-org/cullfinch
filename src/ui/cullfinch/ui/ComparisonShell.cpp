@@ -44,11 +44,16 @@ ComparisonShell::ComparisonShell(application::SessionController& session,
 
     connect(&session_, &application::SessionController::stateChanged, this,
             &ComparisonShell::refresh);
-    connect(
-        &session_, &application::SessionController::savingChanged, this,
-        [this](bool saving, bool unsaved) {
-            savingState_->setText(saving ? tr("Saving…") : unsaved ? tr("Unsaved") : tr("Saved"));
-        });
+    connect(&session_, &application::SessionController::savingChanged, this,
+            [this](bool saving, bool unsaved) {
+                QString text = tr("Saved");
+                if (saving) {
+                    text = tr("Saving…");
+                } else if (unsaved) {
+                    text = tr("Unsaved");
+                }
+                savingState_->setText(text);
+            });
     connect(&session_, &application::SessionController::errorOccurred, this,
             &ComparisonShell::errorOccurred);
 
@@ -169,8 +174,7 @@ void ComparisonShell::changeEvent(QEvent* event) {
 }
 
 void ComparisonShell::finish() {
-    QString error;
-    if (!session_.finish(&error)) {
+    if (QString error; !session_.finish(&error)) {
         Q_EMIT errorOccurred(error);
         return;
     }
@@ -182,8 +186,7 @@ void ComparisonShell::finish() {
 }
 
 void ComparisonShell::pause() {
-    QString error;
-    if (!session_.pause(&error)) {
+    if (QString error; !session_.pause(&error)) {
         Q_EMIT errorOccurred(error);
         return;
     }
@@ -195,18 +198,17 @@ void ComparisonShell::pause() {
 }
 
 void ComparisonShell::discard() {
-    const int answer = QMessageBox::question(
-        this, tr("Discard comparison"),
-        tr("Throw away the %1 elimination(s) made in this comparison?\n\nDeletion marks from "
-           "earlier comparisons are kept.")
-            .arg(session_.summary().draftRejected.size()),
-        QMessageBox::Discard | QMessageBox::Cancel, QMessageBox::Cancel);
-    if (answer != QMessageBox::Discard) {
+    if (const int answer = QMessageBox::question(
+            this, tr("Discard comparison"),
+            tr("Throw away the %1 elimination(s) made in this comparison?\n\nDeletion marks from "
+               "earlier comparisons are kept.")
+                .arg(session_.summary().draftRejected.size()),
+            QMessageBox::Discard | QMessageBox::Cancel, QMessageBox::Cancel);
+        answer != QMessageBox::Discard) {
         return;
     }
 
-    QString error;
-    if (!session_.discard(&error)) {
+    if (QString error; !session_.discard(&error)) {
         Q_EMIT errorOccurred(error);
         return;
     }
@@ -237,8 +239,7 @@ void ComparisonShell::closeEvent(QCloseEvent* event) {
         return;
     }
     // Closing the window is never a silent apply or discard: it pauses.
-    QString error;
-    if (!session_.pause(&error)) {
+    if (QString error; !session_.pause(&error)) {
         Q_EMIT errorOccurred(error);
         event->ignore();
         return;

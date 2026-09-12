@@ -1,5 +1,5 @@
 # Shared helpers for owned targets. Every owned library, executable and test goes through these so
-# warnings, C++20, static analysis and coverage are applied consistently and never leak onto
+# warnings, C++23, static analysis and coverage are applied consistently and never leak onto
 # dependency targets.
 
 include_guard(GLOBAL)
@@ -10,7 +10,7 @@ option(CULLFINCH_ENABLE_SANITIZERS "Build owned targets with ASan and UBSan" OFF
 add_library(cullfinch_project_options INTERFACE)
 add_library(cullfinch::project_options ALIAS cullfinch_project_options)
 
-target_compile_features(cullfinch_project_options INTERFACE cxx_std_20)
+target_compile_features(cullfinch_project_options INTERFACE cxx_std_23)
 
 target_compile_options(
   cullfinch_project_options

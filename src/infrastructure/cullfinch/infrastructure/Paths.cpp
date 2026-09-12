@@ -8,8 +8,20 @@
 namespace cullfinch::infrastructure {
 namespace {
 
-QString g_dataOverride;  // NOLINT(cppcoreguidelines-avoid-non-const-global-variables)
-QString g_cacheOverride; // NOLINT(cppcoreguidelines-avoid-non-const-global-variables)
+/// Test overrides for the two platform roots.
+///
+/// Held in function-local static variables rather than at namespace scope: the
+/// state has to be mutable, and this way it is not a global and cannot be read
+/// before it is initialised.
+QString& dataOverride() {
+    static QString value;
+    return value;
+}
+
+QString& cacheOverride() {
+    static QString value;
+    return value;
+}
 
 } // namespace
 
@@ -19,15 +31,15 @@ QString Paths::ensureDirectory(const QString& path) {
 }
 
 QString Paths::applicationDataDirectory() {
-    if (!g_dataOverride.isEmpty()) {
-        return ensureDirectory(g_dataOverride);
+    if (!dataOverride().isEmpty()) {
+        return ensureDirectory(dataOverride());
     }
     return ensureDirectory(QStandardPaths::writableLocation(QStandardPaths::AppDataLocation));
 }
 
 QString Paths::cacheDirectory() {
-    if (!g_cacheOverride.isEmpty()) {
-        return ensureDirectory(g_cacheOverride);
+    if (!cacheOverride().isEmpty()) {
+        return ensureDirectory(cacheOverride());
     }
     return ensureDirectory(QStandardPaths::writableLocation(QStandardPaths::CacheLocation));
 }
@@ -45,13 +57,13 @@ QString Paths::stagingRootFor(const QString& collectionRoot) {
 }
 
 void Paths::overrideRoots(const QString& dataDirectory, const QString& cacheDirectory) {
-    g_dataOverride = dataDirectory;
-    g_cacheOverride = cacheDirectory;
+    dataOverride() = dataDirectory;
+    cacheOverride() = cacheDirectory;
 }
 
 void Paths::clearOverrides() {
-    g_dataOverride.clear();
-    g_cacheOverride.clear();
+    dataOverride().clear();
+    cacheOverride().clear();
 }
 
 } // namespace cullfinch::infrastructure

@@ -98,7 +98,7 @@ public:
     void setResumePrompt(ResumePrompt prompt) { resumePrompt_ = std::move(prompt); }
 
     [[nodiscard]] QList<domain::AssetId> selectedAssetIds() const;
-    void selectAssets(const QList<domain::AssetId>& ids);
+    void selectAssets(const QList<domain::AssetId>& ids) const;
 
     [[nodiscard]] AssetListModel* model() { return model_; }
     [[nodiscard]] QListView* grid() { return grid_; }

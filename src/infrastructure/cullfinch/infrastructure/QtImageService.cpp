@@ -24,12 +24,13 @@ qint64 imageBytes(const QImage& image) {
 }
 
 QString requestClassToken(application::ImageRequestClass kind) {
+    using enum application::ImageRequestClass;
     switch (kind) {
-    case application::ImageRequestClass::Thumbnail:
+    case Thumbnail:
         return QStringLiteral("thumb");
-    case application::ImageRequestClass::Comparison:
+    case Comparison:
         return QStringLiteral("compare");
-    case application::ImageRequestClass::FullResolution:
+    case FullResolution:
         break;
     }
     return QStringLiteral("full");
@@ -139,95 +140,101 @@ quint64 QtImageService::request(const application::ImageRequest& request) {
         }
     }
 
-    std::ignore = QtConcurrent::run(&pool_, [this, request, requestId, key]() {
-        application::ImageResult result;
-        result.requestId = requestId;
-        result.memberId = request.memberId;
-        result.generation = request.generation;
-        result.kind = request.kind;
-
-        if (isCancelled(requestId, request.generation)) {
-            return;
-        }
-
-        QImageReader reader(request.path);
-        reader.setAutoTransform(true); // Honour the embedded orientation.
-
-        const QSize native = reader.size();
-        if (!native.isValid()) {
-            result.error = tr("'%1' could not be read: %2").arg(request.path, reader.errorString());
-            deliver(result);
-            return;
-        }
-        result.nativeSize = native;
-
-        if (request.targetSize.isValid() && !request.targetSize.isEmpty()) {
-            // Scaled reading: a fit-all wall needs layout items, not
-            // full-resolution pixels for a tiny tile.
-            QSize scaled = native;
-            scaled.scale(request.targetSize, Qt::KeepAspectRatio);
-            if (scaled.width() < native.width()) {
-                reader.setScaledSize(scaled);
-            }
-        }
-
-        {
-            QMutexLocker locker(&mutex_);
-            inFlightBytes_ += static_cast<qint64>(native.width()) * native.height() * 4;
-        }
-
-        QImage image = reader.read();
-
-        {
-            QMutexLocker locker(&mutex_);
-            inFlightBytes_ -= static_cast<qint64>(native.width()) * native.height() * 4;
-            if (inFlightBytes_ < 0) {
-                inFlightBytes_ = 0;
-            }
-        }
-
-        if (image.isNull()) {
-            result.error =
-                tr("'%1' could not be decoded: %2").arg(request.path, reader.errorString());
-            deliver(result);
-            return;
-        }
-
-        // Convert to a defined sRGB working representation. An untagged file is
-        // provisionally treated as sRGB and that assumption is recorded.
-        if (!image.colorSpace().isValid()) {
-            result.colourAssumedSrgb = true;
-            image.setColorSpace(QColorSpace::SRgb);
-        } else if (image.colorSpace() != QColorSpace(QColorSpace::SRgb)) {
-            image.convertToColorSpace(QColorSpace::SRgb);
-        }
-
-        result.image = image;
-        result.success = true;
-
-        {
-            QMutexLocker locker(&mutex_);
-            const qint64 bytes = imageBytes(image);
-            if (bytes <= budgetBytes_) {
-                // Byte-budgeted least-recently-used eviction.
-                while (cacheBytes_ + bytes > budgetBytes_ && !cacheOrder_.isEmpty()) {
-                    const QString oldest = cacheOrder_.takeFirst();
-                    cacheBytes_ -= imageBytes(cache_.value(oldest));
-                    cache_.remove(oldest);
-                    if (cacheBytes_ < 0) {
-                        cacheBytes_ = 0;
-                    }
-                }
-                cache_.insert(key, image);
-                cacheOrder_.append(key);
-                cacheBytes_ += bytes;
-            }
-        }
-
-        deliver(result);
-    });
+    std::ignore = QtConcurrent::run(
+        &pool_, [this, request, requestId, key]() { decodeAndDeliver(request, requestId, key); });
 
     return requestId;
+}
+
+void QtImageService::decodeAndDeliver(const application::ImageRequest& request, quint64 requestId,
+                                      const QString& key) {
+    application::ImageResult result;
+    result.requestId = requestId;
+    result.memberId = request.memberId;
+    result.generation = request.generation;
+    result.kind = request.kind;
+
+    if (isCancelled(requestId, request.generation)) {
+        return;
+    }
+
+    QImageReader reader(request.path);
+    reader.setAutoTransform(true); // Honour the embedded orientation.
+
+    const QSize native = reader.size();
+    if (!native.isValid()) {
+        result.error = tr("'%1' could not be read: %2").arg(request.path, reader.errorString());
+        deliver(result);
+        return;
+    }
+    result.nativeSize = native;
+
+    if (request.targetSize.isValid() && !request.targetSize.isEmpty()) {
+        // Scaled reading: a fit-all wall needs layout items, not
+        // full-resolution pixels for a tiny tile.
+        QSize scaled = native;
+        scaled.scale(request.targetSize, Qt::KeepAspectRatio);
+        if (scaled.width() < native.width()) {
+            reader.setScaledSize(scaled);
+        }
+    }
+
+    const qint64 estimate = static_cast<qint64>(native.width()) * native.height() * 4;
+    {
+        QMutexLocker locker(&mutex_);
+        inFlightBytes_ += estimate;
+    }
+
+    QImage image = reader.read();
+
+    {
+        QMutexLocker locker(&mutex_);
+        inFlightBytes_ -= estimate;
+        if (inFlightBytes_ < 0) {
+            inFlightBytes_ = 0;
+        }
+    }
+
+    if (image.isNull()) {
+        result.error = tr("'%1' could not be decoded: %2").arg(request.path, reader.errorString());
+        deliver(result);
+        return;
+    }
+
+    // Convert to a defined sRGB working representation. An untagged file is
+    // provisionally treated as sRGB and that assumption is recorded.
+    if (!image.colorSpace().isValid()) {
+        result.colourAssumedSrgb = true;
+        image.setColorSpace(QColorSpace::SRgb);
+    } else if (image.colorSpace() != QColorSpace(QColorSpace::SRgb)) {
+        image.convertToColorSpace(QColorSpace::SRgb);
+    }
+
+    result.image = image;
+    result.success = true;
+
+    cacheImage(key, image);
+    deliver(result);
+}
+
+void QtImageService::cacheImage(const QString& key, const QImage& image) {
+    QMutexLocker locker(&mutex_);
+    const qint64 bytes = imageBytes(image);
+    if (bytes > budgetBytes_) {
+        return;
+    }
+    // Byte-budgeted least-recently-used eviction.
+    while (cacheBytes_ + bytes > budgetBytes_ && !cacheOrder_.isEmpty()) {
+        const QString oldest = cacheOrder_.takeFirst();
+        cacheBytes_ -= imageBytes(cache_.value(oldest));
+        cache_.remove(oldest);
+        if (cacheBytes_ < 0) {
+            cacheBytes_ = 0;
+        }
+    }
+    cache_.insert(key, image);
+    cacheOrder_.append(key);
+    cacheBytes_ += bytes;
 }
 
 void QtImageService::deliver(const application::ImageResult& result) {

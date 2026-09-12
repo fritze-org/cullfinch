@@ -17,8 +17,10 @@
 
 #include <sys/stat.h>
 
+#include <algorithm>
 #include <filesystem>
 #include <system_error>
+#include <utility>
 
 namespace cullfinch::infrastructure {
 namespace {
@@ -144,6 +146,285 @@ int indexOfMember(const OperationRecord& record, const domain::MemberId& id) {
     return -1;
 }
 
+/// The journal entry for one member, or nullptr when the record does not carry
+/// it. Every step below updates the journal through this, so "the record does
+/// not know this member" stays one check rather than an index test per site.
+OperationMemberRecord* entryFor(OperationRecord& record, const domain::MemberId& id) {
+    const int index = indexOfMember(record, id);
+    return index >= 0 ? &record.members[index] : nullptr;
+}
+
+/// Why the files of one group no longer match what was reviewed, or an empty
+/// string when they still do.
+QString memberBlocker(const PlannedGroup& group, const domain::PhotoAsset& asset,
+                      const std::optional<quint64>& stagingDevice, const QString& stagingRoot) {
+    // Membership must still match what was reviewed. A missing previously known
+    // RAW blocks the whole group.
+    QSet<QString> currentPaths;
+    for (const domain::FileMember& member : asset.members) {
+        currentPaths.insert(member.absolutePath);
+    }
+
+    for (const PlannedMember& member : group.members) {
+        if (!currentPaths.contains(member.sourcePath)) {
+            return tr("'%1' is no longer part of this photo.").arg(member.fileName);
+        }
+        const domain::FileFingerprint actual = fingerprintOf(member.sourcePath);
+        if (!actual.isKnown()) {
+            return tr("'%1' no longer exists.").arg(member.fileName);
+        }
+        if (actual.sizeBytes != member.expected.sizeBytes ||
+            actual.modifiedMsecsUtc != member.expected.modifiedMsecsUtc) {
+            return tr("'%1' changed on disk since this operation was reviewed.")
+                .arg(member.fileName);
+        }
+
+        // Rename-only staging cannot cross a filesystem boundary. The spec asks
+        // for this to block the policy rather than fail at member N with half
+        // the group already moved.
+        if (!stagingDevice.has_value()) {
+            continue;
+        }
+        const std::optional<quint64> sourceDevice = deviceOf(member.sourcePath);
+        if (!sourceDevice.has_value() || *sourceDevice != *stagingDevice) {
+            return tr("'%1' is on a different filesystem from the staging directory '%2'. This "
+                      "deletion policy moves files by rename only, so it cannot move this photo.")
+                .arg(member.fileName, stagingRoot);
+        }
+    }
+
+    if (group.members.size() != asset.members.size()) {
+        return tr("This photo now has a different number of files than was reviewed.");
+    }
+    return {};
+}
+
+/// Re-enumerate the directory: a companion that appeared after the last scan is
+/// not in the plan, and moving the rest would orphan it.
+QString appearedSiblingBlocker(const PlannedGroup& group, const domain::AssociationConfig& config) {
+    if (group.members.isEmpty()) {
+        return {};
+    }
+
+    QSet<QString> planned;
+    for (const PlannedMember& member : group.members) {
+        planned.insert(QFileInfo(member.sourcePath).absoluteFilePath());
+    }
+    const QFileInfo firstMember(group.members.first().sourcePath);
+    const QString stem = firstMember.completeBaseName();
+    const QFileInfoList siblings =
+        firstMember.dir().entryInfoList(QDir::Files | QDir::Hidden | QDir::System, QDir::Name);
+    for (const QFileInfo& sibling : siblings) {
+        // The same policy as the scan: a switched-off sidecar is not part of the
+        // photo and never was, so it cannot be left behind; an unrecognised
+        // same-stem file, on the other hand, is exactly what blocks a group.
+        if (config.isDisabledSidecar(sibling.suffix())) {
+            continue;
+        }
+        if (sibling.completeBaseName() == stem && !planned.contains(sibling.absoluteFilePath())) {
+            return tr("'%1' appeared beside this photo after it was reviewed.")
+                .arg(sibling.fileName());
+        }
+    }
+    return {};
+}
+
+/// Record where every member is going, and that it has not gone yet.
+void recordStagingIntent(OperationRecord& record, const PlannedGroup& group,
+                         const QString& directory) {
+    for (const PlannedMember& member : group.members) {
+        if (OperationMemberRecord* entry = entryFor(record, member.memberId); entry != nullptr) {
+            entry->stagingPath = QDir(directory).absoluteFilePath(member.fileName);
+            entry->lastDurableStep = QLatin1String(kStepPlanned);
+        }
+    }
+}
+
+/// Put back everything that already reached staging, and report what would not
+/// go back. Never overwrites: a staging copy that cannot be restored is retained
+/// and shown as a recovery task.
+QStringList putBackMoved(OperationRecord& record, const QList<PlannedMember>& moved,
+                         const QString& directory) {
+    QStringList problems;
+    for (const PlannedMember& member : moved) {
+        const QString staged = QDir(directory).absoluteFilePath(member.fileName);
+        QString restoreError;
+        if (!renameOnly(staged, member.sourcePath, &restoreError)) {
+            problems.append(restoreError);
+            continue;
+        }
+        if (OperationMemberRecord* entry = entryFor(record, member.memberId); entry != nullptr) {
+            entry->stagingPath.clear();
+            entry->lastDurableStep = QLatin1String(kStepRestored);
+        }
+    }
+    return problems;
+}
+
+/// The first member that failed to arrive in staging with its reviewed identity.
+///
+/// Returns the file's name, so the answer is an optional rather than an empty
+/// string: a name is data and could in principle be empty, where "no blocker"
+/// cannot be.
+std::optional<QString> absentFromStaging(const PlannedGroup& group, const QString& directory) {
+    for (const PlannedMember& member : group.members) {
+        const QString staged = QDir(directory).absoluteFilePath(member.fileName);
+        const domain::FileFingerprint actual = fingerprintOf(staged);
+        if (!actual.isKnown() || actual.sizeBytes != member.expected.sizeBytes ||
+            actual.modifiedMsecsUtc != member.expected.modifiedMsecsUtc) {
+            return member.fileName;
+        }
+    }
+    return std::nullopt;
+}
+
+/// True when the journal already recorded every member of the group in Trash.
+bool journalSaysTrashed(const OperationRecord& record, const PlannedGroup& group) {
+    if (group.members.isEmpty()) {
+        return false;
+    }
+    return std::ranges::all_of(group.members, [&record](const PlannedMember& member) {
+        const int index = indexOfMember(record, member.memberId);
+        return index >= 0 &&
+               record.members.at(index).lastDurableStep == QLatin1String(kStepTrashed);
+    });
+}
+
+/// What one group's restoration attempt found.
+struct GroupRestore {
+    QStringList missing;  ///< Members in neither their original nor staging location.
+    QStringList problems; ///< Everything that needs a person.
+    bool anyFound = false;
+    int stillStaged = 0;
+    int restored = 0;
+};
+
+/// Where the member's staged copy should be.
+///
+/// The journal first, then the manifest beside the files, then the planned name:
+/// a crash between a rename and its confirmation leaves the journal one step
+/// behind, and the manifest, or failing that the plan, still says where the file
+/// was going.
+QString stagedPathFor(const OperationMemberRecord& entry, const std::optional<Manifest>& manifest,
+                      const PlannedMember& member, const QString& directory) {
+    if (!entry.stagingPath.isEmpty()) {
+        return entry.stagingPath;
+    }
+    if (manifest.has_value()) {
+        const ManifestEntry* known = manifest->entry(member.memberId);
+        if (known != nullptr && !known->stagingPath.isEmpty()) {
+            return known->stagingPath;
+        }
+    }
+    return QDir(directory).absoluteFilePath(member.fileName);
+}
+
+void restoreMember(const PlannedMember& member, const QString& staged, OperationMemberRecord& entry,
+                   GroupRestore& found) {
+    const bool sourceExists = QFileInfo::exists(entry.sourcePath);
+    const bool stagedExists = QFileInfo::exists(staged);
+    if (sourceExists && !stagedExists) {
+        // Never moved, or already put back.
+        found.anyFound = true;
+        entry.stagingPath.clear();
+        entry.lastDurableStep = QLatin1String(kStepPlanned);
+        return;
+    }
+    if (!stagedExists) {
+        found.missing.append(member.fileName);
+        return;
+    }
+    found.anyFound = true;
+    if (sourceExists) {
+        found.problems.append(tr("'%1' exists both at its original path and in staging; "
+                                 "nothing was overwritten.")
+                                  .arg(member.fileName));
+        ++found.stillStaged;
+        return;
+    }
+
+    // A file in staging is only put back when it is the file that was reviewed.
+    // Existence alone proves nothing after a crash.
+    if (const domain::FileFingerprint actual = fingerprintOf(staged);
+        !actual.isKnown() || actual.sizeBytes != member.expected.sizeBytes ||
+        actual.modifiedMsecsUtc != member.expected.modifiedMsecsUtc) {
+        found.problems.append(tr("'%1' is in staging but is not the file that was reviewed "
+                                 "(its size or modification time differs); it was left "
+                                 "where it is.")
+                                  .arg(member.fileName));
+        entry.stagingPath = staged;
+        ++found.stillStaged;
+        return;
+    }
+
+    if (QString moveError; !renameOnly(staged, entry.sourcePath, &moveError)) {
+        found.problems.append(moveError);
+        entry.stagingPath = staged;
+        ++found.stillStaged;
+        return;
+    }
+    entry.stagingPath.clear();
+    entry.lastDurableStep = QLatin1String(kStepRestored);
+    ++found.restored;
+}
+
+GroupRestore restoreGroup(OperationRecord& record, const PlannedGroup& group,
+                          const QString& directory) {
+    QString manifestError;
+    const std::optional<Manifest> manifest =
+        StagingExecutor::readManifest(directory, &manifestError);
+
+    GroupRestore found;
+    for (const PlannedMember& member : group.members) {
+        OperationMemberRecord* entry = entryFor(record, member.memberId);
+        if (entry == nullptr) {
+            continue;
+        }
+        restoreMember(member, stagedPathFor(*entry, manifest, member, directory), *entry, found);
+    }
+    return found;
+}
+
+void markGroupTrashed(OperationRecord& record, const PlannedGroup& group) {
+    for (const PlannedMember& member : group.members) {
+        if (OperationMemberRecord* entry = entryFor(record, member.memberId); entry != nullptr) {
+            entry->lastDurableStep = QLatin1String(kStepTrashed);
+        }
+    }
+}
+
+/// Decide what a group that vanished whole means, and report whether it is
+/// confirmed to have reached Trash.
+///
+/// A group directory that disappeared together is what a Trash of it looks like.
+/// That is confirmed only when the reported Trash location still holds this
+/// group's manifest; otherwise the outcome is recorded as uncertain and left to
+/// a person. Nothing is ever deleted again on a guess.
+bool vanishedGroupReachedTrash(OperationRecord& record, const PlannedGroup& group,
+                               QStringList& problems) {
+    std::optional<Manifest> inTrash;
+    if (!record.trashPath.isEmpty()) {
+        QString ignored;
+        inTrash = StagingExecutor::readManifest(record.trashPath, &ignored);
+    }
+    if (inTrash.has_value() && inTrash->assetId == group.assetId) {
+        markGroupTrashed(record, group);
+        return true;
+    }
+
+    problems.append(tr("'%1' (%2 file(s)) is in neither its original location nor staging. "
+                       "It was probably moved to Trash before that could be recorded; check "
+                       "the Trash before doing anything else. Nothing will be deleted again.")
+                        .arg(group.displayName)
+                        .arg(group.members.size()));
+    for (const PlannedMember& member : group.members) {
+        if (OperationMemberRecord* entry = entryFor(record, member.memberId); entry != nullptr) {
+            entry->error = tr("Not found in staging or at the original path.");
+        }
+    }
+    return false;
+}
+
 } // namespace
 
 const ManifestEntry* Manifest::entry(const domain::MemberId& id) const {
@@ -258,77 +539,10 @@ domain::PlanningResult StagingExecutor::preflight(const domain::OperationPlan& p
             continue;
         }
 
-        // Membership must still match what was reviewed. A missing previously
-        // known RAW blocks the whole group.
-        QHash<QString, const domain::FileMember*> currentByPath;
-        for (const domain::FileMember& member : asset->members) {
-            currentByPath.insert(member.absolutePath, &member);
+        QString blocker = memberBlocker(group, *asset, stagingDevice, plan.stagingRoot);
+        if (blocker.isEmpty()) {
+            blocker = appearedSiblingBlocker(group, config_);
         }
-
-        QString blocker;
-        for (const PlannedMember& member : group.members) {
-            const domain::FileMember* found = currentByPath.value(member.sourcePath, nullptr);
-            if (found == nullptr) {
-                blocker = tr("'%1' is no longer part of this photo.").arg(member.fileName);
-                break;
-            }
-            const domain::FileFingerprint actual = fingerprintOf(member.sourcePath);
-            if (!actual.isKnown()) {
-                blocker = tr("'%1' no longer exists.").arg(member.fileName);
-                break;
-            }
-            if (actual.sizeBytes != member.expected.sizeBytes ||
-                actual.modifiedMsecsUtc != member.expected.modifiedMsecsUtc) {
-                blocker = tr("'%1' changed on disk since this operation was reviewed.")
-                              .arg(member.fileName);
-                break;
-            }
-            // Rename-only staging cannot cross a filesystem boundary. The
-            // spec asks for this to block the policy rather than fail at
-            // member N with half the group already moved.
-            if (stagingDevice.has_value()) {
-                const std::optional<quint64> sourceDevice = deviceOf(member.sourcePath);
-                if (!sourceDevice.has_value() || *sourceDevice != *stagingDevice) {
-                    blocker = tr("'%1' is on a different filesystem from the staging directory "
-                                 "'%2'. This deletion policy moves files by rename only, so it "
-                                 "cannot move this photo.")
-                                  .arg(member.fileName, plan.stagingRoot);
-                    break;
-                }
-            }
-        }
-        if (blocker.isEmpty() && group.members.size() != asset->members.size()) {
-            blocker = tr("This photo now has a different number of files than was reviewed.");
-        }
-
-        // Re-enumerate the directory: a companion that appeared after the
-        // last scan is not in the plan, and moving the rest would orphan it.
-        if (blocker.isEmpty() && !group.members.isEmpty()) {
-            QSet<QString> planned;
-            for (const PlannedMember& member : group.members) {
-                planned.insert(QFileInfo(member.sourcePath).absoluteFilePath());
-            }
-            const QFileInfo firstMember(group.members.first().sourcePath);
-            const QString stem = firstMember.completeBaseName();
-            const QFileInfoList siblings = firstMember.dir().entryInfoList(
-                QDir::Files | QDir::Hidden | QDir::System, QDir::Name);
-            for (const QFileInfo& sibling : siblings) {
-                // The same policy as the scan: a switched-off sidecar is not
-                // part of the photo and never was, so it cannot be left
-                // behind; an unrecognised same-stem file, on the other hand,
-                // is exactly what blocks a group.
-                if (config_.isDisabledSidecar(sibling.suffix())) {
-                    continue;
-                }
-                if (sibling.completeBaseName() == stem &&
-                    !planned.contains(sibling.absoluteFilePath())) {
-                    blocker = tr("'%1' appeared beside this photo after it was reviewed.")
-                                  .arg(sibling.fileName());
-                    break;
-                }
-            }
-        }
-
         if (!blocker.isEmpty()) {
             result.blocked.append(domain::PlanningIssue{group.assetId, group.displayName, blocker});
         }
@@ -373,13 +587,7 @@ OperationRecord StagingExecutor::executeGroup(const OperationRecord& input,
     // has not gone yet -- before the first rename. A crash between a rename
     // and its confirmation then leaves a journal that names the destination
     // to look in, rather than one that swears the file never moved.
-    for (const PlannedMember& member : group.members) {
-        const int index = indexOfMember(record, member.memberId);
-        if (index >= 0) {
-            record.members[index].stagingPath = QDir(directory).absoluteFilePath(member.fileName);
-            record.members[index].lastDurableStep = QLatin1String(kStepPlanned);
-        }
-    }
+    recordStagingIntent(record, group, directory);
     QString journalError;
     if (!writeJournal(&journalError)) {
         return withState(record, OperationState::Failed, journalError); // Nothing has moved.
@@ -388,29 +596,12 @@ OperationRecord StagingExecutor::executeGroup(const OperationRecord& input,
     QList<PlannedMember> movedMembers;
     for (const PlannedMember& member : group.members) {
         const QString destination = QDir(directory).absoluteFilePath(member.fileName);
-        QString moveError;
-        if (!renameOnly(member.sourcePath, destination, &moveError)) {
+        if (QString moveError; !renameOnly(member.sourcePath, destination, &moveError)) {
             // Stop the group and attempt journalled restoration of what moved.
-            QStringList restoreProblems;
-            for (const PlannedMember& moved : movedMembers) {
-                const QString staged = QDir(directory).absoluteFilePath(moved.fileName);
-                QString restoreError;
-                if (!renameOnly(staged, moved.sourcePath, &restoreError)) {
-                    // Never overwrite: the staging copy is retained and shown
-                    // as a recovery task.
-                    restoreProblems.append(restoreError);
-                } else {
-                    const int index = indexOfMember(record, moved.memberId);
-                    if (index >= 0) {
-                        record.members[index].stagingPath.clear();
-                        record.members[index].lastDurableStep = QLatin1String(kStepRestored);
-                    }
-                }
-            }
-
-            const int index = indexOfMember(record, member.memberId);
-            if (index >= 0) {
-                record.members[index].error = moveError;
+            const QStringList restoreProblems = putBackMoved(record, movedMembers, directory);
+            if (OperationMemberRecord* entry = entryFor(record, member.memberId);
+                entry != nullptr) {
+                entry->error = moveError;
             }
 
             if (restoreProblems.isEmpty()) {
@@ -421,10 +612,9 @@ OperationRecord StagingExecutor::executeGroup(const OperationRecord& input,
                                  .arg(moveError, restoreProblems.join(QLatin1String(" "))));
         }
 
-        const int index = indexOfMember(record, member.memberId);
-        if (index >= 0) {
-            record.members[index].stagingPath = destination;
-            record.members[index].lastDurableStep = QLatin1String(kStepStaged);
+        if (OperationMemberRecord* entry = entryFor(record, member.memberId); entry != nullptr) {
+            entry->stagingPath = destination;
+            entry->lastDurableStep = QLatin1String(kStepStaged);
         }
         movedMembers.append(member);
 
@@ -440,16 +630,12 @@ OperationRecord StagingExecutor::executeGroup(const OperationRecord& input,
 
     // Verify that every expected member reached staging with its recorded
     // identity before the group is called staged.
-    for (const PlannedMember& member : group.members) {
-        const QString staged = QDir(directory).absoluteFilePath(member.fileName);
-        const domain::FileFingerprint actual = fingerprintOf(staged);
-        if (!actual.isKnown() || actual.sizeBytes != member.expected.sizeBytes ||
-            actual.modifiedMsecsUtc != member.expected.modifiedMsecsUtc) {
-            return withState(record, OperationState::NeedsRecovery,
-                             tr("'%1' did not arrive in staging as expected. The files are kept "
-                                "for recovery and nothing was sent to Trash.")
-                                 .arg(member.fileName));
-        }
+    if (const std::optional<QString> absent = absentFromStaging(group, directory);
+        absent.has_value()) {
+        return withState(record, OperationState::NeedsRecovery,
+                         tr("'%1' did not arrive in staging as expected. The files are kept "
+                            "for recovery and nothing was sent to Trash.")
+                             .arg(*absent));
     }
 
     // Refresh the manifest so it records the actual staging paths.
@@ -474,8 +660,7 @@ OperationRecord StagingExecutor::executeGroup(const OperationRecord& input,
     }
 
     QString trashPath;
-    QString trashError;
-    if (!trash_.moveToTrash(directory, &trashPath, &trashError)) {
+    if (QString trashError; !trash_.moveToTrash(directory, &trashPath, &trashError)) {
         // The complete group is retained. Retry Trash or Restore are the only
         // options; there is never an automatic fall back to permanent deletion.
         return withState(record, OperationState::NeedsRecovery,
@@ -486,13 +671,8 @@ OperationRecord StagingExecutor::executeGroup(const OperationRecord& input,
 
     // The platform need not report a Trash path, so recovery relies on the
     // manifest inside the group directory rather than on this value.
-    record.trashPath = trashPath;
-    for (const PlannedMember& member : group.members) {
-        const int index = indexOfMember(record, member.memberId);
-        if (index >= 0) {
-            record.members[index].lastDurableStep = QLatin1String(kStepTrashed);
-        }
-    }
+    record.trashPath = std::move(trashPath);
+    markGroupTrashed(record, group);
 
     // The outcome is journalled here, not left to the caller: a crash between
     // this return and the controller's own write would otherwise leave a
@@ -522,144 +702,37 @@ OperationRecord StagingExecutor::recover(const OperationRecord& input) {
     int restoredGroups = 0;
 
     for (const PlannedGroup& group : record.plan.groups) {
-        const QString directory =
-            QDir(record.plan.stagingRoot).absoluteFilePath(group.stagingDirectoryName);
-
         // Members the journal already saw reach Trash need nothing.
-        bool journalSaysTrashed = !group.members.isEmpty();
-        for (const PlannedMember& member : group.members) {
-            const int index = indexOfMember(record, member.memberId);
-            if (index < 0 ||
-                record.members.at(index).lastDurableStep != QLatin1String(kStepTrashed)) {
-                journalSaysTrashed = false;
-                break;
-            }
-        }
-        if (journalSaysTrashed) {
+        if (journalSaysTrashed(record, group)) {
             ++trashedGroups;
             continue;
         }
 
-        // The manifest beside the files is consulted before the journal's
-        // paths are trusted: a crash between a rename and its confirmation
-        // leaves the journal one step behind, and the manifest, or failing
-        // that the plan, still says where the file was going.
-        QString manifestError;
-        const std::optional<Manifest> manifest = readManifest(directory, &manifestError);
+        const QString directory =
+            QDir(record.plan.stagingRoot).absoluteFilePath(group.stagingDirectoryName);
+        const GroupRestore found = restoreGroup(record, group, directory);
+        problems.append(found.problems);
+        stillStaged += found.stillStaged;
 
-        QStringList missing;
-        bool anyFound = false;
-        int restoredHere = 0;
-        for (const PlannedMember& member : group.members) {
-            const int index = indexOfMember(record, member.memberId);
-            if (index < 0) {
-                continue;
+        if (found.missing.isEmpty()) {
+            if (found.restored > 0 || found.anyFound) {
+                ++restoredGroups;
             }
-            OperationMemberRecord& entry = record.members[index];
-
-            QString staged = entry.stagingPath;
-            if (staged.isEmpty() && manifest.has_value()) {
-                const ManifestEntry* known = manifest->entry(member.memberId);
-                if (known != nullptr && !known->stagingPath.isEmpty()) {
-                    staged = known->stagingPath;
-                }
-            }
-            if (staged.isEmpty()) {
-                staged = QDir(directory).absoluteFilePath(member.fileName);
-            }
-
-            const bool sourceExists = QFileInfo::exists(entry.sourcePath);
-            const bool stagedExists = QFileInfo::exists(staged);
-            if (sourceExists && !stagedExists) {
-                // Never moved, or already put back.
-                anyFound = true;
-                entry.stagingPath.clear();
-                entry.lastDurableStep = QLatin1String(kStepPlanned);
-                continue;
-            }
-            if (!stagedExists) {
-                missing.append(member.fileName);
-                continue;
-            }
-            anyFound = true;
-            if (sourceExists) {
-                problems.append(tr("'%1' exists both at its original path and in staging; "
-                                   "nothing was overwritten.")
-                                    .arg(member.fileName));
-                ++stillStaged;
-                continue;
-            }
-
-            // A file in staging is only put back when it is the file that was
-            // reviewed. Existence alone proves nothing after a crash.
-            if (const domain::FileFingerprint actual = fingerprintOf(staged);
-                !actual.isKnown() || actual.sizeBytes != member.expected.sizeBytes ||
-                actual.modifiedMsecsUtc != member.expected.modifiedMsecsUtc) {
-                problems.append(tr("'%1' is in staging but is not the file that was reviewed "
-                                   "(its size or modification time differs); it was left "
-                                   "where it is.")
-                                    .arg(member.fileName));
-                entry.stagingPath = staged;
-                ++stillStaged;
-                continue;
-            }
-
-            if (QString moveError; !renameOnly(staged, entry.sourcePath, &moveError)) {
-                problems.append(moveError);
-                entry.stagingPath = staged;
-                ++stillStaged;
-                continue;
-            }
-            entry.stagingPath.clear();
-            entry.lastDurableStep = QLatin1String(kStepRestored);
-            ++restoredHere;
+            continue;
         }
 
-        if (!missing.isEmpty()) {
-            if (!anyFound && !QFileInfo::exists(directory)) {
-                // The whole group vanished together, which is what a Trash
-                // of the group directory looks like. Confirmed only when the
-                // reported Trash location still holds this group's manifest;
-                // otherwise the outcome is recorded as uncertain and left to
-                // a person. Nothing is ever deleted again on a guess.
-                std::optional<Manifest> inTrash;
-                if (!record.trashPath.isEmpty()) {
-                    QString ignored;
-                    inTrash = readManifest(record.trashPath, &ignored);
-                }
-                if (inTrash.has_value() && inTrash->assetId == group.assetId) {
-                    for (const PlannedMember& member : group.members) {
-                        const int index = indexOfMember(record, member.memberId);
-                        if (index >= 0) {
-                            record.members[index].lastDurableStep = QLatin1String(kStepTrashed);
-                        }
-                    }
-                    ++trashedGroups;
-                } else {
-                    problems.append(
-                        tr("'%1' (%2 file(s)) is in neither its original location nor staging. "
-                           "It was probably moved to Trash before that could be recorded; check "
-                           "the Trash before doing anything else. Nothing will be deleted again.")
-                            .arg(group.displayName)
-                            .arg(group.members.size()));
-                    for (const PlannedMember& member : group.members) {
-                        const int index = indexOfMember(record, member.memberId);
-                        if (index >= 0) {
-                            record.members[index].error =
-                                tr("Not found in staging or at the original path.");
-                        }
-                    }
-                }
-            } else {
-                // Part of the group is accounted for and part is not. Do not
-                // assume the last recorded step completed: this needs a person.
-                for (const QString& fileName : missing) {
-                    problems.append(tr("'%1' is in neither its original nor its staging location.")
-                                        .arg(fileName));
-                }
+        if (!found.anyFound && !QFileInfo::exists(directory)) {
+            if (vanishedGroupReachedTrash(record, group, problems)) {
+                ++trashedGroups;
             }
-        } else if (restoredHere > 0 || anyFound) {
-            ++restoredGroups;
+            continue;
+        }
+
+        // Part of the group is accounted for and part is not. Do not assume the
+        // last recorded step completed: this needs a person.
+        for (const QString& fileName : found.missing) {
+            problems.append(
+                tr("'%1' is in neither its original nor its staging location.").arg(fileName));
         }
     }
 

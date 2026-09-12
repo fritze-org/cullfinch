@@ -6,6 +6,7 @@
 #include <QString>
 #include <QUuid>
 
+#include <compare>
 #include <utility>
 
 namespace cullfinch::domain {
@@ -30,11 +31,13 @@ public:
     [[nodiscard]] bool isValid() const noexcept { return !value_.isEmpty(); }
     [[nodiscard]] const QString& toString() const noexcept { return value_; }
 
-    friend bool operator==(const StrongId& lhs, const StrongId& rhs) noexcept {
-        return lhs.value_ == rhs.value_;
-    }
-    friend bool operator<(const StrongId& lhs, const StrongId& rhs) noexcept {
-        return lhs.value_ < rhs.value_;
+    friend bool operator==(const StrongId& lhs, const StrongId& rhs) = default;
+
+    /// Written out rather than defaulted because `QString` only gained `<=>` in
+    /// Qt 6.8 and this project's floor is 6.5. `compare` yields the same order
+    /// `operator<` did, and the remaining relational operators come from here.
+    friend std::strong_ordering operator<=>(const StrongId& lhs, const StrongId& rhs) noexcept {
+        return lhs.value_.compare(rhs.value_) <=> 0;
     }
 
 private:

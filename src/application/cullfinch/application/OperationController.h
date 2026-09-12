@@ -48,6 +48,14 @@ signals:
 
 private:
     bool persist(const OperationRecord& record, QString* error);
+    /// Re-enumerate the plan against the filesystem. Emits `planInvalidated`
+    /// and fails when what was reviewed no longer holds.
+    bool verifyAgainstDisk(const domain::OperationPlan& plan, const domain::PhotoAssetList& current,
+                           QString* error);
+    /// Stage every group, journalling and reporting progress between them, and
+    /// stop at the first group that fails or leaves recoverable work.
+    bool stageGroups(const domain::OperationPlan& plan, OperationRecord& record,
+                     const JournalWriter& journal, QString* error);
 
     IAssetRepository& repository_;
     IOperationExecutor& executor_;

@@ -39,3 +39,6 @@ __pycache__/
 .vscode/
 *.swp
 .DS_Store
+
+# Local secrets (SonarCloud MCP token)
+.env

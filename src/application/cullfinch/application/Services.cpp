@@ -4,30 +4,32 @@
 namespace cullfinch::application {
 
 QString sessionLifecycleToken(SessionLifecycle lifecycle) {
+    using enum SessionLifecycle;
     switch (lifecycle) {
-    case SessionLifecycle::Active:
+    case Active:
         return QStringLiteral("active");
-    case SessionLifecycle::Paused:
+    case Paused:
         return QStringLiteral("paused");
-    case SessionLifecycle::Finished:
+    case Finished:
         return QStringLiteral("finished");
-    case SessionLifecycle::Discarded:
+    case Discarded:
         break;
     }
     return QStringLiteral("discarded");
 }
 
 SessionLifecycle sessionLifecycleFromToken(const QString& token) {
+    using enum SessionLifecycle;
     if (token == QLatin1String("active")) {
-        return SessionLifecycle::Active;
+        return Active;
     }
     if (token == QLatin1String("paused")) {
-        return SessionLifecycle::Paused;
+        return Paused;
     }
     if (token == QLatin1String("finished")) {
-        return SessionLifecycle::Finished;
+        return Finished;
     }
-    return SessionLifecycle::Discarded;
+    return Discarded;
 }
 
 } // namespace cullfinch::application

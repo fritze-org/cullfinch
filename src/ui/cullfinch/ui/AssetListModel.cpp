@@ -6,6 +6,8 @@
 #include <QPixmap>
 #include <QStringList>
 
+#include <utility>
+
 namespace cullfinch::ui {
 
 AssetListModel::AssetListModel(application::IImageService& images, QObject* parent)
@@ -119,8 +121,8 @@ QVariant AssetListModel::data(const QModelIndex& index, int role) const {
         if (preview == nullptr) {
             return {};
         }
-        const auto cached = thumbnails_.constFind(preview->id);
-        if (cached != thumbnails_.constEnd()) {
+        if (const auto cached = thumbnails_.constFind(preview->id);
+            cached != thumbnails_.constEnd()) {
             return QIcon(QPixmap::fromImage(*cached));
         }
         requestThumbnail(index.row());
@@ -131,7 +133,7 @@ QVariant AssetListModel::data(const QModelIndex& index, int role) const {
     case DisplayNameRole:
         return asset.displayName;
     case PairingStateRole:
-        return static_cast<int>(asset.pairingState);
+        return std::to_underlying(asset.pairingState);
     case PairingTextRole:
         return domain::pairingStateName(asset.pairingState);
     case RawCountRole:
@@ -139,7 +141,7 @@ QVariant AssetListModel::data(const QModelIndex& index, int role) const {
     case MemberCountRole:
         return static_cast<int>(asset.members.size());
     case DispositionRole:
-        return static_cast<int>(asset.disposition);
+        return std::to_underlying(asset.disposition);
     case DiagnosticsRole:
         return asset.diagnostics;
     case ComparableRole:

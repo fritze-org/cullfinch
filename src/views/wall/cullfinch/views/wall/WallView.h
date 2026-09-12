@@ -48,6 +48,13 @@ private:
     void relayout();
     void recordAspect(const domain::AssetId& id);
     [[nodiscard]] bool acceptGesture(const domain::AssetId& id, const QPoint& pointer);
+    /// Remember where tiles that are about to leave used to be, so a repeat
+    /// click at those coordinates does not hit whatever moves in.
+    void recordVanishedTiles(const QList<domain::AssetId>& positions);
+    /// Drop the tiles whose candidates are no longer on the wall.
+    void removeDepartedTiles();
+    /// Create the tile for one candidate and wire its gestures.
+    void addTile(const domain::AssetId& id);
 
     application::IImageService& images_;
     /// Every wall position, placeholders included.
