@@ -7,6 +7,7 @@
 
 #include <QAbstractItemModelTester>
 #include <QAction>
+#include <QFile>
 #include <QItemSelectionModel>
 #include <QJsonObject>
 #include <QKeySequence>
@@ -50,6 +51,9 @@ private slots:
     void theRecoveryScreenRefusesItsOffersInAReadOnlyInstance();
     void restoringFromTheRecoveryScreenPutsTheGroupBack();
     void retryingTrashFromTheRecoveryScreenCompletesTheOperation();
+    void theRecoveryScreenNamesWhereEachFileIs_data();
+    void theRecoveryScreenNamesWhereEachFileIs();
+    void aRestoreThatCannotFindTheFilesSaysSoAndOffersWhatIsLeft();
 
 private:
     /// Write an interrupted operation into the repository the browser reads,
@@ -677,6 +681,72 @@ void TestBrowserWindow::retryingTrashFromTheRecoveryScreenCompletesTheOperation(
         fixture_->window()->findChild<QAction*>(QStringLiteral("actionRecoverOperations"));
     QVERIFY(recover != nullptr);
     QVERIFY(!recover->isEnabled());
+}
+
+void TestBrowserWindow::theRecoveryScreenNamesWhereEachFileIs_data() {
+    QTest::addColumn<QString>("step");
+    QTest::addColumn<QString>("mentions");
+
+    namespace step = application::operationStep;
+    // The journal's own token says nothing a person can act on, so the screen
+    // never shows it: every durable step is named in words instead, and the
+    // five are told apart from each other.
+    QTest::newRow("planned") << QString(step::planned) << QStringLiteral("At its original");
+    QTest::newRow("staged") << QString(step::staged) << QStringLiteral("staging directory");
+    QTest::newRow("restored") << QString(step::restored) << QStringLiteral("Put back");
+    QTest::newRow("trashed") << QString(step::trashed) << QStringLiteral("In Trash");
+    QTest::newRow("uncertain") << QString(step::uncertain) << QStringLiteral("Unknown");
+}
+
+void TestBrowserWindow::theRecoveryScreenNamesWhereEachFileIs() {
+    QFETCH(QString, step);
+    QFETCH(QString, mentions);
+
+    seedInterruptedOperation(step, QStringLiteral("Something stopped part way through."));
+    ui::RecoveryDialog dialog(fixture_->root().operations(),
+                              fixture_->root().collection().collectionId(), true);
+
+    auto* tree = dialog.findChild<QTreeWidget*>(QStringLiteral("recoveryTree"));
+    QVERIFY(tree != nullptr);
+    QCOMPARE(tree->topLevelItemCount(), 1);
+    QTreeWidgetItem* file = tree->topLevelItem(0)->child(0)->child(0);
+    QVERIFY(file != nullptr);
+    QVERIFY2(file->text(1).contains(mentions), qPrintable(file->text(1)));
+    QVERIFY2(file->text(1) != step, "the raw journal token reached the screen");
+}
+
+void TestBrowserWindow::aRestoreThatCannotFindTheFilesSaysSoAndOffersWhatIsLeft() {
+    const domain::AssetId assetId = fixture_->window()->model()->idForRow(0);
+    const domain::PhotoAsset* asset = fixture_->root().collection().asset(assetId);
+    QVERIFY(asset != nullptr);
+
+    seedInterruptedOperation(application::operationStep::staged,
+                             QStringLiteral("Trash refused the staged group."));
+
+    // The files are in neither place: something outside Cullfinch took them
+    // while the record still said staging. A restore cannot invent them back.
+    for (const domain::FileMember& member : asset->members) {
+        QVERIFY2(QFile::remove(member.absolutePath), qPrintable(member.absolutePath));
+    }
+
+    ui::RecoveryDialog dialog(fixture_->root().operations(),
+                              fixture_->root().collection().collectionId(), true);
+    QCOMPARE(dialog.recordCount(), 1);
+    dialog.findChild<QPushButton*>(QStringLiteral("recoveryRestore"))->click();
+
+    // It says what it found instead of reporting success, and the record stays
+    // on the screen.
+    auto* detail = dialog.findChild<QLabel*>(QStringLiteral("recoveryDetail"));
+    QVERIFY(detail != nullptr);
+    QVERIFY2(detail->text().contains(QStringLiteral("Trash")), qPrintable(detail->text()));
+    QCOMPARE(dialog.recordCount(), 1);
+
+    // Nothing is left to put back or hand over, and the one thing a person can
+    // still settle is now the only thing offered.
+    QVERIFY(!dialog.findChild<QPushButton*>(QStringLiteral("recoveryRestore"))->isEnabled());
+    QVERIFY(!dialog.findChild<QPushButton*>(QStringLiteral("recoveryRetryTrash"))->isEnabled());
+    QVERIFY(dialog.findChild<QPushButton*>(QStringLiteral("recoveryConfirmTrashed"))->isEnabled());
+    QCOMPARE(fixture_->trash().callCount(), 0);
 }
 
 QTEST_MAIN(TestBrowserWindow)
