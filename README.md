@@ -72,6 +72,13 @@ make coverage  # instrumented build, all three suites, Cobertura + HTML report
 Development tools (pre-commit, gcovr, ruff, shellcheck, actionlint) are pinned through `uv` in
 `pyproject.toml` and `uv.lock`. That adds no Python dependency to the application.
 
+`.pre-commit-config.yaml` pins each hook to a commit SHA with the tag kept in a trailing
+comment. Update hook versions with
+`uv run --frozen --group tooling -- pre-commit autoupdate --freeze`, then confirm
+`uv run --frozen --group tooling -- pre-commit validate-config` and `make lint` still pass.
+CI re-runs the full hook suite with the same locked tooling on both Ubuntu and macOS; never
+hand-edit a `rev:` back to a bare tag.
+
 ## Tests
 
 | Suite | Label | What it covers |
