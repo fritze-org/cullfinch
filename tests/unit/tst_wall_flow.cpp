@@ -7,6 +7,8 @@
 #include <QSet>
 #include <QTest>
 
+#include <utility>
+
 using namespace cullfinch;
 using cullfinch::flows::wall::LayoutMode;
 using cullfinch::flows::wall::WallFlow;
@@ -323,7 +325,7 @@ void TestWallFlow::refusesADraftWhoseCellsContradictItsDecisions() {
         saved.flowId = QLatin1String(flows::wall::kFlowId);
         saved.schemaVersion = flows::wall::kStateSchemaVersion;
         saved.revision = 4;
-        saved.payload = payload;
+        saved.payload = std::move(payload);
         return saved;
     };
     const auto placeholderFor = [](const domain::AssetId& id) {
