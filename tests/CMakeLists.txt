@@ -109,6 +109,23 @@ cullfinch_add_test(
   LABELS "integration;native-trash-adjacent" PLATFORM offscreen
   TIMEOUT 300)
 
+# Recovery after an actual process death, rather than after a journal snapshot replayed in-process.
+# The suite spawns cullfinch_crash_helper, which kills itself at a named journal write, and then
+# opens the same database. It runs in every row that runs the integration suites, sanitizers
+# included: five short-lived children are not what makes that job slow.
+cullfinch_add_test(
+  tst_crash_recovery
+  SOURCES integration/tst_crash_recovery.cpp
+  DEPS cullfinch::cullfinch_infrastructure cullfinch::cullfinch_testsupport
+  LABELS integration PLATFORM offscreen
+  TIMEOUT 300)
+
+# The helper is launched by path, never linked, so the dependency has to be stated: without it a
+# fresh build tree races the test against a binary that does not exist yet.
+add_dependencies(tst_crash_recovery cullfinch_crash_helper)
+target_compile_definitions(tst_crash_recovery
+                           PRIVATE CULLFINCH_CRASH_HELPER="$<TARGET_FILE:cullfinch_crash_helper>")
+
 # -------------------------------------------------------------------- gui ----
 # The production widgets and the production composition, with injectable adapters. The platform
 # plugin comes from the environment so the same binaries run offscreen, under XCB and under Cocoa.
