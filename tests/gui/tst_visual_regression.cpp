@@ -20,6 +20,7 @@
 #include "GuiFixture.h"
 #include "VisualBaseline.h"
 
+#include <cullfinch/ui/AssetListModel.h>
 #include <cullfinch/views/versus/VersusView.h>
 #include <cullfinch/views/wall/WallView.h>
 
@@ -31,6 +32,8 @@
 #include <QStatusBar>
 #include <QTest>
 
+#include <array>
+#include <cstddef>
 #include <cstdlib>
 #include <memory>
 #include <tuple>
@@ -66,14 +69,15 @@ constexpr int kTileLabelBandHeight = 52;
 /// Six flat photos, alternating landscape and portrait so the wall's fit
 /// policy is exercised, and carrying no drawn text of their own.
 void addFlatPhotos(testsupport::TempCollection& collection) {
-    const QList<QRgb> colours{qRgb(0xC0, 0x39, 0x2B), qRgb(0x27, 0xAE, 0x60),
-                              qRgb(0x29, 0x80, 0xB9), qRgb(0xF1, 0xC4, 0x0F),
-                              qRgb(0x8E, 0x44, 0xAD), qRgb(0x16, 0xA0, 0x85)};
-    for (int index = 0; index < colours.size(); ++index) {
+    constexpr std::array colours{qRgb(0xC0, 0x39, 0x2B), qRgb(0x27, 0xAE, 0x60),
+                                 qRgb(0x29, 0x80, 0xB9), qRgb(0xF1, 0xC4, 0x0F),
+                                 qRgb(0x8E, 0x44, 0xAD), qRgb(0x16, 0xA0, 0x85)};
+    for (std::size_t index = 0; index < colours.size(); ++index) {
         const QSize size = (index % 2 == 0) ? QSize(320, 240) : QSize(240, 320);
-        collection.addSolidJpeg(QStringLiteral("IMG_%1.JPG").arg(index + 1),
-                                QColor(colours.at(index)), size);
-        collection.addRaw(QStringLiteral("IMG_%1.RAF").arg(index + 1));
+        const int number = static_cast<int>(index) + 1;
+        collection.addSolidJpeg(QStringLiteral("IMG_%1.JPG").arg(number), QColor(colours.at(index)),
+                                size);
+        collection.addRaw(QStringLiteral("IMG_%1.RAF").arg(number));
     }
 }
 
@@ -111,15 +115,16 @@ private slots:
     void theVersusPanesAreUnchanged();
 
 private:
-    void startWallOn(int count);
-    void startVersusOn(int count);
-    [[nodiscard]] QImage renderStatusBar(ui::BrowserWindow* window) const;
-    [[nodiscard]] QImage renderWallSurface() const;
+    // These report failure by returning null rather than through QVERIFY: a
+    // QVERIFY inside a helper returns from the helper, and leaves the test
+    // carrying on with whatever it was handed.
+    [[nodiscard]] views::wall::WallSurface* startWallOn(int count);
+    [[nodiscard]] views::versus::VersusView* startVersusOn(int count);
+    [[nodiscard]] static QImage renderStatusBar(const ui::BrowserWindow* window);
+    [[nodiscard]] static QImage renderWallSurface(views::wall::WallSurface* surface);
 
     std::unique_ptr<GuiFixture> fixture_;
     std::unique_ptr<VisualBaseline> baseline_;
-    views::wall::WallView* wall_ = nullptr;
-    views::versus::VersusView* versus_ = nullptr;
 };
 
 void TestVisualRegression::initTestCase() {
@@ -151,43 +156,65 @@ void TestVisualRegression::init() {
 }
 
 void TestVisualRegression::cleanup() {
-    wall_ = nullptr;
-    versus_ = nullptr;
     fixture_.reset();
 }
 
-void TestVisualRegression::startWallOn(int count) {
+views::wall::WallSurface* TestVisualRegression::startWallOn(int count) {
+    ui::BrowserWindow* window = fixture_->window();
+    ui::AssetListModel* model = (window != nullptr) ? window->model() : nullptr;
+    if (model == nullptr) {
+        return nullptr;
+    }
+
     QList<domain::AssetId> ids;
     for (int row = 0; row < count; ++row) {
-        ids.append(fixture_->window()->model()->idForRow(row));
+        ids.append(model->idForRow(row));
     }
-    fixture_->window()->selectAssets(ids);
-    QVERIFY(fixture_->window()->startFlow(QStringLiteral("image-wall")));
+    window->selectAssets(ids);
+    if (!window->startFlow(QStringLiteral("image-wall"))) {
+        return nullptr;
+    }
 
-    ui::ComparisonShell* shell = fixture_->window()->activeShell();
-    QVERIFY(shell != nullptr);
+    ui::ComparisonShell* shell = window->activeShell();
+    if (shell == nullptr) {
+        return nullptr;
+    }
     guitests::settleWindow(shell);
-    wall_ = dynamic_cast<views::wall::WallView*>(shell->view());
-    QVERIFY(wall_ != nullptr);
+
+    auto* view = dynamic_cast<views::wall::WallView*>(shell->view());
+    return (view != nullptr) ? view->surface() : nullptr;
 }
 
-void TestVisualRegression::startVersusOn(int count) {
+views::versus::VersusView* TestVisualRegression::startVersusOn(int count) {
+    ui::BrowserWindow* window = fixture_->window();
+    ui::AssetListModel* model = (window != nullptr) ? window->model() : nullptr;
+    if (model == nullptr) {
+        return nullptr;
+    }
+
     QList<domain::AssetId> ids;
     for (int row = 0; row < count; ++row) {
-        ids.append(fixture_->window()->model()->idForRow(row));
+        ids.append(model->idForRow(row));
     }
-    fixture_->window()->selectAssets(ids);
-    QVERIFY(fixture_->window()->startFlow(QStringLiteral("versus-tree")));
+    window->selectAssets(ids);
+    if (!window->startFlow(QStringLiteral("versus-tree"))) {
+        return nullptr;
+    }
 
-    ui::ComparisonShell* shell = fixture_->window()->activeShell();
-    QVERIFY(shell != nullptr);
+    ui::ComparisonShell* shell = window->activeShell();
+    if (shell == nullptr) {
+        return nullptr;
+    }
     guitests::settleWindow(shell);
-    versus_ = dynamic_cast<views::versus::VersusView*>(shell->view());
-    QVERIFY(versus_ != nullptr);
+
+    return dynamic_cast<views::versus::VersusView*>(shell->view());
 }
 
-QImage TestVisualRegression::renderStatusBar(ui::BrowserWindow* window) const {
+QImage TestVisualRegression::renderStatusBar(const ui::BrowserWindow* window) {
     QStatusBar* status = window->statusBar();
+    if (status == nullptr) {
+        return {};
+    }
 
     // Temporary messages carry a scan's progress and, when the collection was
     // downgraded, the identity of the process holding the lock. Neither is a
@@ -204,9 +231,8 @@ QImage TestVisualRegression::renderStatusBar(ui::BrowserWindow* window) const {
     return guitests::renderSettled(status);
 }
 
-QImage TestVisualRegression::renderWallSurface() const {
-    views::wall::WallSurface* surface = wall_->surface();
-    if (!guitests::pinSize(surface, kWallSurfaceSize)) {
+QImage TestVisualRegression::renderWallSurface(views::wall::WallSurface* surface) {
+    if (surface == nullptr || !guitests::pinSize(surface, kWallSurfaceSize)) {
         return {};
     }
 
@@ -232,7 +258,9 @@ QImage TestVisualRegression::renderWallSurface() const {
 
 void TestVisualRegression::theBrowserGridLaysOutItsTilesUnchanged() {
     auto* grid = fixture_->window()->findChild<QListView*>(QStringLiteral("assetGrid"));
-    QVERIFY(grid != nullptr);
+    if (grid == nullptr) {
+        QFAIL("the browser has no asset grid");
+    }
     QVERIFY(guitests::pinSize(grid, kGridSize));
 
     // The viewport, not the view: the frame and the scroll bars belong to the
@@ -278,6 +306,9 @@ void TestVisualRegression::theBrowserStatusBarShowsTheReadOnlyIndicator() {
     QVERIFY2(second.initialise(&error), qPrintable(error));
 
     std::unique_ptr<ui::BrowserWindow> window(second.createBrowserWindow());
+    if (!window) {
+        QFAIL("the second composition built no browser window");
+    }
     window->show();
     guitests::settleWindow(window.get());
     QVERIFY(window->openDirectory(fixture_->collection().path()));
@@ -291,9 +322,12 @@ void TestVisualRegression::theBrowserStatusBarShowsTheReadOnlyIndicator() {
 }
 
 void TestVisualRegression::theWallLaysOutItsTilesUnchanged() {
-    startWallOn(6);
+    views::wall::WallSurface* surface = startWallOn(6);
+    if (surface == nullptr) {
+        QFAIL("the wall flow did not start");
+    }
 
-    const QImage rendering = renderWallSurface();
+    const QImage rendering = renderWallSurface(surface);
     QVERIFY2(!rendering.isNull(), "the wall surface never stopped changing");
 
     CULLFINCH_COMPARE_RENDERING(QStringLiteral("wall-surface"), rendering,
@@ -301,20 +335,24 @@ void TestVisualRegression::theWallLaysOutItsTilesUnchanged() {
 }
 
 void TestVisualRegression::theWallIsUnchangedAfterAnElimination() {
-    startWallOn(6);
-    views::wall::WallSurface* surface = wall_->surface();
+    views::wall::WallSurface* surface = startWallOn(6);
+    if (surface == nullptr) {
+        QFAIL("the wall flow did not start");
+    }
     QVERIFY(guitests::pinSize(surface, kWallSurfaceSize));
 
     application::SessionController& session = fixture_->root().session();
     const domain::AssetId victim = surface->order().at(2);
     ui::ImageCanvas* tile = surface->tileFor(victim);
-    QVERIFY(tile != nullptr);
+    if (tile == nullptr) {
+        QFAIL("the wall has no tile for the photo it is about to eliminate");
+    }
     QTest::mouseClick(tile, Qt::LeftButton, Qt::NoModifier, tile->rect().center());
     QVERIFY(GuiFixture::waitFor([&session]() { return session.summary().remaining.size() == 5; }));
 
     // Five survivors reflowed into the same surface: a different grid, and the
     // case that catches a reflow regression a count assertion cannot see.
-    const QImage rendering = renderWallSurface();
+    const QImage rendering = renderWallSurface(surface);
     QVERIFY2(!rendering.isNull(), "the wall surface never stopped changing");
 
     CULLFINCH_COMPARE_RENDERING(QStringLiteral("wall-surface-after-elimination"), rendering,
@@ -322,15 +360,20 @@ void TestVisualRegression::theWallIsUnchangedAfterAnElimination() {
 }
 
 void TestVisualRegression::theVersusPanesAreUnchanged() {
-    startVersusOn(4);
+    views::versus::VersusView* view = startVersusOn(4);
+    if (view == nullptr) {
+        QFAIL("the versus flow did not start");
+    }
 
-    ui::ImageCanvas* left = versus_->leftCanvas();
-    ui::ImageCanvas* right = versus_->rightCanvas();
-    QVERIFY(left != nullptr && right != nullptr);
+    ui::ImageCanvas* left = view->leftCanvas();
+    ui::ImageCanvas* right = view->rightCanvas();
+    if (left == nullptr || right == nullptr) {
+        QFAIL("the versus view did not build both panes");
+    }
 
-    // Equal available area is the versus layout's promise. It is asserted
-    // here rather than read out of the pixels, because the panes are about to
-    // be pinned to a stated size.
+    // Equal available area is the versus layout's promise. It is asserted here
+    // rather than read out of the pixels, because the panes are about to be
+    // pinned to a stated size.
     QVERIFY(GuiFixture::waitFor([left, right]() { return left->isReady() && right->isReady(); }));
     QVERIFY2(std::abs(left->width() - right->width()) <= 1 && left->height() == right->height(),
              "the versus panes are not laid out at equal area");

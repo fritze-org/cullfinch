@@ -103,21 +103,39 @@ public:
 
     /// @param message receives a report in every case, including a match.
     Outcome compare(const QString& caseName, const QImage& rendering, VisualScope scope,
-                    const VisualTolerance& tolerance, QString* message);
+                    const VisualTolerance& tolerance, QString* message) const;
 
     /// Directory name identifying this rendering environment.
-    [[nodiscard]] QString environmentId() const { return environmentId_; }
+    [[nodiscard]] QString environmentId() const { return environment_.id; }
     /// The inputs that identifier was derived from, one per line.
-    [[nodiscard]] QString environmentReport() const { return environmentReport_; }
+    [[nodiscard]] QString environmentReport() const { return environment_.report; }
 
 private:
+    /// Everything a rendering depends on that is not cullfinch, as a directory
+    /// name and as the inputs behind it. Held as one value so the two cannot
+    /// be built from different states.
+    struct Environment {
+        QString id;
+        QString report;
+    };
+    [[nodiscard]] static Environment describeEnvironment();
+
     [[nodiscard]] QString referenceDirectory(VisualScope scope) const;
     [[nodiscard]] bool write(const QString& path, const QImage& image, QString* error) const;
+    void writeEnvironmentReport() const;
+
+    [[nodiscard]] Outcome record(const QString& caseName, const QString& referencePath,
+                                 const QImage& actual, QString* report) const;
+    [[nodiscard]] Outcome missing(const QString& caseName, const QString& directory,
+                                  const QString& referencePath, const QImage& actual,
+                                  QString* report) const;
+    [[nodiscard]] Outcome verify(const QString& caseName, const QString& referencePath,
+                                 const QImage& actual, const VisualTolerance& tolerance,
+                                 QString* report) const;
 
     QString referenceRoot_;
     QString artifactRoot_;
-    QString environmentId_;
-    QString environmentReport_;
+    Environment environment_;
     bool recording_ = false;
     bool requireReferences_ = false;
 };
