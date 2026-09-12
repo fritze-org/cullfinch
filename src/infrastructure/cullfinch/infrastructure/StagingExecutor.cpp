@@ -20,6 +20,7 @@
 #include <algorithm>
 #include <filesystem>
 #include <system_error>
+#include <utility>
 
 namespace cullfinch::infrastructure {
 namespace {
@@ -670,7 +671,7 @@ OperationRecord StagingExecutor::executeGroup(const OperationRecord& input,
 
     // The platform need not report a Trash path, so recovery relies on the
     // manifest inside the group directory rather than on this value.
-    record.trashPath = trashPath;
+    record.trashPath = std::move(trashPath);
     markGroupTrashed(record, group);
 
     // The outcome is journalled here, not left to the caller: a crash between
