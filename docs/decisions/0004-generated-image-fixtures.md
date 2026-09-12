@@ -13,7 +13,12 @@ committed.
 
 `tests/support/cullfinch/testsupport/TempCollection` writes every image fixture
 at run time with `QImageWriter`. RAW companions are arbitrary opaque bytes.
-Nothing binary is committed.
+Nothing binary is committed as an *input*.
+
+Expected *outputs* are a different question, settled separately by
+[decision 0008](0008-visual-regression-references.md): the visual regression
+suite's reference images are committed, because a reference a test generates is
+not an expectation.
 
 ## Consequences
 

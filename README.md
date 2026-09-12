@@ -86,6 +86,7 @@ hand-edit a `rev:` back to a bare tag.
 | Unit | `unit` | Pairing rules, bracket construction, flow transitions, layout geometry, selection snapshots, mark merging, operation planning |
 | Integration | `integration` | Real temporary directories, real SQLite, staging and recovery under injected faults |
 | GUI | `gui` | The production widgets and composition, driven through Qt Test with injected adapters |
+| Visual | `visual` | The production views rendered offscreen and compared against checked-in reference images |
 | Package | `package` | The installed application in a clean environment, proving the deployed plugins load |
 
 ```sh
@@ -105,6 +106,17 @@ Both set `CULLFINCH_EXPECTED_PLATFORM`, so a run that quietly lands on XWayland,
 offscreen fails instead of passing under a backend nobody asked for. The Wayland helper waits
 for a real client connection rather than for a socket to appear, and unsets `DISPLAY` so
 XWayland cannot rescue a broken native path.
+
+The visual suite is the exception: it pins `offscreen` itself, because a compositor decides how a
+surface is finally composed and a pixel comparison only means something against the backend its
+reference was recorded on. Its references live in
+[`tests/fixtures/visual/`](tests/fixtures/visual/), and an environment nobody has recorded one for
+skips instead of failing.
+
+```sh
+ctest --preset dev-fast --label-regex visual   # compare
+make visual-record                             # re-record, then review the diff
+```
 
 ## Branch protection
 

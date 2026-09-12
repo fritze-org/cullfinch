@@ -49,6 +49,25 @@ QString TempCollection::addJpeg(const QString& relative, const QSize& size) {
     return target;
 }
 
+QString TempCollection::addSolidJpeg(const QString& relative, const QColor& colour,
+                                     const QSize& size) {
+    QString target = filePath(relative);
+    QDir().mkpath(QFileInfo(target).absolutePath());
+
+    QImage image(size, QImage::Format_RGB32);
+    image.fill(colour);
+
+    // Quality 100 keeps a flat fill flat: the chroma subsampling a lower
+    // setting applies would smear the edges of the fill by a level or two,
+    // which a pixel comparison would then have to tolerate for no benefit.
+    QImageWriter writer(target, QByteArrayLiteral("jpeg"));
+    writer.setQuality(100);
+    if (!writer.write(image)) {
+        return QString();
+    }
+    return target;
+}
+
 QString TempCollection::addRaw(const QString& relative, const QByteArray& contents) {
     return addFile(relative, contents);
 }
