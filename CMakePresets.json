@@ -77,10 +77,11 @@
       "name": "ci-linux-asan",
       "inherits": "base",
       "displayName": "CI: Linux Clang with ASan and UBSan",
+      "description": "CC/CXX are set by the workflow to the pinned LLVM version; there is no unversioned default for this preset",
       "cacheVariables": {
         "CMAKE_BUILD_TYPE": "RelWithDebInfo",
-        "CMAKE_C_COMPILER": "clang",
-        "CMAKE_CXX_COMPILER": "clang++",
+        "CMAKE_C_COMPILER": "$env{CC}",
+        "CMAKE_CXX_COMPILER": "$env{CXX}",
         "CULLFINCH_ENABLE_SANITIZERS": "ON",
         "CULLFINCH_WARNINGS_AS_ERRORS": "ON",
         "CULLFINCH_ENABLE_CLANG_TIDY": "OFF"
