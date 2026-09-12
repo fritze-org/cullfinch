@@ -234,6 +234,13 @@ void QtImageService::deliver(const application::ImageResult& result) {
     if (isCancelled(result.requestId, result.generation)) {
         return; // A superseded request never reaches the view.
     }
+    {
+        QMutexLocker locker(&mutex_);
+        if (holdResults_) {
+            heldResults_.append(result);
+            return;
+        }
+    }
     QMetaObject::invokeMethod(
         this,
         [this, result]() {
@@ -243,6 +250,25 @@ void QtImageService::deliver(const application::ImageResult& result) {
             Q_EMIT imageReady(result);
         },
         Qt::QueuedConnection);
+}
+
+void QtImageService::holdResultsForTesting() {
+    QMutexLocker locker(&mutex_);
+    holdResults_ = true;
+}
+
+void QtImageService::releaseHeldResultsForTesting() {
+    QList<application::ImageResult> ready;
+    {
+        QMutexLocker locker(&mutex_);
+        holdResults_ = false;
+        ready.swap(heldResults_);
+    }
+    // Delivered through the normal path, which re-checks cancellation: a
+    // generation abandoned while held must still never reach the view.
+    for (const application::ImageResult& result : ready) {
+        deliver(result);
+    }
 }
 
 } // namespace cullfinch::infrastructure

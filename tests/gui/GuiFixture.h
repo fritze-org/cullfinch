@@ -73,6 +73,18 @@ public:
         return window_->model()->rowCount() == expectedAssets;
     }
 
+    /// Test-only: hold decode results (thumbnails included) instead of
+    /// delivering them, so a test can capture UI state before a decode a
+    /// real window manager triggered during setup would otherwise have
+    /// already completed. Safe to call before showWindow().
+    void holdImageResults() {
+        static_cast<infrastructure::QtImageService&>(root_->images()).holdResultsForTesting();
+    }
+    void releaseImageResults() {
+        static_cast<infrastructure::QtImageService&>(root_->images())
+            .releaseHeldResultsForTesting();
+    }
+
     [[nodiscard]] testsupport::TempCollection& collection() { return collection_; }
     /// The application data root this composition writes to. A second
     /// composition against the same root is what a second launch is.

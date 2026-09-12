@@ -60,6 +60,18 @@ void TestBrowserWindow::init() {
         fixture_->collection().addRaw(QStringLiteral("IMG_%1.RAF").arg(index));
     }
 
+    // Under a real window manager, showing and settling the window can expose
+    // and paint the grid, which is enough to finish decoding these tiny
+    // fixture thumbnails before the decode-timing test's own body runs. Hold
+    // results across setup so that test can see the pre-decode state itself,
+    // rather than racing the window manager.
+    const bool holdThumbnailsAcrossSetup =
+        QString::fromLatin1(QTest::currentTestFunction()) ==
+        QStringLiteral("tilesKeepTheirFullSizeWhileThumbnailsAreStillDecoding");
+    if (holdThumbnailsAcrossSetup) {
+        fixture_->holdImageResults();
+    }
+
     QVERIFY(fixture_->showWindow() != nullptr);
     guitests::settleWindow(fixture_->window());
     QVERIFY2(fixture_->openCollection(6), "the scan did not publish six photos");
@@ -391,6 +403,12 @@ void TestBrowserWindow::tilesKeepTheirFullSizeWhileThumbnailsAreStillDecoding() 
     const QModelIndex first = grid->model()->index(0, 0);
     QVERIFY(first.isValid());
 
+    // Decode results have been held since before the window was shown, so
+    // regardless of what a real window manager did during setup, the
+    // thumbnail cannot have reached the model yet. Asking for the decoration
+    // is what the view does when it paints, and what starts the decode.
+    QVERIFY(!first.data(Qt::DecorationRole).isValid());
+
     const QRect beforeDecode = grid->visualRect(first);
     QVERIFY2(beforeDecode.height() >= grid->iconSize().height(),
              qPrintable(QStringLiteral("tile is %1px tall before the thumbnail arrives, too short "
@@ -398,8 +416,8 @@ void TestBrowserWindow::tilesKeepTheirFullSizeWhileThumbnailsAreStillDecoding() 
                             .arg(beforeDecode.height())
                             .arg(grid->iconSize().height())));
 
-    // Asking for the decoration is what the view does when it paints, and what
-    // starts the decode.
+    // Now let the held decode reach the model.
+    fixture_->releaseImageResults();
     QVERIFY(GuiFixture::waitFor([&]() { return first.data(Qt::DecorationRole).isValid(); }));
 
     // The arriving thumbnail must not move or resize the tile it lands in.
