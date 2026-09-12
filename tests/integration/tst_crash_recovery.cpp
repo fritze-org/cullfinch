@@ -78,6 +78,14 @@ private:
     /// A QVERIFY inside a helper returns from the helper, not from the test, so every caller checks
     /// that this got as far as building a controller and finding a group before reading either.
     void crashAndReopen(CrashPoint point, application::OperationRecord* record);
+    /// Recover, and assert the whole photo came back: every file at its original path, nothing left
+    /// in staging, and nothing sent to Trash. The plan is left retryable rather than recorded as
+    /// completed, which would say the photo was deleted when it is still there.
+    ///
+    /// The three steps before Trash is called all have to end this way, which is the point: what
+    /// differs between them is the state the journal was caught in, not what recovery owes the
+    /// photo.
+    void recoverPutsThePhotoBack(const application::OperationRecord& stored);
 
     [[nodiscard]] QString stagingRoot() const;
     [[nodiscard]] QString trashRoot() const;
@@ -220,6 +228,21 @@ void TestCrashRecovery::crashAndReopen(CrashPoint point, application::OperationR
     *record = unfinished.first();
 }
 
+void TestCrashRecovery::recoverPutsThePhotoBack(const application::OperationRecord& stored) {
+    QString error;
+    QVERIFY2(controller_->recover(stored.plan.id, &error), qPrintable(error));
+    QCOMPARE(filesGoneFromTheCollection(), 0);
+    QCOMPARE(filesIn(groupDirectory(stagingRoot(), stored)), 0);
+    QCOMPARE(trash_->callCount(), 0);
+
+    const std::optional<application::OperationRecord> reloaded =
+        repository_->loadOperation(stored.plan.id, &error);
+    if (!reloaded.has_value()) {
+        QFAIL(qPrintable(error));
+    }
+    QCOMPARE(reloaded->state, domain::OperationState::Planned);
+}
+
 void TestCrashRecovery::anUninterruptedRunCompletesAndLeavesNothingUnfinished() {
     // The control case. Without it, a helper that silently failed to start would make every crash
     // case below pass for the wrong reason.
@@ -271,19 +294,7 @@ void TestCrashRecovery::recoversFromACrashBetweenARenameAndItsJournal() {
     }
     QCOMPARE(manifest->members.size(), photoFileCount());
 
-    QVERIFY2(controller_->recover(stored.plan.id, &error), qPrintable(error));
-    QCOMPARE(filesGoneFromTheCollection(), 0);
-    QCOMPARE(filesIn(staged), 0);
-    QCOMPARE(trash_->callCount(), 0);
-
-    // Nothing reached Trash, so the reviewed plan is intact and may be retried. Calling this
-    // "completed" would say the photo was deleted when it is still there.
-    const std::optional<application::OperationRecord> reloaded =
-        repository_->loadOperation(stored.plan.id, &error);
-    if (!reloaded.has_value()) {
-        QFAIL(qPrintable(error));
-    }
-    QCOMPARE(reloaded->state, domain::OperationState::Planned);
+    recoverPutsThePhotoBack(stored);
 }
 
 void TestCrashRecovery::recoversFromACrashAfterTheWholeGroupReachedStaging() {
@@ -299,19 +310,8 @@ void TestCrashRecovery::recoversFromACrashAfterTheWholeGroupReachedStaging() {
     QVERIFY(stored.trashPath.isEmpty());
 
     // Staged is not Trashed: the group is whole, in staging, and must come back.
-    QString error;
-    QVERIFY2(controller_->recover(stored.plan.id, &error), qPrintable(error));
-    QCOMPARE(filesGoneFromTheCollection(), 0);
-    QCOMPARE(filesIn(staged), 0);
-    QCOMPARE(trash_->callCount(), 0);
+    recoverPutsThePhotoBack(stored);
     QVERIFY(!QFileInfo::exists(trashRoot()));
-
-    const std::optional<application::OperationRecord> reloaded =
-        repository_->loadOperation(stored.plan.id, &error);
-    if (!reloaded.has_value()) {
-        QFAIL(qPrintable(error));
-    }
-    QCOMPARE(reloaded->state, domain::OperationState::Planned);
 }
 
 void TestCrashRecovery::recoversFromACrashAfterTheIntentToTrashWasJournalled() {
@@ -330,18 +330,7 @@ void TestCrashRecovery::recoversFromACrashAfterTheIntentToTrashWasJournalled() {
 
     // Recovery must read the files, not the state name. Taking "Trashing" as evidence of a Trash
     // would abandon a group that is sitting in staging, intact.
-    QString error;
-    QVERIFY2(controller_->recover(stored.plan.id, &error), qPrintable(error));
-    QCOMPARE(filesGoneFromTheCollection(), 0);
-    QCOMPARE(filesIn(staged), 0);
-    QCOMPARE(trash_->callCount(), 0);
-
-    const std::optional<application::OperationRecord> reloaded =
-        repository_->loadOperation(stored.plan.id, &error);
-    if (!reloaded.has_value()) {
-        QFAIL(qPrintable(error));
-    }
-    QCOMPARE(reloaded->state, domain::OperationState::Planned);
+    recoverPutsThePhotoBack(stored);
 }
 
 void TestCrashRecovery::reportsAnUncertainOutcomeAfterACrashBetweenTrashAndItsJournal() {
