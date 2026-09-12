@@ -444,18 +444,17 @@ bool SessionController::finish(QString* error) {
     // still looks resumable.
     std::optional<DispositionController::PendingRejections> pending;
     QString transactionError;
-    const bool committed = repository_.runInTransaction(
-        [&]() {
-            pending = dispositions_.beginRejections(summary.draftRejected, &transactionError);
-            if (!pending.has_value()) {
-                return false;
-            }
-            return repository_.saveSession(toStoredSession(SessionLifecycle::Finished),
-                                           &transactionError);
-        },
-        &transactionError);
-
-    if (!committed) {
+    if (const bool committed = repository_.runInTransaction(
+            [this, &pending, &transactionError, &summary]() {
+                pending = dispositions_.beginRejections(summary.draftRejected, &transactionError);
+                if (!pending.has_value()) {
+                    return false;
+                }
+                return repository_.saveSession(toStoredSession(SessionLifecycle::Finished),
+                                               &transactionError);
+            },
+            &transactionError);
+        !committed) {
         dispositions_.setMarkingEnabled(false);
         if (error != nullptr) {
             *error = tr("This comparison could not be finished: %1").arg(transactionError);

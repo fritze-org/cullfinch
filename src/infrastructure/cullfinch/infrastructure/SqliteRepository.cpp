@@ -874,6 +874,38 @@ bool SqliteRepository::reconcileAssets(const CollectionId& id, const PhotoAssetL
     return true;
 }
 
+bool SqliteRepository::applyDispositionsLocked(const CollectionId& id, quint64 expectedRevision,
+                                               const QList<AssetId>& reject,
+                                               const QList<AssetId>& neutral, QString* error) {
+    if (const quint64 actual = collectionRevision(id, nullptr); actual != expectedRevision) {
+        report(error, tr("The collection changed while you were working (revision %1, "
+                         "expected %2). Refresh and try again.")
+                          .arg(actual)
+                          .arg(expectedRevision));
+        return false;
+    }
+
+    QSqlQuery update(database_);
+    update.prepare(QStringLiteral("UPDATE assets SET disposition = :disposition WHERE id = :id AND "
+                                  "collection_id = :collection"));
+    if (!applyDisposition(update, id, reject, QStringLiteral("reject")) ||
+        !applyDisposition(update, id, neutral, QStringLiteral("neutral"))) {
+        report(error, tr("Storing deletion marks failed: %1").arg(update.lastError().text()));
+        return false;
+    }
+
+    QSqlQuery revision(database_);
+    revision.prepare(
+        QStringLiteral("UPDATE collections SET revision = revision + 1 WHERE id = :id"));
+    revision.bindValue(QStringLiteral(":id"), text(id.toString()));
+    if (!revision.exec()) {
+        report(error,
+               tr("Advancing the collection revision failed: %1").arg(revision.lastError().text()));
+        return false;
+    }
+    return true;
+}
+
 bool SqliteRepository::applyDispositions(const CollectionId& id, quint64 expectedRevision,
                                          const QList<AssetId>& reject,
                                          const QList<AssetId>& neutral, quint64* newRevision,
@@ -882,42 +914,12 @@ bool SqliteRepository::applyDispositions(const CollectionId& id, quint64 expecte
     // caller can fold this write into a larger transaction (see
     // SessionController::finish, which must not let the collection's marks
     // become durable unless the session record that describes them does too).
-    const bool committed = runInTransaction(
-        [&]() {
-            if (const quint64 actual = collectionRevision(id, nullptr);
-                actual != expectedRevision) {
-                report(error, tr("The collection changed while you were working (revision %1, "
-                                 "expected %2). Refresh and try again.")
-                                  .arg(actual)
-                                  .arg(expectedRevision));
-                return false;
-            }
-
-            QSqlQuery update(database_);
-            update.prepare(
-                QStringLiteral("UPDATE assets SET disposition = :disposition WHERE id = :id AND "
-                               "collection_id = :collection"));
-            if (!applyDisposition(update, id, reject, QStringLiteral("reject")) ||
-                !applyDisposition(update, id, neutral, QStringLiteral("neutral"))) {
-                report(error,
-                       tr("Storing deletion marks failed: %1").arg(update.lastError().text()));
-                return false;
-            }
-
-            QSqlQuery revision(database_);
-            revision.prepare(
-                QStringLiteral("UPDATE collections SET revision = revision + 1 WHERE id = :id"));
-            revision.bindValue(QStringLiteral(":id"), text(id.toString()));
-            if (!revision.exec()) {
-                report(error, tr("Advancing the collection revision failed: %1")
-                                  .arg(revision.lastError().text()));
-                return false;
-            }
-            return true;
-        },
-        error);
-
-    if (!committed) {
+    if (const bool committed = runInTransaction(
+            [this, &id, expectedRevision, &reject, &neutral, error]() {
+                return applyDispositionsLocked(id, expectedRevision, reject, neutral, error);
+            },
+            error);
+        !committed) {
         return false;
     }
     if (newRevision != nullptr) {

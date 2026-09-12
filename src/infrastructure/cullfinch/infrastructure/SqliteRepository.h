@@ -78,6 +78,13 @@ private:
     /// an inner one just reports `commit` up to whichever call is outermost.
     bool endTransactionScope(bool commit, QString* error);
 
+    /// The body of `applyDispositions`, run inside the transaction scope
+    /// `runInTransaction` opens -- split out so that scope's lambda stays
+    /// short and its captures explicit.
+    bool applyDispositionsLocked(const domain::CollectionId& id, quint64 expectedRevision,
+                                 const QList<domain::AssetId>& reject,
+                                 const QList<domain::AssetId>& neutral, QString* error);
+
     QString databaseFile_;
     QString connectionName_;
     QSqlDatabase database_;
