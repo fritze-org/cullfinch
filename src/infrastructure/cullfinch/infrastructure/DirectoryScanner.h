@@ -6,6 +6,9 @@
 
 #include <QAtomicInteger>
 #include <QFileSystemWatcher>
+#include <QFuture>
+#include <QList>
+#include <QMutex>
 #include <QStringList>
 #include <QTimer>
 
@@ -52,6 +55,10 @@ private:
     bool watchEnabled_ = false;
     /// Latest generation. Workers compare against it and drop stale results.
     QAtomicInteger<quint64> currentGeneration_ = 0;
+    /// Outstanding worker tasks, so destruction can wait for them. Guarded
+    /// because workers finish on the pool while the owning thread appends.
+    QMutex inFlightGuard_;
+    QList<QFuture<void>> inFlight_;
 };
 
 } // namespace cullfinch::infrastructure

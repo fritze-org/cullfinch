@@ -9,10 +9,11 @@
 #include <QFile>
 #include <QFileInfo>
 #include <QMetaObject>
+#include <QMutexLocker>
 #include <QThreadPool>
 #include <QtConcurrent/QtConcurrentRun>
 
-#include <tuple>
+#include <utility>
 
 #if defined(Q_OS_UNIX)
 #include <sys/stat.h>
@@ -78,6 +79,20 @@ DirectoryScanner::DirectoryScanner(QObject* parent) : application::IScanService(
 
 DirectoryScanner::~DirectoryScanner() {
     cancelAll();
+
+    // Bumping the generation cancels a *result*, not the task that produces it:
+    // a worker still dereferences this object to discover that its result is
+    // unwanted. So no task may outlive the scanner. Only destruction waits;
+    // cancelAll() stays non-blocking, because the GUI thread calls it whenever
+    // the user switches collections.
+    QList<QFuture<void>> pending;
+    {
+        const QMutexLocker locked(&inFlightGuard_);
+        pending = std::move(inFlight_);
+    }
+    for (QFuture<void>& task : pending) {
+        task.waitForFinished();
+    }
 }
 
 QList<domain::DiscoveredFile> DirectoryScanner::enumerate(const QString& rootPath, bool recursive,
@@ -130,7 +145,7 @@ void DirectoryScanner::requestScan(const application::ScanRequest& request) {
 
     // Decode-free work, so QThreadPool is enough; the scanner never holds a
     // widget pointer.
-    std::ignore =
+    QFuture<void> task =
         QtConcurrent::run(QThreadPool::globalInstance(), [this, resolver, generation, rootPath,
                                                           recursive, config, collectionId]() {
             QString error;
@@ -146,6 +161,13 @@ void DirectoryScanner::requestScan(const application::ScanRequest& request) {
                 resolver->resolve(collectionId, files, config, /*scopeComplete=*/true);
             publishFinished(generation, result);
         });
+
+    // Kept so the destructor can join it. Superseded entries are dropped here
+    // rather than by a timer: a scan that has already delivered is nothing to
+    // wait for, and a long session must not accumulate them.
+    const QMutexLocker locked(&inFlightGuard_);
+    inFlight_.removeIf([](const QFuture<void>& pending) { return pending.isFinished(); });
+    inFlight_.append(task);
 }
 
 void DirectoryScanner::publishFinished(quint64 generation,
