@@ -23,7 +23,7 @@ exclude: |
 repos:
   # ---------------------------------------------------------------- C++ format
   - repo: https://github.com/pre-commit/mirrors-clang-format
-    rev: v23.1.0
+    rev: e2b496dc2bd8340c2524cb9a2d2a943cde1bb6df  # frozen: v23.1.1
     hooks:
       - id: clang-format
         name: clang-format (LLVM 23)
@@ -32,7 +32,7 @@ repos:
 
   # ------------------------------------------------------------ editor settings
   - repo: https://github.com/editorconfig-checker/editorconfig-checker.python
-    rev: 3.11.1
+    rev: e8b4e28241a9ae8296ba6e4a491b5da4eda73283  # frozen: 3.11.1
     hooks:
       - id: editorconfig-checker
         alias: ec
@@ -65,7 +65,7 @@ repos:
 
   # ------------------------------------------------------------------ Markdown
   - repo: https://github.com/DavidAnson/markdownlint-cli2
-    rev: v0.23.2
+    rev: b82a6c8896e491b9cb377a99ff3412131920681b  # frozen: v0.23.2
     hooks:
       - id: markdownlint-cli2
         # Pinned so the hook does not depend on whatever Node the machine
@@ -74,7 +74,7 @@ repos:
 
   # ------------------------------------------------------------ GitHub Actions
   - repo: https://github.com/rhysd/actionlint
-    rev: v1.7.12
+    rev: 914e7df21a07ef503a81201c76d2b11c789d3fca  # frozen: v1.7.12
     hooks:
       - id: actionlint
         # actionlint's optional ShellCheck integration must be deterministic.
@@ -87,13 +87,13 @@ repos:
 
   # ------------------------------------------------------------- Shell scripts
   - repo: https://github.com/shellcheck-py/shellcheck-py
-    rev: v0.11.0.1
+    rev: a6564f5d57444e123433a5c9af733e3975c77229  # frozen: v0.11.0.1-1
     hooks:
       - id: shellcheck
         args: [--severity=style, --shell=bash]
 
   - repo: https://github.com/scop/pre-commit-shfmt
-    rev: v3.13.1-1
+    rev: 05c1426671b9237fb5e1444dd63aa5731bec0dfb  # frozen: v3.13.1-1
     hooks:
       - id: shfmt
         # Matches .editorconfig: 4-space indentation, LF, POSIX-safe bash.
@@ -101,7 +101,7 @@ repos:
 
   # ------------------------------- Python maintenance scripts (no app runtime)
   - repo: https://github.com/astral-sh/ruff-pre-commit
-    rev: v0.16.6
+    rev: e8f7d69b957a30acb2c875078d5fd012de24b64c  # frozen: v0.16.7
     hooks:
       - id: ruff-check
         args: [--fix]
@@ -109,7 +109,7 @@ repos:
 
   # ------------------------------------------------------------------ Spelling
   - repo: https://github.com/codespell-project/codespell
-    rev: v2.4.3
+    rev: 57b21406f092110c18776e39b0bda50d37c945c8  # frozen: v2.4.3
     hooks:
       - id: codespell
         args: [--ignore-words, .codespell-ignore-words.txt]
@@ -117,7 +117,7 @@ repos:
 
   # ------------------------------------------- Whitespace, data and integrity
   - repo: https://github.com/pre-commit/pre-commit-hooks
-    rev: v6.0.0
+    rev: 3e8a8703264a2f4a69428a0aa4dcb512790b2c8c  # frozen: v6.0.0
     hooks:
       # Whitespace: normalise to LF; Markdown uses explicit line breaks.
       - id: trailing-whitespace
@@ -145,7 +145,7 @@ repos:
 
   # ------------------------------------------------------- Tool lock integrity
   - repo: https://github.com/astral-sh/uv-pre-commit
-    rev: 0.12.12
+    rev: 4f783b6470be305483837130a5be2e21ed7ff52b  # frozen: 0.12.13
     hooks:
       - id: uv-lock
         args: [--check]

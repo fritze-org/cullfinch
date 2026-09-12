@@ -72,6 +72,10 @@ make coverage  # instrumented build, all three suites, Cobertura + HTML report
 Development tools (pre-commit, gcovr, ruff, shellcheck, actionlint) are pinned through `uv` in
 `pyproject.toml` and `uv.lock`. That adds no Python dependency to the application.
 
+`.pre-commit-config.yaml` pins each hook to a commit SHA with the tag kept in a trailing
+comment. Update hook versions with `pre-commit autoupdate --freeze`, then confirm
+`pre-commit validate-config` still passes; never hand-edit a `rev:` back to a bare tag.
+
 ## Tests
 
 | Suite | Label | What it covers |
