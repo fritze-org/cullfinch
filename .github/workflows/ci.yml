@@ -333,7 +333,12 @@ jobs:
         env:
           CULLFINCH_LLVM_VERSION: '23'
         run: |
-          curl -fsSL -o /tmp/llvm.sh https://apt.llvm.org/llvm.sh
+          # -L follows redirects, so the protocol has to be pinned for the
+          # redirect too: without --proto-redir a redirect could downgrade
+          # this to plain HTTP and hand the job an unauthenticated script it
+          # then runs as root.
+          curl -fsSL --proto '=https' --proto-redir '=https' \
+            -o /tmp/llvm.sh https://apt.llvm.org/llvm.sh
           chmod +x /tmp/llvm.sh
           sudo /tmp/llvm.sh "${CULLFINCH_LLVM_VERSION}"
           # llvm.sh installs clang, lldb, lld and clangd, but clang-tidy ships
