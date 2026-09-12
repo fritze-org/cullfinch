@@ -45,9 +45,11 @@ jobs:
           enable-cache: true
           cache-dependency-glob: uv.lock
 
-      # No --no-build here, unlike the steps that only run the tools: actionlint-py
-      # publishes no wheel, so the sync has to build its source distribution. The
-      # lock pins that sdist by hash, which is what makes building it acceptable.
+      # No --no-build on any uv invocation in this job, the `uv run` steps below
+      # included: actionlint-py publishes no wheel, `uv run` re-checks the
+      # environment against the lock on every call, and uv has no per-package
+      # exemption from a global --no-build. The lock pins that sdist by hash,
+      # which is what makes building it acceptable. See issue #25.
       - name: Sync the locked tooling environment
         run: uv sync --locked --group tooling
 
@@ -57,18 +59,13 @@ jobs:
           path: ~/.cache/pre-commit
           key: pre-commit-${{ matrix.os }}-${{ hashFiles('.pre-commit-config.yaml') }}
 
-      # --no-build refuses to compile a source distribution. The sync above
-      # already materialised the environment, so nothing here needs building and
-      # a step that suddenly wants to is a change worth failing on.
       - name: Validate the hook configuration
-        run: uv run --frozen --no-build --group tooling -- pre-commit validate-config
+        run: uv run --frozen --group tooling -- pre-commit validate-config
 
       # The same configuration developers commit with, against every tracked file.
       - name: Run all hooks on all files
         id: hooks
-        run: |
-          uv run --frozen --no-build --group tooling -- \
-            pre-commit run --all-files --show-diff-on-failure
+        run: uv run --frozen --group tooling -- pre-commit run --all-files --show-diff-on-failure
 
       # A formatting change is a failure with a downloadable diff. CI never
       # commits the fix itself.
@@ -435,9 +432,9 @@ jobs:
           enable-cache: true
           cache-dependency-glob: uv.lock
 
-      # No --no-build here, unlike the steps that only run the tools: actionlint-py
-      # publishes no wheel, so the sync has to build its source distribution. The
-      # lock pins that sdist by hash, which is what makes building it acceptable.
+      # No --no-build: actionlint-py publishes no wheel, so the sync has to build
+      # its source distribution. The lock pins that sdist by hash, which is what
+      # makes building it acceptable. See issue #25.
       - name: Sync the locked tooling environment
         run: uv sync --locked --group tooling
 
