@@ -35,10 +35,16 @@ the rendering it can:
 - The photos are flat colours written by `TempCollection::addSolidJpeg`, not the name-stamped
   fixtures the behavioural suites use.
 
-What survives that is genuinely font-dependent: the browser's status bar is nothing but its three
-permanent labels. Those cases are recorded per rendering environment, in a directory named after a
-digest of the Qt version, platform plugin, style, device pixel ratio and resolved font metrics.
-Everything else shares one `shared/` set.
+What survives that is genuinely font-dependent goes in a directory named after a digest of the Qt
+version, platform plugin, style, device pixel ratio and resolved font metrics: the browser's status
+bar, which is nothing but its three permanent labels, and the browser's grid, whose cells are a
+fixed size but are split between thumbnail and label by the label's own height — so a taller font
+draws a smaller thumbnail, whatever the mask hides. The wall and versus cases share one `shared/`
+set.
+
+That split is a claim about what reaches the pixels, and only one environment has been recorded so
+far. A `shared/` case that turns out to differ elsewhere is a mismatch rather than a skip; the
+remedy is to move it into the environment directory and record why, not to widen the tolerance.
 
 An environment with no recorded references **skips** rather than fails, and writes what it rendered
 to the artifact directory as a candidate. A directory that exists but is missing a case is a

@@ -15,8 +15,10 @@
 //     the geometry that decides where the text goes and drops the
 //     rasterisation, which no two font stacks agree on.
 //
-// What is left over -- the browser's status bar, which is nothing but text --
-// is recorded per rendering environment instead. See VisualBaseline.h.
+// What is left over is recorded per rendering environment instead: the
+// browser's status bar, which is nothing but text, and its grid, whose cells
+// are a fixed size but split between thumbnail and label by the label's own
+// height. See VisualBaseline.h.
 #include "GuiFixture.h"
 #include "VisualBaseline.h"
 
@@ -254,6 +256,11 @@ void TestVisualRegression::theBrowserGridLaysOutItsTilesUnchanged() {
     QImage rendering = guitests::renderSettled(grid->viewport());
     QVERIFY2(!rendering.isNull(), "the browser grid never stopped changing");
 
+    // Masking the label band drops the glyphs, but not the font: the cell is a
+    // fixed size and the delegate splits it between decoration and text by the
+    // text's own height, so a taller font draws a smaller thumbnail. That is
+    // what keeps this case per-environment while the wall and versus ones are
+    // shared.
     const QAbstractItemModel* model = grid->model();
     QCOMPARE(model->rowCount(), 6);
     for (int row = 0; row < model->rowCount(); ++row) {
@@ -266,7 +273,7 @@ void TestVisualRegression::theBrowserGridLaysOutItsTilesUnchanged() {
     }
 
     CULLFINCH_COMPARE_RENDERING(QStringLiteral("browser-grid"), rendering,
-                                VisualScope::FontIndependent);
+                                VisualScope::FontDependent);
 }
 
 void TestVisualRegression::theBrowserStatusBarIsUnchangedWhileWritable() {
