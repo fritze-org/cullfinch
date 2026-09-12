@@ -13,3 +13,4 @@ departs from it, and why.
 | [0005](0005-coalesced-synchronous-autosave.md) | Draft autosave is coalesced and synchronous in the first release |
 | [0006](0006-operations-blocked-flag.md) | Operation safety is a separate flag from pairing state |
 | [0007](0007-wayland-primary-linux-backend.md) | Native Wayland is the primary Linux backend |
+| [0008](0008-cpp23-language-standard.md) | The language standard is C++23, not the specified C++20 |
