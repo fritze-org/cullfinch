@@ -21,6 +21,7 @@
 #include "VisualBaseline.h"
 
 #include <cullfinch/ui/AssetListModel.h>
+#include <cullfinch/ui/FlowView.h>
 #include <cullfinch/views/versus/VersusView.h>
 #include <cullfinch/views/wall/WallView.h>
 
@@ -118,6 +119,7 @@ private:
     // These report failure by returning null rather than through QVERIFY: a
     // QVERIFY inside a helper returns from the helper, and leaves the test
     // carrying on with whatever it was handed.
+    [[nodiscard]] ui::IFlowView* startFlowOn(const QString& flowId, int count);
     [[nodiscard]] views::wall::WallSurface* startWallOn(int count);
     [[nodiscard]] views::versus::VersusView* startVersusOn(int count);
     [[nodiscard]] static QImage renderStatusBar(const ui::BrowserWindow* window);
@@ -159,7 +161,7 @@ void TestVisualRegression::cleanup() {
     fixture_.reset();
 }
 
-views::wall::WallSurface* TestVisualRegression::startWallOn(int count) {
+ui::IFlowView* TestVisualRegression::startFlowOn(const QString& flowId, int count) {
     ui::BrowserWindow* window = fixture_->window();
     ui::AssetListModel* model = (window != nullptr) ? window->model() : nullptr;
     if (model == nullptr) {
@@ -171,7 +173,7 @@ views::wall::WallSurface* TestVisualRegression::startWallOn(int count) {
         ids.append(model->idForRow(row));
     }
     window->selectAssets(ids);
-    if (!window->startFlow(QStringLiteral("image-wall"))) {
+    if (!window->startFlow(flowId)) {
         return nullptr;
     }
 
@@ -180,34 +182,18 @@ views::wall::WallSurface* TestVisualRegression::startWallOn(int count) {
         return nullptr;
     }
     guitests::settleWindow(shell);
+    return shell->view();
+}
 
-    auto* view = dynamic_cast<views::wall::WallView*>(shell->view());
+views::wall::WallSurface* TestVisualRegression::startWallOn(int count) {
+    auto* view =
+        dynamic_cast<views::wall::WallView*>(startFlowOn(QStringLiteral("image-wall"), count));
     return (view != nullptr) ? view->surface() : nullptr;
 }
 
 views::versus::VersusView* TestVisualRegression::startVersusOn(int count) {
-    ui::BrowserWindow* window = fixture_->window();
-    ui::AssetListModel* model = (window != nullptr) ? window->model() : nullptr;
-    if (model == nullptr) {
-        return nullptr;
-    }
-
-    QList<domain::AssetId> ids;
-    for (int row = 0; row < count; ++row) {
-        ids.append(model->idForRow(row));
-    }
-    window->selectAssets(ids);
-    if (!window->startFlow(QStringLiteral("versus-tree"))) {
-        return nullptr;
-    }
-
-    ui::ComparisonShell* shell = window->activeShell();
-    if (shell == nullptr) {
-        return nullptr;
-    }
-    guitests::settleWindow(shell);
-
-    return dynamic_cast<views::versus::VersusView*>(shell->view());
+    return dynamic_cast<views::versus::VersusView*>(
+        startFlowOn(QStringLiteral("versus-tree"), count));
 }
 
 QImage TestVisualRegression::renderStatusBar(const ui::BrowserWindow* window) {
