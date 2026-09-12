@@ -48,6 +48,7 @@ private slots:
     void aFailedDraftWriteKeepsTheInMemoryDraft();
     void aReadOnlyCollectionRefusesToSaveTheDraft();
     void aFailedMarkWriteLeavesMarksUnchanged();
+    void aFailedSessionWriteDuringFinishLeavesMarksUnchanged();
     void aFailedUndoWriteDropsTheHistoryWithoutTouchingMarks();
     void marksCannotChangeWhileAComparisonIsActive();
     void anArbitraryNewFlowRunsThroughTheSameController();
@@ -390,6 +391,36 @@ void TestSessionController::aFailedMarkWriteLeavesMarksUnchanged() {
     // The history is dropped rather than left describing storage incorrectly.
     QVERIFY(dispositions_->isBlocked());
     QCOMPARE(dispositions_->undoStack()->count(), 0);
+}
+
+void TestSessionController::aFailedSessionWriteDuringFinishLeavesMarksUnchanged() {
+    QString error;
+    session_->start(QLatin1String(ConformanceFlow::kId), snapshotFor(assets_, collection_),
+                    domain::FlowOptions{}, &error);
+    session_->dispatch(QStringLiteral("drop"), QJsonObject{}, &error);
+
+    // finish() writes the Active draft once before it starts its atomic
+    // section; only the write of the Finished record inside that section
+    // must fail.
+    repository_->failNextSessionSaves(1, 1);
+
+    QVERIFY2(!session_->finish(&error),
+             "finishing must fail when the session record cannot be saved");
+    QVERIFY(!error.isEmpty());
+
+    // The mark write that ran ahead of the failed session write must not
+    // have survived on its own: a crash here must never leave marks applied
+    // to a session that still looks resumable.
+    for (const domain::PhotoAsset& asset : repository_->loadAssets(collection_, nullptr)) {
+        QCOMPARE(asset.disposition, domain::Disposition::Neutral);
+    }
+    QCOMPARE(dispositions_->undoStack()->count(), 0);
+    QVERIFY(!dispositions_->isBlocked());
+
+    // The session itself is untouched by the failed transaction and stays
+    // resumable.
+    QVERIFY(session_->isActive());
+    QCOMPARE(session_->summary().draftRejected.size(), 1);
 }
 
 void TestSessionController::aFailedUndoWriteDropsTheHistoryWithoutTouchingMarks() {

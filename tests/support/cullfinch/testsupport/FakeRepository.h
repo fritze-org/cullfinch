@@ -17,6 +17,8 @@ public:
     bool open(QString* error) override;
     void close() override;
 
+    bool runInTransaction(const std::function<bool()>& action, QString* error) override;
+
     std::optional<domain::CollectionId> ensureCollection(const QString& rootPath, bool recursive,
                                                          QString* error) override;
     [[nodiscard]] std::optional<domain::CollectionId> findCollection(const QString& rootPath,
@@ -47,7 +49,13 @@ public:
     unfinishedOperations(const domain::CollectionId& id, QString* error) const override;
 
     // ---- Fault injection and inspection -----------------------------------
-    void failNextSessionSaves(int count) { sessionSaveFailures_ = count; }
+    /// Refuse session saves, starting after `after` successes. Lets a test
+    /// keep an earlier autosave write succeeding while making only the write
+    /// `SessionController::finish()` makes inside its transaction fail.
+    void failNextSessionSaves(int count, int after = 0) {
+        sessionSaveSuccessesBeforeFailure_ = after;
+        sessionSaveFailures_ = count;
+    }
     void failNextDispositionWrites(int count) { dispositionFailures_ = count; }
     /// Refuse operation journal writes, starting after `after` successes.
     void failOperationSaves(int after, int count) {
@@ -76,7 +84,11 @@ private:
     QHash<domain::OperationId, application::OperationRecord> operations_;
 
     int sessionSaveFailures_ = 0;
+    int sessionSaveSuccessesBeforeFailure_ = 0;
     int dispositionFailures_ = 0;
+    /// Nesting depth of runInTransaction calls; only the outermost one takes
+    /// the rollback snapshot and restores it on failure.
+    int transactionDepth_ = 0;
     int operationSavesBeforeFailure_ = 0;
     int operationSaveFailures_ = 0;
     int sessionSaveCount_ = 0;

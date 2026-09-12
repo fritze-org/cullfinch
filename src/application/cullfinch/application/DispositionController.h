@@ -11,6 +11,8 @@
 #include <QString>
 #include <QUndoStack>
 
+#include <optional>
+
 namespace cullfinch::application {
 
 /// Owns collection-level deletion marks and their undo history.
@@ -40,6 +42,31 @@ public:
     /// marks as one undoable step.
     bool applyRejections(const QList<domain::AssetId>& ids, const QString& commandText,
                          QString* error);
+
+    /// The forward and inverse mark changes a `beginRejections` call wrote,
+    /// kept by the caller until it knows whether the enclosing transaction
+    /// committed.
+    struct PendingRejections {
+        QHash<domain::AssetId, domain::Disposition> forward;
+        QHash<domain::AssetId, domain::Disposition> inverse;
+    };
+
+    /// Phase one of finishing a comparison inside a caller-managed
+    /// `IAssetRepository::runInTransaction` scope: writes `ids` as rejected,
+    /// but -- unlike `applyRejections` -- does not yet touch this
+    /// controller's revision or undo history, since the write is not
+    /// necessarily durable until the caller's transaction commits. Returns
+    /// nullopt without writing anything when marking is refused outright
+    /// (read-only, blocked) or the write itself fails.
+    std::optional<PendingRejections> beginRejections(const QList<domain::AssetId>& ids,
+                                                     QString* error);
+
+    /// Phase two: records the undo step and refreshes the revision for marks
+    /// a `beginRejections` call wrote, once the caller's transaction is known
+    /// to have committed. Never call this after that transaction failed --
+    /// the write rolled back with it, and this controller must keep
+    /// describing the marks storage still has.
+    void commitRejections(const PendingRejections& pending, const QString& commandText);
 
     /// Clear the deletion mark on assets, making them eligible again.
     bool unmark(const QList<domain::AssetId>& ids, QString* error);
@@ -75,6 +102,15 @@ signals:
     void markingEnabledChanged(bool enabled);
 
 private:
+    /// Writes `targets` to storage. Unlike `persist`, never touches this
+    /// controller's revision or emits `dispositionsChanged`: shared by
+    /// `persist` (which does so immediately after) and `beginRejections`
+    /// (which defers it to `commitRejections`). A storage failure is always
+    /// handled here -- it means the write itself was refused, not merely that
+    /// an enclosing transaction later rolled it back.
+    bool writeDispositions(const QHash<domain::AssetId, domain::Disposition>& targets,
+                           quint64* newRevision, QString* error);
+
     IAssetRepository& repository_;
     QUndoStack undoStack_;
     domain::CollectionId collectionId_;

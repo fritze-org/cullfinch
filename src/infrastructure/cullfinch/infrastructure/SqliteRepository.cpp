@@ -401,6 +401,46 @@ bool SqliteRepository::open(QString* error) {
     return true;
 }
 
+bool SqliteRepository::beginTransactionScope(QString* error) {
+    if (transactionDepth_ == 0 && !database_.transaction()) {
+        report(error,
+               tr("A transaction could not be started: %1").arg(database_.lastError().text()));
+        return false;
+    }
+    ++transactionDepth_;
+    return true;
+}
+
+bool SqliteRepository::endTransactionScope(bool commit, QString* error) {
+    --transactionDepth_;
+    if (transactionDepth_ > 0) {
+        // An enclosing runInTransaction call decides whether the connection's
+        // transaction is committed or rolled back.
+        return true;
+    }
+    if (!commit) {
+        database_.rollback();
+        return true;
+    }
+    if (!database_.commit()) {
+        report(error,
+               tr("Committing the transaction failed: %1").arg(database_.lastError().text()));
+        return false;
+    }
+    return true;
+}
+
+bool SqliteRepository::runInTransaction(const std::function<bool()>& action, QString* error) {
+    if (!beginTransactionScope(error)) {
+        return false;
+    }
+    const bool ok = action();
+    if (!endTransactionScope(ok, error)) {
+        return false;
+    }
+    return ok;
+}
+
 void SqliteRepository::close() {
     if (database_.isOpen()) {
         database_.close();
@@ -838,48 +878,48 @@ bool SqliteRepository::applyDispositions(const CollectionId& id, quint64 expecte
                                          const QList<AssetId>& reject,
                                          const QList<AssetId>& neutral, quint64* newRevision,
                                          QString* error) {
-    if (!database_.transaction()) {
-        report(error, tr("Deletion marks could not be changed: no transaction available."));
+    // Routed through runInTransaction rather than a private BEGIN/COMMIT so a
+    // caller can fold this write into a larger transaction (see
+    // SessionController::finish, which must not let the collection's marks
+    // become durable unless the session record that describes them does too).
+    const bool committed = runInTransaction(
+        [&]() {
+            if (const quint64 actual = collectionRevision(id, nullptr);
+                actual != expectedRevision) {
+                report(error, tr("The collection changed while you were working (revision %1, "
+                                 "expected %2). Refresh and try again.")
+                                  .arg(actual)
+                                  .arg(expectedRevision));
+                return false;
+            }
+
+            QSqlQuery update(database_);
+            update.prepare(
+                QStringLiteral("UPDATE assets SET disposition = :disposition WHERE id = :id AND "
+                               "collection_id = :collection"));
+            if (!applyDisposition(update, id, reject, QStringLiteral("reject")) ||
+                !applyDisposition(update, id, neutral, QStringLiteral("neutral"))) {
+                report(error,
+                       tr("Storing deletion marks failed: %1").arg(update.lastError().text()));
+                return false;
+            }
+
+            QSqlQuery revision(database_);
+            revision.prepare(
+                QStringLiteral("UPDATE collections SET revision = revision + 1 WHERE id = :id"));
+            revision.bindValue(QStringLiteral(":id"), text(id.toString()));
+            if (!revision.exec()) {
+                report(error, tr("Advancing the collection revision failed: %1")
+                                  .arg(revision.lastError().text()));
+                return false;
+            }
+            return true;
+        },
+        error);
+
+    if (!committed) {
         return false;
     }
-
-    if (const quint64 actual = collectionRevision(id, nullptr); actual != expectedRevision) {
-        database_.rollback();
-        report(error, tr("The collection changed while you were working (revision %1, expected "
-                         "%2). Refresh and try again.")
-                          .arg(actual)
-                          .arg(expectedRevision));
-        return false;
-    }
-
-    QSqlQuery update(database_);
-    update.prepare(QStringLiteral("UPDATE assets SET disposition = :disposition WHERE id = :id AND "
-                                  "collection_id = :collection"));
-
-    if (!applyDisposition(update, id, reject, QStringLiteral("reject")) ||
-        !applyDisposition(update, id, neutral, QStringLiteral("neutral"))) {
-        const QString message = update.lastError().text();
-        database_.rollback();
-        report(error, tr("Storing deletion marks failed: %1").arg(message));
-        return false;
-    }
-
-    QSqlQuery revision(database_);
-    revision.prepare(
-        QStringLiteral("UPDATE collections SET revision = revision + 1 WHERE id = :id"));
-    revision.bindValue(QStringLiteral(":id"), text(id.toString()));
-    if (!revision.exec()) {
-        const QString message = revision.lastError().text();
-        database_.rollback();
-        report(error, tr("Advancing the collection revision failed: %1").arg(message));
-        return false;
-    }
-
-    if (!database_.commit()) {
-        report(error, tr("Storing deletion marks failed: %1").arg(database_.lastError().text()));
-        return false;
-    }
-
     if (newRevision != nullptr) {
         *newRevision = collectionRevision(id, error);
     }

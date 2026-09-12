@@ -437,18 +437,33 @@ bool SessionController::finish(QString* error) {
 
     // Marking must be possible again before the marks are applied.
     dispositions_.setMarkingEnabled(true);
-    if (!dispositions_.applyRejections(summary.draftRejected, commandText, error)) {
+
+    // The marks and the Finished session record are two writes that must
+    // become durable together or not at all: a crash or a refused second
+    // write between them must never leave marks applied to a session that
+    // still looks resumable.
+    std::optional<DispositionController::PendingRejections> pending;
+    QString transactionError;
+    const bool committed = repository_.runInTransaction(
+        [&]() {
+            pending = dispositions_.beginRejections(summary.draftRejected, &transactionError);
+            if (!pending.has_value()) {
+                return false;
+            }
+            return repository_.saveSession(toStoredSession(SessionLifecycle::Finished),
+                                           &transactionError);
+        },
+        &transactionError);
+
+    if (!committed) {
         dispositions_.setMarkingEnabled(false);
+        if (error != nullptr) {
+            *error = tr("This comparison could not be finished: %1").arg(transactionError);
+        }
         return false;
     }
 
-    if (QString storageError;
-        !repository_.saveSession(toStoredSession(SessionLifecycle::Finished), &storageError)) {
-        // The marks are durable; only the session record lagged behind.
-        Q_EMIT errorOccurred(
-            tr("Deletion marks were applied, but the comparison record could not be updated: %1")
-                .arg(storageError));
-    }
+    dispositions_.commitRejections(*pending, commandText);
 
     clearSession();
     Q_EMIT sessionEnded(id, true);

@@ -130,6 +130,10 @@ public:
     bool open(QString* error) override { return inner_.open(error); }
     void close() override { inner_.close(); }
 
+    bool runInTransaction(const std::function<bool()>& action, QString* error) override {
+        return inner_.runInTransaction(action, error);
+    }
+
     std::optional<domain::CollectionId> ensureCollection(const QString& rootPath, bool recursive,
                                                          QString* error) override {
         return inner_.ensureCollection(rootPath, recursive, error);

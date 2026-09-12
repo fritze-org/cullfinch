@@ -31,6 +31,7 @@ private slots:
     void invalidatesMarksWhenMembershipChanges();
     void marksAnAssetStaleWhenAMemberDisappears();
     void refusesAMarkChangeAgainstAStaleRevision();
+    void runInTransactionRollsBackMarksWhenTheEnclosingActionFails();
     void roundTripsASessionDraft();
     void listsOnlyResumableSessions();
     void roundTripsAnOperationJournal();
@@ -280,6 +281,42 @@ void TestSqliteRepository::refusesAMarkChangeAgainstAStaleRevision() {
     for (const domain::PhotoAsset& asset : repository_->loadAssets(*id, nullptr)) {
         QCOMPARE(asset.disposition, domain::Disposition::Neutral);
     }
+}
+
+void TestSqliteRepository::runInTransactionRollsBackMarksWhenTheEnclosingActionFails() {
+    QString error;
+    const auto id = repository_->ensureCollection(QStringLiteral("/photos"), false, &error);
+    if (!id.has_value()) {
+        QFAIL(qPrintable(error));
+    }
+    const domain::PhotoAssetList assets = AssetBuilder::resolvedSeries(2);
+
+    quint64 revision = 0;
+    QVERIFY2(repository_->reconcileAssets(*id, assets, nullptr, &revision, &error),
+             qPrintable(error));
+
+    // applyDispositions must nest inside an enclosing runInTransaction scope
+    // rather than starting a second, conflicting one -- this is what lets
+    // SessionController::finish() apply marks and save the session record as
+    // one atomic unit.
+    quint64 writtenRevision = revision;
+    QVERIFY2(!repository_->runInTransaction(
+                 [&]() {
+                     if (!repository_->applyDispositions(*id, revision, {assets.first().id}, {},
+                                                         &writtenRevision, &error)) {
+                         return false;
+                     }
+                     // Something else sharing this transaction fails; the mark
+                     // write above must not survive on its own.
+                     return false;
+                 },
+                 &error),
+             "the enclosing action's failure must roll back every write in the scope");
+
+    for (const domain::PhotoAsset& asset : repository_->loadAssets(*id, nullptr)) {
+        QCOMPARE(asset.disposition, domain::Disposition::Neutral);
+    }
+    QCOMPARE(repository_->collectionRevision(*id, nullptr), revision);
 }
 
 void TestSqliteRepository::roundTripsASessionDraft() {

@@ -30,6 +30,8 @@ public:
     bool open(QString* error) override;
     void close() override;
 
+    bool runInTransaction(const std::function<bool()>& action, QString* error) override;
+
     [[nodiscard]] std::optional<domain::CollectionId> findCollection(const QString& rootPath,
                                                                      QString* error) const override;
     std::optional<domain::CollectionId> ensureCollection(const QString& rootPath, bool recursive,
@@ -68,10 +70,19 @@ public:
 private:
     bool migrate(QString* error);
 
+    /// Opens the connection's transaction unless one from an enclosing
+    /// `runInTransaction` call is already open, in which case this joins it.
+    bool beginTransactionScope(QString* error);
+    /// Leaves the transaction scope opened by the matching `beginTransactionScope`
+    /// call. Only the outermost, unmatched call actually commits or rolls back;
+    /// an inner one just reports `commit` up to whichever call is outermost.
+    bool endTransactionScope(bool commit, QString* error);
+
     QString databaseFile_;
     QString connectionName_;
     QSqlDatabase database_;
     bool open_ = false;
+    int transactionDepth_ = 0;
 };
 
 } // namespace cullfinch::infrastructure
