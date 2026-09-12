@@ -105,14 +105,25 @@ jobs:
 
       - name: Build an AppImage (Linux)
         if: runner.os == 'Linux'
+        env:
+          # An existing packaging tool; cullfinch does not implement an image
+          # packager of its own. A released version, not the rolling
+          # "continuous" asset, so two builds of the same tag use the same
+          # packager -- and verified by digest, because a release asset can be
+          # replaced after the fact.
+          CULLFINCH_APPIMAGETOOL_VERSION: '1.9.1'
+          CULLFINCH_APPIMAGETOOL_SHA256: >-
+            ed4ce84f0d9caff66f50bcca6ff6f35aae54ce8135408b3fa33abfc3cb384eb0
         run: |
-          # An existing packaging tool, pinned. cullfinch does not implement an
-          # image packager of its own.
           # --proto/--proto-redir pin the transport: -L follows redirects, and
           # the release asset is served through one, so without them a redirect
           # to http:// would be honoured silently.
           curl -fsSL --proto '=https' --proto-redir '=https' -o appimagetool \
-            https://github.com/AppImage/appimagetool/releases/download/continuous/appimagetool-x86_64.AppImage
+            "https://github.com/AppImage/appimagetool/releases/download/${CULLFINCH_APPIMAGETOOL_VERSION}/appimagetool-x86_64.AppImage"
+          # Nothing is made executable until the digest matches. The step shell
+          # is `bash -e`, so a mismatch fails here rather than packaging with an
+          # unverified tool. Bump the version and the digest together.
+          echo "${CULLFINCH_APPIMAGETOOL_SHA256}  appimagetool" | sha256sum --check --strict -
           chmod +x appimagetool
 
           appdir="${{ github.workspace }}/cullfinch.AppDir"
