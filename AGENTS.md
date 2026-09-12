@@ -99,6 +99,11 @@ These were all found the expensive way. Most cost a full CI round.
 - **A headless compositor can have no input seat.** Never assert `hasFocus()` or rely on `setFocus()`
   being honoured in the GUI suites; deliver the event directly instead. Real focus routing belongs
   to the compositor integration suite.
+- **`resize()` on a mapped window is a request, and Qt adopts it before the answer arrives.** A
+  window manager that already mapped the window at another size can revert it, and `size()` cannot
+  tell the two apart; the revert surfaces later as a relayout, moving widgets a test has already
+  measured. That is what made the wall suite fail under X11 and nowhere else. GUI tests that read
+  geometry use `guitests::settleWindowSize()`, which waits for the size to hold.
 - **Wayland cannot place its own windows.** Restore size and window state, never a desktop position,
   and treat fullscreen transitions as asynchronous.
 - **`ComparisonShell` takes presentations at construction** because it renders state immediately; a

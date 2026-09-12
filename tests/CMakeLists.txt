@@ -63,6 +63,14 @@ cullfinch_add_test(
   LABELS unit PLATFORM offscreen
   TIMEOUT 180)
 
+# Startup-time desktop integration is a policy decision plus a one-line effect, and both are checked
+# here: the effects are process-wide environment and QIcon state, which this restores.
+cullfinch_add_test(
+  tst_desktop_integration
+  SOURCES unit/tst_desktop_integration.cpp
+  DEPS cullfinch::cullfinch_composition
+  LABELS unit PLATFORM offscreen)
+
 # ------------------------------------------------------------ integration ----
 # Real temporary directories and a real SQLite database, with controllable adapters for the failure
 # paths.

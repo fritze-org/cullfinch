@@ -1,5 +1,6 @@
 // SPDX-License-Identifier: GPL-3.0-or-later
 #include <CompositionRoot.h>
+#include <DesktopIntegration.h>
 
 #include <QApplication>
 #include <QCommandLineOption>
@@ -179,8 +180,10 @@ int main(int argc, char* argv[]) {
         return 0;
     }
 
+    cullfinch::app::preferPortalDialogs();
     QApplication application(argc, argv);
     setApplicationIdentity();
+    cullfinch::app::pruneUnreachableIconThemePaths();
     // The identifiers above stay lowercase because paths derive from them;
     // what people read is the confirmed product name.
     QGuiApplication::setApplicationDisplayName(QStringLiteral("Cullfinch"));

@@ -5,8 +5,8 @@
 # injectable adapters, rather than re-implementing it.
 cullfinch_add_library(
   cullfinch_composition
-  SOURCES CompositionRoot.cpp
-  HEADERS CompositionRoot.h
+  SOURCES CompositionRoot.cpp DesktopIntegration.cpp
+  HEADERS CompositionRoot.h DesktopIntegration.h
   PUBLIC_DEPS cullfinch::cullfinch_ui cullfinch::cullfinch_infrastructure
               cullfinch::cullfinch_view_versus cullfinch::cullfinch_view_wall)
 
