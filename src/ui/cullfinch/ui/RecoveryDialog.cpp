@@ -42,6 +42,36 @@ QString stepDescription(const QString& step) {
     return step;
 }
 
+/// One photo's row, with a row per file under it.
+///
+/// A free function because it reads nothing from the dialog: every row it
+/// builds comes from the record it is handed.
+void addGroupItem(QTreeWidgetItem* parent, const application::OperationRecord& record,
+                  const domain::PlannedGroup& group, int row) {
+    auto* groupItem = new QTreeWidgetItem(parent);
+    groupItem->setData(0, kRecordRole, row);
+    groupItem->setText(0, group.displayName);
+    groupItem->setText(2,
+                       QDir(record.plan.stagingRoot).absoluteFilePath(group.stagingDirectoryName));
+
+    // The complete group membership is shown, as the review screen shows it: a
+    // person deciding what to do about a half-moved photo needs to see every
+    // file it owns, not a count.
+    for (const domain::PlannedMember& member : group.members) {
+        const auto entry = std::ranges::find(record.members, member.memberId,
+                                             &application::OperationMemberRecord::memberId);
+        auto* memberItem = new QTreeWidgetItem(groupItem);
+        memberItem->setData(0, kRecordRole, row);
+        memberItem->setText(0, member.fileName);
+        if (entry == record.members.cend()) {
+            continue;
+        }
+        memberItem->setText(1, stepDescription(entry->lastDurableStep));
+        memberItem->setText(2, entry->error.isEmpty() ? member.sourcePath : entry->error);
+    }
+    groupItem->setExpanded(true);
+}
+
 } // namespace
 
 RecoveryDialog::RecoveryDialog(application::OperationController& operations,
@@ -173,33 +203,6 @@ void RecoveryDialog::addRecordItem(const application::OperationRecord& record, i
     item->setExpanded(true);
 }
 
-void RecoveryDialog::addGroupItem(QTreeWidgetItem* parent,
-                                  const application::OperationRecord& record,
-                                  const domain::PlannedGroup& group, int row) {
-    auto* groupItem = new QTreeWidgetItem(parent);
-    groupItem->setData(0, kRecordRole, row);
-    groupItem->setText(0, group.displayName);
-    groupItem->setText(2,
-                       QDir(record.plan.stagingRoot).absoluteFilePath(group.stagingDirectoryName));
-
-    // The complete group membership is shown, as the review screen shows it: a
-    // person deciding what to do about a half-moved photo needs to see every
-    // file it owns, not a count.
-    for (const domain::PlannedMember& member : group.members) {
-        const auto entry = std::ranges::find(record.members, member.memberId,
-                                             &application::OperationMemberRecord::memberId);
-        auto* memberItem = new QTreeWidgetItem(groupItem);
-        memberItem->setData(0, kRecordRole, row);
-        memberItem->setText(0, member.fileName);
-        if (entry == record.members.cend()) {
-            continue;
-        }
-        memberItem->setText(1, stepDescription(entry->lastDurableStep));
-        memberItem->setText(2, entry->error.isEmpty() ? member.sourcePath : entry->error);
-    }
-    groupItem->setExpanded(true);
-}
-
 const application::OperationRecord* RecoveryDialog::selectedRecord() const {
     const QTreeWidgetItem* item = tree_->currentItem();
     if (item == nullptr) {
@@ -240,14 +243,15 @@ void RecoveryDialog::take(Offer offer, const QString& settled) {
     const domain::OperationId id = record->plan.id;
     QString error;
     bool done = false;
+    using enum Offer;
     switch (offer) {
-    case Offer::Restore:
+    case Restore:
         done = operations_.recover(id, &error);
         break;
-    case Offer::RetryTrash:
+    case RetryTrash:
         done = operations_.retryTrash(id, &error);
         break;
-    case Offer::ConfirmTrashed:
+    case ConfirmTrashed:
         done = operations_.confirmTrashed(id, &error);
         break;
     }

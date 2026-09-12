@@ -46,12 +46,10 @@ private:
     /// answers, so this is how the screen follows what just happened.
     void reload();
     void populate();
-    /// One operation's row, one group's row under it, one row per file under
-    /// that. Split apart because the three levels of nesting are the shape of
-    /// the data, not of the decision being made.
+    /// One operation's row, with a group row under it per photo and a file row
+    /// under that. Split out of populate() because the three levels of nesting
+    /// are the shape of the data, not of any decision being made.
     void addRecordItem(const application::OperationRecord& record, int row);
-    void addGroupItem(QTreeWidgetItem* parent, const application::OperationRecord& record,
-                      const domain::PlannedGroup& group, int row);
     void updateOffers();
     /// Take one offer on the selected record and report its outcome.
     void take(Offer offer, const QString& settled);

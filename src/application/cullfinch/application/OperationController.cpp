@@ -194,14 +194,15 @@ bool OperationController::applyRecovery(const domain::OperationId& operationId, 
     }
 
     OperationRecord recovered;
+    using enum RecoveryStep;
     switch (step) {
-    case RecoveryStep::Restore:
+    case Restore:
         recovered = executor_.recover(*stored);
         break;
-    case RecoveryStep::RetryTrash:
+    case RetryTrash:
         recovered = executor_.retryTrash(*stored);
         break;
-    case RecoveryStep::ConfirmTrashed:
+    case ConfirmTrashed:
         recovered = executor_.confirmTrashed(*stored);
         break;
     }
