@@ -38,15 +38,23 @@ public:
     [[nodiscard]] int recordCount() const { return static_cast<int>(records_.size()); }
 
 private:
+    /// The three things this screen can ask of a stopped operation.
+    enum class Offer { Restore, RetryTrash, ConfirmTrashed };
+
     void buildLayout();
     /// Re-read the journal and rebuild the list. Every offer persists before it
     /// answers, so this is how the screen follows what just happened.
     void reload();
     void populate();
+    /// One operation's row, one group's row under it, one row per file under
+    /// that. Split apart because the three levels of nesting are the shape of
+    /// the data, not of the decision being made.
+    void addRecordItem(const application::OperationRecord& record, int row);
+    void addGroupItem(QTreeWidgetItem* parent, const application::OperationRecord& record,
+                      const domain::PlannedGroup& group, int row);
     void updateOffers();
-    /// Run one offer against the selected record and report its outcome.
-    void take(bool (application::OperationController::*offer)(const domain::OperationId&, QString*),
-              const QString& settled);
+    /// Take one offer on the selected record and report its outcome.
+    void take(Offer offer, const QString& settled);
     [[nodiscard]] const application::OperationRecord* selectedRecord() const;
 
     application::OperationController& operations_;

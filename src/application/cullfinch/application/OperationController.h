@@ -71,13 +71,14 @@ private:
     /// stop at the first group that fails or leaves recoverable work.
     bool stageGroups(const domain::OperationPlan& plan, OperationRecord& record,
                      const JournalWriter& journal, QString* error);
-    /// Load, apply one executor recovery step, journal the outcome and report
-    /// whether the operation is settled. The three offers differ only in the
-    /// step they run, so they share everything around it -- including the rule
-    /// that the journal is written before the caller is told anything.
-    bool applyRecovery(const domain::OperationId& operationId,
-                       OperationRecord (IOperationExecutor::*apply)(const OperationRecord&),
-                       QString* error);
+    /// Which of the executor's recovery steps one of the offers runs.
+    enum class RecoveryStep { Restore, RetryTrash, ConfirmTrashed };
+
+    /// Load, run one recovery step, journal the outcome and report whether the
+    /// operation is settled. The three offers differ only in the step, so they
+    /// share everything around it -- including the rule that the journal is
+    /// written before the caller is told anything.
+    bool applyRecovery(const domain::OperationId& operationId, RecoveryStep step, QString* error);
 
     IAssetRepository& repository_;
     IOperationExecutor& executor_;

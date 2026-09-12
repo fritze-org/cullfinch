@@ -308,7 +308,9 @@ void TestOperationController::confirmTrashedSettlesAnOutcomeNothingOnDiskCanShow
     QString error;
     QVERIFY2(controller_->execute(plan, scan(), &error), qPrintable(error));
     const std::optional<application::OperationRecord> interrupted = snapshotBeforeTrash(journal);
-    QVERIFY(interrupted.has_value());
+    if (!interrupted.has_value()) {
+        QFAIL("the journal never recorded the moment just before Trash was asked");
+    }
 
     // Rewind the journal to that moment and reconcile, as a restart would.
     QVERIFY2(repository_->saveOperation(*interrupted, &error), qPrintable(error));

@@ -114,16 +114,15 @@ void RecoveryDialog::buildLayout() {
 
     connect(buttons, &QDialogButtonBox::rejected, this, &QDialog::reject);
     connect(restore_, &QPushButton::clicked, this, [this]() {
-        take(&application::OperationController::recover,
+        take(Offer::Restore,
              tr("The staged files were put back where they came from. The photos are still marked "
                 "for deletion; review file operations again to move them."));
     });
     connect(retryTrash_, &QPushButton::clicked, this, [this]() {
-        take(&application::OperationController::retryTrash,
-             tr("The staged group reached Trash. The operation is complete."));
+        take(Offer::RetryTrash, tr("The staged group reached Trash. The operation is complete."));
     });
     connect(confirmTrashed_, &QPushButton::clicked, this, [this]() {
-        take(&application::OperationController::confirmTrashed,
+        take(Offer::ConfirmTrashed,
              tr("Recorded as confirmed in Trash. Nothing was moved or deleted."));
     });
 }
@@ -147,48 +146,58 @@ void RecoveryDialog::populate() {
     const QSignalBlocker blocker(tree_);
     tree_->clear();
     for (int row = 0; row < records_.size(); ++row) {
-        const application::OperationRecord& record = records_.at(row);
-
-        auto* item = new QTreeWidgetItem(tree_);
-        item->setData(0, kRecordRole, row);
-        item->setText(0, tr("%1 photo(s), reviewed %2")
-                             .arg(record.plan.logicalPhotoCount())
-                             .arg(QLocale::system().toString(record.createdUtc.toLocalTime(),
-                                                             QLocale::ShortFormat)));
-        item->setText(1, domain::operationStateName(record.state));
-        item->setText(2, record.error);
-        item->setToolTip(2, record.error);
-
-        for (const domain::PlannedGroup& group : record.plan.groups) {
-            auto* groupItem = new QTreeWidgetItem(item);
-            groupItem->setData(0, kRecordRole, row);
-            groupItem->setText(0, group.displayName);
-            groupItem->setText(
-                2, QDir(record.plan.stagingRoot).absoluteFilePath(group.stagingDirectoryName));
-
-            // The complete group membership is shown, as the review screen
-            // shows it: a person deciding what to do about a half-moved photo
-            // needs to see every file it owns, not a count.
-            for (const domain::PlannedMember& member : group.members) {
-                const auto entry = std::ranges::find(record.members, member.memberId,
-                                                     &application::OperationMemberRecord::memberId);
-                auto* memberItem = new QTreeWidgetItem(groupItem);
-                memberItem->setData(0, kRecordRole, row);
-                memberItem->setText(0, member.fileName);
-                if (entry == record.members.cend()) {
-                    continue;
-                }
-                memberItem->setText(1, stepDescription(entry->lastDurableStep));
-                memberItem->setText(2, entry->error.isEmpty() ? member.sourcePath : entry->error);
-            }
-            groupItem->setExpanded(true);
-        }
-        item->setExpanded(true);
+        addRecordItem(records_.at(row), row);
     }
     tree_->resizeColumnToContents(0);
     if (tree_->topLevelItemCount() > 0) {
         tree_->setCurrentItem(tree_->topLevelItem(0));
     }
+}
+
+void RecoveryDialog::addRecordItem(const application::OperationRecord& record, int row) {
+    auto* item = new QTreeWidgetItem(tree_);
+    // Every row carries its record, children included, so clicking a file
+    // selects the operation it belongs to rather than nothing.
+    item->setData(0, kRecordRole, row);
+    item->setText(0, tr("%1 photo(s), reviewed %2")
+                         .arg(record.plan.logicalPhotoCount())
+                         .arg(QLocale::system().toString(record.createdUtc.toLocalTime(),
+                                                         QLocale::ShortFormat)));
+    item->setText(1, domain::operationStateName(record.state));
+    item->setText(2, record.error);
+    item->setToolTip(2, record.error);
+
+    for (const domain::PlannedGroup& group : record.plan.groups) {
+        addGroupItem(item, record, group, row);
+    }
+    item->setExpanded(true);
+}
+
+void RecoveryDialog::addGroupItem(QTreeWidgetItem* parent,
+                                  const application::OperationRecord& record,
+                                  const domain::PlannedGroup& group, int row) {
+    auto* groupItem = new QTreeWidgetItem(parent);
+    groupItem->setData(0, kRecordRole, row);
+    groupItem->setText(0, group.displayName);
+    groupItem->setText(2,
+                       QDir(record.plan.stagingRoot).absoluteFilePath(group.stagingDirectoryName));
+
+    // The complete group membership is shown, as the review screen shows it: a
+    // person deciding what to do about a half-moved photo needs to see every
+    // file it owns, not a count.
+    for (const domain::PlannedMember& member : group.members) {
+        const auto entry = std::ranges::find(record.members, member.memberId,
+                                             &application::OperationMemberRecord::memberId);
+        auto* memberItem = new QTreeWidgetItem(groupItem);
+        memberItem->setData(0, kRecordRole, row);
+        memberItem->setText(0, member.fileName);
+        if (entry == record.members.cend()) {
+            continue;
+        }
+        memberItem->setText(1, stepDescription(entry->lastDurableStep));
+        memberItem->setText(2, entry->error.isEmpty() ? member.sourcePath : entry->error);
+    }
+    groupItem->setExpanded(true);
 }
 
 const application::OperationRecord* RecoveryDialog::selectedRecord() const {
@@ -220,9 +229,7 @@ void RecoveryDialog::updateOffers() {
     detail_->setText(record == nullptr ? QString() : record->error);
 }
 
-void RecoveryDialog::take(
-    bool (application::OperationController::*offer)(const domain::OperationId&, QString*),
-    const QString& settled) {
+void RecoveryDialog::take(Offer offer, const QString& settled) {
     const application::OperationRecord* record = selectedRecord();
     if (record == nullptr) {
         return;
@@ -232,7 +239,18 @@ void RecoveryDialog::take(
     // into.
     const domain::OperationId id = record->plan.id;
     QString error;
-    const bool done = (operations_.*offer)(id, &error);
+    bool done = false;
+    switch (offer) {
+    case Offer::Restore:
+        done = operations_.recover(id, &error);
+        break;
+    case Offer::RetryTrash:
+        done = operations_.retryTrash(id, &error);
+        break;
+    case Offer::ConfirmTrashed:
+        done = operations_.confirmTrashed(id, &error);
+        break;
+    }
 
     // The journal is written whether or not the operation is settled, and a
     // partial retry really did move files, so the caller is told either way.

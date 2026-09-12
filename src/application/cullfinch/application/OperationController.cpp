@@ -181,9 +181,8 @@ OperationController::needingRecovery(const domain::CollectionId& collectionId) c
     return result;
 }
 
-bool OperationController::applyRecovery(
-    const domain::OperationId& operationId,
-    OperationRecord (IOperationExecutor::*apply)(const OperationRecord&), QString* error) {
+bool OperationController::applyRecovery(const domain::OperationId& operationId, RecoveryStep step,
+                                        QString* error) {
     QString storageError;
     const std::optional<OperationRecord> stored =
         repository_.loadOperation(operationId, &storageError);
@@ -194,7 +193,18 @@ bool OperationController::applyRecovery(
         return false;
     }
 
-    OperationRecord recovered = (executor_.*apply)(*stored);
+    OperationRecord recovered;
+    switch (step) {
+    case RecoveryStep::Restore:
+        recovered = executor_.recover(*stored);
+        break;
+    case RecoveryStep::RetryTrash:
+        recovered = executor_.retryTrash(*stored);
+        break;
+    case RecoveryStep::ConfirmTrashed:
+        recovered = executor_.confirmTrashed(*stored);
+        break;
+    }
     recovered.updatedUtc = QDateTime::currentDateTimeUtc();
     // Journalled before anyone is told: what the executor found is worth no
     // less than what it did, and a second attempt must start from it.
@@ -214,15 +224,15 @@ bool OperationController::applyRecovery(
 }
 
 bool OperationController::recover(const domain::OperationId& operationId, QString* error) {
-    return applyRecovery(operationId, &IOperationExecutor::recover, error);
+    return applyRecovery(operationId, RecoveryStep::Restore, error);
 }
 
 bool OperationController::retryTrash(const domain::OperationId& operationId, QString* error) {
-    return applyRecovery(operationId, &IOperationExecutor::retryTrash, error);
+    return applyRecovery(operationId, RecoveryStep::RetryTrash, error);
 }
 
 bool OperationController::confirmTrashed(const domain::OperationId& operationId, QString* error) {
-    return applyRecovery(operationId, &IOperationExecutor::confirmTrashed, error);
+    return applyRecovery(operationId, RecoveryStep::ConfirmTrashed, error);
 }
 
 } // namespace cullfinch::application

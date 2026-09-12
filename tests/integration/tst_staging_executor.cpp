@@ -985,12 +985,21 @@ void TestStagingExecutor::retryTrashHandsTheRetainedGroupToTrash() {
     QCOMPARE(group.staged.state, domain::OperationState::NeedsRecovery);
     QCOMPARE(group.trash.callCount(), 1);
 
+    // Trash refuses once more: the complete group is retained again, and the
+    // same two offers still stand. There is never a fall back to deleting it.
+    group.trash.failNextCalls(1);
+    const application::OperationRecord refusedAgain = group.executor.retryTrash(group.staged);
+    QCOMPARE(refusedAgain.state, domain::OperationState::NeedsRecovery);
+    QVERIFY2(refusedAgain.error.contains(QStringLiteral("retry Trash or restore it")),
+             qPrintable(refusedAgain.error));
+    QVERIFY(QFileInfo::exists(group.stagedPath(QStringLiteral("A.JPG"))));
+
     // The whole group is still in staging, so the other half of the offer the
     // policy makes -- retry, rather than restore -- applies.
     const application::OperationRecord retried = group.executor.retryTrash(group.staged);
     QVERIFY2(retried.error.isEmpty(), qPrintable(retried.error));
     QCOMPARE(retried.state, domain::OperationState::Completed);
-    QCOMPARE(group.trash.callCount(), 2);
+    QCOMPARE(group.trash.callCount(), 3);
     QCOMPARE(stepOf(retried, QStringLiteral("A.JPG")), QStringLiteral("trashed"));
     QCOMPARE(stepOf(retried, QStringLiteral("A.RAF")), QStringLiteral("trashed"));
     QVERIFY(!QFileInfo::exists(collection.filePath(QStringLiteral("A.JPG"))));
