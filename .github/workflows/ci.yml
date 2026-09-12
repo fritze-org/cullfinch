@@ -30,9 +30,12 @@ env:
   # Single source of truth for the LLVM toolchain used by the clang-tidy and
   # sanitizer jobs: the Linux apt.llvm.org pin, the macOS llvm@N formula, and
   # the sanitizer job's compiler all resolve from this exact release, and the
-  # analysis jobs assert the installed clang-tidy matches it. Keep this in
-  # sync with the clang-format rev pinned in .pre-commit-config.yaml.
-  CULLFINCH_LLVM_VERSION: '23.1.1'
+  # analysis jobs assert the installed clang-tidy matches it. Bump this in
+  # step with the clang-format rev pinned in .pre-commit-config.yaml when a
+  # new LLVM release ships -- apt.llvm.org's branch snapshot can run ahead of
+  # the latest tagged release clang-format mirrors, so the two need not
+  # always agree on the patch digit.
+  CULLFINCH_LLVM_VERSION: '23.1.2'
 
 jobs:
   pre-commit:
