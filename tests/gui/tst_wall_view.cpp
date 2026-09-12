@@ -47,6 +47,8 @@ private slots:
     void keyRepeatDoesNotRejectASequence();
     void fixedPositionsKeepSurvivorsInPlaceUntilCompact();
     void anEliminatedTileStaysInItsCellMarkedEliminated();
+    void aPlaceholderWithNoCandidateStillHoldsItsCell();
+    void aTileCreatedBeforeItsPresentationPicksItUp();
     void undoReinstatesThePhotoAndItsPosition();
     void anEmptyWallStillOffersUndoAndFinish();
     void keyboardOnlyCullingWorks();
@@ -310,6 +312,80 @@ void TestWallView::anEliminatedTileStaysInItsCellMarkedEliminated() {
     // Compacting takes the cell, and the tile with it.
     QTest::mouseClick(compact, Qt::LeftButton);
     QVERIFY(GuiFixture::waitFor([&]() { return view_->surface()->tileFor(victim) == nullptr; }));
+}
+
+void TestWallView::aPlaceholderWithNoCandidateStillHoldsItsCell() {
+    startWallOn(6);
+    QVERIFY(guitests::settleWindowSize(shell_, kWallWindowSize));
+
+    // A wall paused by a build that did not keep the placeholder's candidate
+    // restores with an anonymous cell. There is no photo to put in it, and it
+    // still has to hold its position, or the survivors move -- which is the one
+    // thing fixed-position mode promises. The surface is driven directly
+    // because no flow in this build can produce that state any more.
+    ui::AssetPresentationMap presentations;
+    QList<flows::wall::WallSlot> positions;
+    for (const domain::AssetId& id : view_->surface()->order()) {
+        presentations.insert(id, view_->surface()->tileFor(id)->presentation());
+        positions.append(flows::wall::WallSlot{id, false});
+    }
+
+    QHash<domain::AssetId, QRect> before;
+    for (const flows::wall::WallSlot& slot : positions) {
+        before.insert(slot.id, view_->surface()->tileFor(slot.id)->geometry());
+    }
+
+    const domain::AssetId anonymous = positions.at(3).id;
+    positions[3] = flows::wall::WallSlot{};
+    view_->surface()->setCandidates(positions, presentations,
+                                    view_->surface()->layoutRevision() + 1);
+    QCoreApplication::processEvents();
+
+    QVERIFY(view_->surface()->tileFor(anonymous) == nullptr);
+    QCOMPARE(view_->surface()->order().size(), 5);
+    for (const domain::AssetId& id : view_->surface()->order()) {
+        QVERIFY2(view_->surface()->tileFor(id) != nullptr, "a survivor lost its tile");
+        QCOMPARE(view_->surface()->tileFor(id)->geometry(), before.value(id));
+    }
+}
+
+void TestWallView::aTileCreatedBeforeItsPresentationPicksItUp() {
+    startWallOn(5);
+    QVERIFY(guitests::settleWindowSize(shell_, kWallWindowSize));
+
+    ui::AssetPresentationMap presentations;
+    QList<flows::wall::WallSlot> positions;
+    for (const domain::AssetId& id : view_->surface()->order()) {
+        presentations.insert(id, view_->surface()->tileFor(id)->presentation());
+        positions.append(flows::wall::WallSlot{id, false});
+    }
+
+    // State can reach the surface before the presentations for it do. The tile
+    // is created anyway, so the grid is right, and it has no photo to show yet.
+    const domain::AssetId late = fixture_->window()->model()->idForRow(5);
+    QVERIFY(late.isValid());
+    positions.append(flows::wall::WallSlot{late, false});
+    view_->surface()->setCandidates(positions, presentations,
+                                    view_->surface()->layoutRevision() + 1);
+    QCoreApplication::processEvents();
+
+    ui::ImageCanvas* tile = view_->surface()->tileFor(late);
+    QVERIFY(tile != nullptr);
+    QVERIFY(!tile->presentation().previewMemberId.isValid());
+    QVERIFY(!tile->isReady());
+
+    // When they arrive, the tile picks its photo up rather than staying blank.
+    for (const domain::PhotoAsset& asset : fixture_->root().collection().assets()) {
+        if (asset.id == late) {
+            presentations.insert(late, ui::AssetPresentation::from(asset));
+        }
+    }
+    QVERIFY(presentations.value(late).previewMemberId.isValid());
+    view_->surface()->setCandidates(positions, presentations,
+                                    view_->surface()->layoutRevision() + 1);
+
+    QVERIFY(GuiFixture::waitFor([&]() { return view_->surface()->tileFor(late)->isReady(); }));
+    QCOMPARE(view_->surface()->tileFor(late)->presentation().id, late);
 }
 
 void TestWallView::undoReinstatesThePhotoAndItsPosition() {

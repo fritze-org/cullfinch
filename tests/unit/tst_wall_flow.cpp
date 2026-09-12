@@ -52,6 +52,7 @@ private slots:
     void aPlaceholderKeepsTheEliminatedCandidate();
     void refusesASecondEliminationOfAHeldPlaceholder();
     void restoresADraftWhosePlaceholdersAreAnonymous();
+    void refusesADraftWhosePlaceholderNamesNoCandidate();
     void switchingBackToReflowCompacts();
     void finishesWithAnyNumberOfSurvivorsIncludingZero();
     void refusesARepeatEliminationOfAVanishedTile();
@@ -223,6 +224,65 @@ void TestWallFlow::restoresADraftWhosePlaceholdersAreAnonymous() {
     QVERIFY(!WallFlow::positions(restored.state).at(1).id.isValid());
     QVERIFY(WallFlow::hasPlaceholders(restored.state));
     QCOMPARE(WallFlow::candidates(restored.state).size(), 2);
+
+    // And the restored draft keeps working: a further elimination writes the
+    // anonymous cell back out as it found it rather than inventing a candidate
+    // for it, and holds a named cell for the photo just eliminated.
+    const domain::FlowState after =
+        flow.reduce(restored.state,
+                    eliminate(selection.orderedAssetIds.at(0), restored.state.revision))
+            .state;
+    const QList<flows::wall::WallSlot> reserialised = WallFlow::positions(after);
+    QCOMPARE(reserialised.size(), 3);
+    QCOMPARE(reserialised.at(0).id, selection.orderedAssetIds.at(0));
+    QVERIFY(reserialised.at(0).rejected);
+    QVERIFY(reserialised.at(1).isPlaceholder());
+    QVERIFY(!reserialised.at(1).id.isValid());
+    QCOMPARE(flow.summarise(after).remaining,
+             QList<domain::AssetId>{selection.orderedAssetIds.at(2)});
+}
+
+void TestWallFlow::refusesADraftWhosePlaceholderNamesNoCandidate() {
+    const WallFlow flow;
+    const domain::SelectionSnapshot selection = snapshotOf(2);
+
+    QJsonArray positions;
+    positions.append(selection.orderedAssetIds.at(0).toString());
+    // "rejected" with no candidate names no cell. An unreadable wall is
+    // reported rather than guessed at.
+    QJsonObject nameless;
+    nameless.insert(QStringLiteral("rejected"), true);
+    positions.append(nameless);
+
+    QJsonObject payload;
+    payload.insert(QStringLiteral("slots"), positions);
+    payload.insert(QStringLiteral("rejected"), QJsonArray{});
+    payload.insert(QStringLiteral("input"), domain::toJsonArray(selection.orderedAssetIds));
+    payload.insert(QStringLiteral("layoutMode"), QStringLiteral("fixed"));
+
+    domain::VersionedFlowState saved;
+    saved.flowId = QLatin1String(flows::wall::kFlowId);
+    saved.schemaVersion = flows::wall::kStateSchemaVersion;
+    saved.revision = 3;
+    saved.payload = payload;
+    QVERIFY(!flow.restore(saved).restored);
+
+    // A survivor is a plain identifier, so an object that claims not to be
+    // rejected is not a slot this build wrote either.
+    QJsonObject unrejected;
+    unrejected.insert(QStringLiteral("assetId"), selection.orderedAssetIds.at(1).toString());
+    unrejected.insert(QStringLiteral("rejected"), false);
+    positions.replace(1, unrejected);
+    payload.insert(QStringLiteral("slots"), positions);
+    saved.payload = payload;
+    QVERIFY(!flow.restore(saved).restored);
+
+    // Nor is anything else a cell: a slot is an identifier, a null or a
+    // placeholder object, and the parser refuses to interpret the rest.
+    positions.replace(1, QJsonValue(7));
+    payload.insert(QStringLiteral("slots"), positions);
+    saved.payload = payload;
+    QVERIFY(!flow.restore(saved).restored);
 }
 
 void TestWallFlow::switchingBackToReflowCompacts() {

@@ -232,6 +232,19 @@ void TestVersusView::linkingTheViewsConvergesThePanesAtOnce() {
     QCoreApplication::sendEvent(right, &wheel);
     QVERIFY(right->zoom() > zoom);
     QCOMPARE(left->zoom(), right->zoom());
+
+    // Unticking makes them independent again: the panes keep whatever framing
+    // they had, and a zoom on one no longer moves the other.
+    link->setChecked(false);
+    const qreal linkedZoom = left->zoom();
+    left->setInspecting(true);
+    QVERIFY(GuiFixture::waitFor([left]() { return left->isFullResolutionReady(); }));
+    QWheelEvent again(QPointF(left->rect().center()), left->mapToGlobal(left->rect().center()),
+                      QPoint(0, 0), QPoint(0, 120), Qt::NoButton, Qt::NoModifier, Qt::NoScrollPhase,
+                      false);
+    QCoreApplication::sendEvent(left, &again);
+    QVERIFY(left->zoom() > linkedZoom);
+    QCOMPARE(right->zoom(), linkedZoom);
 }
 
 void TestVersusView::undoRestoresTheExactPreviousMatch() {

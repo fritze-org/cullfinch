@@ -143,13 +143,13 @@ void VersusView::setState(const domain::FlowState& state, const domain::FlowSumm
             leftId_ = winner;
             rightId_ = domain::AssetId();
             right_->clearPresentation();
-            if (winner.isValid()) {
-                left_->setPresentation(survivor, revision_);
-                left_->setCaption(tr("%1 · kept").arg(survivor.displayName));
-                left_->setSelectionHighlighted(true);
-            } else {
-                left_->clearPresentation();
-            }
+            // An invalid winner presents nothing, which is exactly what
+            // clearing the pane does: a flow that reports completion with no
+            // survivor is a broken saved state, not a photo to mark as kept.
+            left_->setPresentation(survivor, revision_);
+            left_->setCaption(winner.isValid() ? tr("%1 · kept").arg(survivor.displayName)
+                                               : QString());
+            left_->setSelectionHighlighted(winner.isValid());
         }
         right_->setVisible(false);
 
