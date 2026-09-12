@@ -1,6 +1,7 @@
 // SPDX-License-Identifier: GPL-3.0-or-later
 #pragma once
 
+#include <QColor>
 #include <QImage>
 #include <QString>
 #include <QTemporaryDir>
@@ -26,6 +27,16 @@ public:
     /// Write a real JPEG of the given size, filled with a distinguishable
     /// colour derived from the name.
     QString addJpeg(const QString& relative, const QSize& size = QSize(160, 120));
+
+    /// Write a real JPEG of one flat colour, with nothing drawn on it.
+    ///
+    /// addJpeg() stamps the file's own name across the image, which is what
+    /// makes a photo identifiable while a test is being debugged -- and what
+    /// makes its pixels depend on whichever fonts the machine has installed.
+    /// The visual-regression suite compares pixels, so it needs a photo whose
+    /// content is stated here rather than rendered by the platform.
+    QString addSolidJpeg(const QString& relative, const QColor& colour,
+                         const QSize& size = QSize(160, 120));
 
     /// Write an opaque companion. cullfinch never decodes these bytes, so any
     /// content is fine; tests assert the bytes survive unchanged.

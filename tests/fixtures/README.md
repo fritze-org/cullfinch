@@ -1,8 +1,10 @@
 # Test fixtures
 
-This directory is deliberately almost empty.
+This directory holds one thing: the reference images the visual regression suite compares against,
+under [`visual/`](visual/). Those are expected *outputs*, and an expected output a test generates
+is not an expectation — see [decision 0009](../../docs/decisions/0009-visual-regression-references.md).
 
-Every image fixture cullfinch tests against is **generated at run time** by
+Every image fixture cullfinch tests *with* is **generated at run time** by
 `tests/support/cullfinch/testsupport/TempCollection`, not committed here. See
 [decision 0004](../../docs/decisions/0004-generated-image-fixtures.md) for the
 reasoning; in short:

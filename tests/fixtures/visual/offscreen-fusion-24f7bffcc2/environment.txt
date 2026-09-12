@@ -1,0 +1,7 @@
+offscreen-fusion-24f7bffcc2
+qt = 6.11.1
+platform = offscreen
+style = fusion
+devicePixelRatio = 1.000
+font = DejaVu Sans 13px
+fontMetrics = 12/3/344

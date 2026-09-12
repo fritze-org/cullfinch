@@ -6,7 +6,7 @@ PRESET ?= dev
 
 .DEFAULT_GOAL := help
 .PHONY: help hooks lint configure build test gui-wayland gui-x11
-.PHONY: tidy coverage coverage-open clean
+.PHONY: visual visual-record tidy coverage coverage-open clean
 
 help: ## Show the available targets
 	@grep -hE '^[a-zA-Z0-9_-]+:.*?## ' $(MAKEFILE_LIST) \
@@ -33,6 +33,14 @@ gui-wayland: ## Run the GUI suite under an isolated headless Wayland session
 
 gui-x11: ## Run the GUI suite under an isolated X11 session (compatibility)
 	tests/support/with-x11.sh ctest --preset $(PRESET) --label-regex gui --output-on-failure
+
+visual: ## Compare the rendered views against the checked-in reference images
+	ctest --preset $(PRESET) --label-regex visual --output-on-failure
+
+visual-record: ## Re-record the reference images, then review the diff before committing
+	CULLFINCH_UPDATE_VISUAL_REFERENCES=1 ctest --preset $(PRESET) --label-regex visual \
+		--output-on-failure
+	@git diff --stat tests/fixtures/visual
 
 tidy: ## Run a fresh clang-tidy analysis build
 	cmake --preset ci-tidy-linux

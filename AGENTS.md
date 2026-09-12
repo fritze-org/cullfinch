@@ -22,7 +22,8 @@ doubles build time; use `dev-fast` unless you are specifically checking analysis
 |---|---|
 | One test executable | `./build/dev-fast/tests/tst_versus_flow` |
 | One test case | `./build/dev-fast/tests/tst_wall_view fixedPositionsKeepSurvivorsInPlaceUntilCompact` |
-| One suite | `ctest --preset dev-fast --label-regex unit` (`unit`, `integration`, `gui`, `package`) |
+| One suite | `ctest --preset dev-fast --label-regex unit` (`unit`, `integration`, `gui`, `visual`, `package`) |
+| Visual regression | `ctest --preset dev-fast --label-regex visual` (`make visual-record` re-records) |
 | All hooks | `make lint` — must pass before committing; CI runs the same config on all files |
 | Static analysis | `make tidy` (fresh analysis build; an up-to-date tree analyses nothing) |
 | Coverage | `make coverage` |
@@ -108,6 +109,13 @@ These were all found the expensive way. Most cost a full CI round.
   and treat fullscreen transitions as asynchronous.
 - **`ComparisonShell` takes presentations at construction** because it renders state immediately; a
   view handed an empty map latches onto empty panes.
+- **A visual regression reference is an expectation, not an artifact.** Re-recording with
+  `CULLFINCH_UPDATE_VISUAL_REFERENCES=1` always makes the suite pass, which is exactly why the
+  images must be looked at before they are committed — a recording run cannot tell an intended
+  redesign from the regression it was meant to catch. Only pixels the suite masks or pins are
+  reproducible; adding a case that renders unmasked text makes it font-dependent, which is what
+  the per-environment reference directories are for. See
+  [decision 0009](docs/decisions/0009-visual-regression-references.md).
 - **Do not `git add -A`.** Spec revisions get dropped in the working tree as inputs; `docs/design.md`
   is the copy the project keeps.
 

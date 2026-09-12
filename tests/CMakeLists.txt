@@ -150,6 +150,24 @@ cullfinch_add_test(
   LABELS gui
   TIMEOUT 300)
 
+# ----------------------------------------------------------------- visual ----
+# Renders the production views offscreen and compares the pixels against checked-in references.
+# Registered with an explicit platform, unlike the suites above: a compositor decides how a surface
+# is finally composed, so a pixel comparison only means something against the backend its reference
+# was recorded on. These images are cullfinch's own widget rendering and nothing beyond it.
+cullfinch_add_test(
+  tst_visual_regression
+  SOURCES gui/tst_visual_regression.cpp gui/GuiFixture.h gui/VisualBaseline.h gui/VisualBaseline.cpp
+  DEPS cullfinch::cullfinch_composition cullfinch::cullfinch_testsupport
+  LABELS visual PLATFORM offscreen
+  TIMEOUT 600)
+
+# References are read from, and rewritten in, the source tree: recording a new one then shows up as
+# a reviewable diff rather than as an artifact somebody copies into place by hand.
+target_compile_definitions(
+  tst_visual_regression
+  PRIVATE "CULLFINCH_VISUAL_REFERENCE_DIR=\"${CMAKE_CURRENT_SOURCE_DIR}/fixtures/visual\"")
+
 # The GUI tests deliberately set no QT_QPA_PLATFORM, so they inherit it from the environment:
 # offscreen on a headless developer machine, xcb under Xvfb, cocoa on macOS. CI additionally sets
 # CULLFINCH_EXPECTED_PLATFORM, which makes an accidental offscreen fallback fail the desktop-backend
