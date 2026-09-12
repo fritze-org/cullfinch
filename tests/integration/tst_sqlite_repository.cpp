@@ -5,6 +5,8 @@
 #include <QDir>
 #include <QFile>
 #include <QSqlDatabase>
+#include <QSqlError>
+#include <QSqlQuery>
 #include <QTemporaryDir>
 #include <QTest>
 
@@ -32,6 +34,8 @@ private slots:
     void marksAnAssetStaleWhenAMemberDisappears();
     void refusesAMarkChangeAgainstAStaleRevision();
     void runInTransactionRollsBackMarksWhenTheEnclosingActionFails();
+    void aFailedMarkUpdateRollsBackTheWholeTransaction();
+    void aFailedRevisionAdvanceRollsBackTheWholeTransaction();
     void roundTripsASessionDraft();
     void listsOnlyResumableSessions();
     void roundTripsAnOperationJournal();
@@ -317,6 +321,76 @@ void TestSqliteRepository::runInTransactionRollsBackMarksWhenTheEnclosingActionF
         QCOMPARE(asset.disposition, domain::Disposition::Neutral);
     }
     QCOMPARE(repository_->collectionRevision(*id, nullptr), revision);
+}
+
+void TestSqliteRepository::aFailedMarkUpdateRollsBackTheWholeTransaction() {
+    // A repository of its own, opened under a connection name this test can
+    // also reach: corrupting the schema through that same connection is a
+    // real SQL failure at the point applyDispositions writes the marks,
+    // rather than something injected around the repository's back.
+    const QString connectionName = QStringLiteral("sqlite-repo-corrupt-marks");
+    infrastructure::SqliteRepository repo(
+        directory_.filePath(QStringLiteral("corrupt-marks.sqlite")), connectionName);
+    QString error;
+    QVERIFY2(repo.open(&error), qPrintable(error));
+
+    const auto id = repo.ensureCollection(QStringLiteral("/photos"), false, &error);
+    if (!id.has_value()) {
+        QFAIL(qPrintable(error));
+    }
+    const domain::PhotoAssetList assets = AssetBuilder::resolvedSeries(2);
+    quint64 revision = 0;
+    QVERIFY2(repo.reconcileAssets(*id, assets, nullptr, &revision, &error), qPrintable(error));
+
+    {
+        QSqlQuery drop(QSqlDatabase::database(connectionName));
+        QVERIFY2(drop.exec(QStringLiteral("DROP TABLE assets")),
+                 qPrintable(drop.lastError().text()));
+    }
+
+    quint64 ignored = 0;
+    QVERIFY2(!repo.applyDispositions(*id, revision, {assets.first().id}, {}, &ignored, &error),
+             "a real SQL failure while writing marks must be reported, not ignored");
+    QVERIFY(error.contains(QStringLiteral("Storing deletion marks failed")));
+    // The whole transaction rolled back with the failed write: the
+    // collection's revision never advanced.
+    QCOMPARE(repo.collectionRevision(*id, nullptr), revision);
+}
+
+void TestSqliteRepository::aFailedRevisionAdvanceRollsBackTheWholeTransaction() {
+    const QString connectionName = QStringLiteral("sqlite-repo-corrupt-revision");
+    infrastructure::SqliteRepository repo(
+        directory_.filePath(QStringLiteral("corrupt-revision.sqlite")), connectionName);
+    QString error;
+    QVERIFY2(repo.open(&error), qPrintable(error));
+
+    const auto id = repo.ensureCollection(QStringLiteral("/photos"), false, &error);
+    if (!id.has_value()) {
+        QFAIL(qPrintable(error));
+    }
+    const domain::PhotoAssetList assets = AssetBuilder::resolvedSeries(2);
+    quint64 revision = 0;
+    QVERIFY2(repo.reconcileAssets(*id, assets, nullptr, &revision, &error), qPrintable(error));
+
+    // The disposition UPDATE succeeds; only the later revision bump fails --
+    // and the whole transaction, marks included, must still roll back.
+    {
+        QSqlQuery trigger(QSqlDatabase::database(connectionName));
+        QVERIFY2(trigger.exec(QStringLiteral(
+                     "CREATE TRIGGER fail_revision BEFORE UPDATE OF revision ON collections "
+                     "BEGIN SELECT RAISE(ABORT, 'boom'); END;")),
+                 qPrintable(trigger.lastError().text()));
+    }
+
+    quint64 ignored = 0;
+    QVERIFY2(!repo.applyDispositions(*id, revision, {assets.first().id}, {}, &ignored, &error),
+             "a failure advancing the revision must roll back the mark write too");
+    QVERIFY(error.contains(QStringLiteral("Advancing the collection revision failed")));
+
+    for (const domain::PhotoAsset& asset : repo.loadAssets(*id, nullptr)) {
+        QCOMPARE(asset.disposition, domain::Disposition::Neutral);
+    }
+    QCOMPARE(repo.collectionRevision(*id, nullptr), revision);
 }
 
 void TestSqliteRepository::roundTripsASessionDraft() {

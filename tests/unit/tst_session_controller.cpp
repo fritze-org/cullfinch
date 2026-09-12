@@ -42,6 +42,7 @@ private slots:
     void rejectsAFlowThatTouchesUnselectedPhotos();
     void finishMergesDraftRejectionsIntoCollectionMarks();
     void finishEarlyMarksOnlyTheDecisionsMade();
+    void finishWithNoDecisionsSkipsTheMarkWrite();
     void discardLeavesEarlierMarksAlone();
     void pauseSavesTheDraftAndResumeRestoresIt();
     void resumeRefusesWhenAGroupChangedUnderneath();
@@ -51,6 +52,8 @@ private slots:
     void aFailedSessionWriteDuringFinishLeavesMarksUnchanged();
     void aFailedUndoWriteDropsTheHistoryWithoutTouchingMarks();
     void marksCannotChangeWhileAComparisonIsActive();
+    void applyRejectionsRefusesWithoutACollection();
+    void persistWithNoTargetsIsANoOp();
     void anArbitraryNewFlowRunsThroughTheSameController();
 
 private:
@@ -268,6 +271,25 @@ void TestSessionController::finishEarlyMarksOnlyTheDecisionsMade() {
     QCOMPARE(neutral, 7);
 }
 
+void TestSessionController::finishWithNoDecisionsSkipsTheMarkWrite() {
+    QString error;
+    session_->start(QLatin1String(ConformanceFlow::kId), snapshotFor(assets_, collection_),
+                    domain::FlowOptions{}, &error);
+    QCOMPARE(session_->summary().draftRejected.size(), 0);
+
+    QSignalSpy ended(session_.get(), &application::SessionController::sessionEnded);
+    QVERIFY2(session_->finish(&error), qPrintable(error));
+    QCOMPARE(ended.size(), 1);
+    QCOMPARE(ended.first().at(1).toBool(), true);
+
+    // Nothing was rejected, so nothing about the collection marks or the
+    // disposition undo history changes.
+    for (const domain::PhotoAsset& asset : repository_->loadAssets(collection_, nullptr)) {
+        QCOMPARE(asset.disposition, domain::Disposition::Neutral);
+    }
+    QCOMPARE(dispositions_->undoStack()->count(), 0);
+}
+
 void TestSessionController::discardLeavesEarlierMarksAlone() {
     QString error;
 
@@ -465,6 +487,25 @@ void TestSessionController::marksCannotChangeWhileAComparisonIsActive() {
 
     session_->discard(&error);
     QVERIFY(dispositions_->isMarkingEnabled());
+}
+
+void TestSessionController::applyRejectionsRefusesWithoutACollection() {
+    // A controller that never had setCollection() called (nothing has been
+    // opened yet) must refuse a write rather than reach for an invalid id.
+    application::DispositionController fresh(*repository_);
+    QString error;
+    QVERIFY2(!fresh.applyRejections({assets_.first().id}, QStringLiteral("test"), &error),
+             "a write without an open collection must be refused");
+    QVERIFY(error.contains(QStringLiteral("No collection is open")));
+}
+
+void TestSessionController::persistWithNoTargetsIsANoOp() {
+    // persist() is public so the undo command type stays a plain
+    // implementation detail; called with nothing to change, it must not
+    // touch storage or the revision at all.
+    QString error;
+    QVERIFY2(dispositions_->persist({}, &error), qPrintable(error));
+    QVERIFY(error.isEmpty());
 }
 
 void TestSessionController::anArbitraryNewFlowRunsThroughTheSameController() {
