@@ -1,6 +1,8 @@
 // SPDX-License-Identifier: GPL-3.0-or-later
 #include <cullfinch/ui/FlowView.h>
 
+#include <algorithm>
+
 namespace cullfinch::ui {
 
 bool FlowViewRegistry::registerView(const QString& flowId, FlowViewFactory factory) {
@@ -12,19 +14,15 @@ bool FlowViewRegistry::registerView(const QString& flowId, FlowViewFactory facto
 }
 
 bool FlowViewRegistry::contains(const QString& flowId) const {
-    for (const auto& entry : factories_) {
-        if (entry.first == flowId) {
-            return true;
-        }
-    }
-    return false;
+    return std::ranges::any_of(factories_,
+                               [&flowId](const auto& entry) { return entry.first == flowId; });
 }
 
 std::unique_ptr<IFlowView> FlowViewRegistry::create(const QString& flowId,
                                                     application::IImageService& images) const {
-    for (const auto& entry : factories_) {
-        if (entry.first == flowId) {
-            return entry.second(images);
+    for (const auto& [id, factory] : factories_) {
+        if (id == flowId) {
+            return factory(images);
         }
     }
     return nullptr;

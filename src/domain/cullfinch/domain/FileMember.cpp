@@ -6,14 +6,15 @@
 namespace cullfinch::domain {
 
 QString memberRoleName(MemberRole role) {
+    using enum MemberRole;
     switch (role) {
-    case MemberRole::Jpeg:
+    case Jpeg:
         return QCoreApplication::translate("cullfinch", "JPEG");
-    case MemberRole::Raw:
+    case Raw:
         return QCoreApplication::translate("cullfinch", "RAW");
-    case MemberRole::Sidecar:
+    case Sidecar:
         return QCoreApplication::translate("cullfinch", "Sidecar");
-    case MemberRole::Unknown:
+    case Unknown:
         break;
     }
     return QCoreApplication::translate("cullfinch", "Unclassified");

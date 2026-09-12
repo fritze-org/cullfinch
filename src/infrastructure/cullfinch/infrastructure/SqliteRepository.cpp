@@ -65,60 +65,174 @@ bool fail(QString* error, const QSqlQuery& query, const QString& what) {
 }
 
 QString pairingToken(PairingState state) {
+    using enum PairingState;
     switch (state) {
-    case PairingState::Provisional:
+    case Provisional:
         return QStringLiteral("provisional");
-    case PairingState::Resolved:
+    case Resolved:
         return QStringLiteral("resolved");
-    case PairingState::JpegOnly:
+    case JpegOnly:
         return QStringLiteral("jpeg-only");
-    case PairingState::RawOnly:
+    case RawOnly:
         return QStringLiteral("raw-only");
-    case PairingState::Ambiguous:
+    case Ambiguous:
         return QStringLiteral("ambiguous");
-    case PairingState::Stale:
+    case Stale:
         break;
     }
     return QStringLiteral("stale");
 }
 
 PairingState pairingFromToken(const QString& token) {
+    using enum PairingState;
     static const QHash<QString, PairingState> states = {
-        {QStringLiteral("provisional"), PairingState::Provisional},
-        {QStringLiteral("resolved"), PairingState::Resolved},
-        {QStringLiteral("jpeg-only"), PairingState::JpegOnly},
-        {QStringLiteral("raw-only"), PairingState::RawOnly},
-        {QStringLiteral("ambiguous"), PairingState::Ambiguous},
-        {QStringLiteral("stale"), PairingState::Stale}};
+        {QStringLiteral("provisional"), Provisional}, {QStringLiteral("resolved"), Resolved},
+        {QStringLiteral("jpeg-only"), JpegOnly},      {QStringLiteral("raw-only"), RawOnly},
+        {QStringLiteral("ambiguous"), Ambiguous},     {QStringLiteral("stale"), Stale}};
     // An unreadable value must not become a comparable, operable group.
-    return states.value(token, PairingState::Ambiguous);
+    return states.value(token, Ambiguous);
 }
 
 QString roleToken(MemberRole role) {
+    using enum MemberRole;
     switch (role) {
-    case MemberRole::Jpeg:
+    case Jpeg:
         return QStringLiteral("jpeg");
-    case MemberRole::Raw:
+    case Raw:
         return QStringLiteral("raw");
-    case MemberRole::Sidecar:
+    case Sidecar:
         return QStringLiteral("sidecar");
-    case MemberRole::Unknown:
+    case Unknown:
         break;
     }
     return QStringLiteral("unknown");
 }
 
 MemberRole roleFromToken(const QString& token) {
+    using enum MemberRole;
     if (token == QLatin1String("jpeg")) {
-        return MemberRole::Jpeg;
+        return Jpeg;
     }
     if (token == QLatin1String("raw")) {
-        return MemberRole::Raw;
+        return Raw;
     }
     if (token == QLatin1String("sidecar")) {
-        return MemberRole::Sidecar;
+        return Sidecar;
     }
-    return MemberRole::Unknown;
+    return Unknown;
+}
+
+/// Re-attach the members a fresh scan no longer sees, and report whether any
+/// were missing.
+///
+/// A member that disappeared after pairing keeps its place and marks the asset
+/// stale. It is never silently reclassified as JPG-only.
+///
+/// Retention is keyed on member identity as well as path: a member row is unique
+/// per (id, asset), so re-adding one whose identity a current member already
+/// carries would abort the whole scan on a primary-key conflict rather than
+/// merely mis-describe one photo.
+bool carryForwardVanishedMembers(const PhotoAsset& previous, PhotoAsset& asset) {
+    QSet<QString> currentPaths;
+    QSet<QString> currentIds;
+    for (const FileMember& member : asset.members) {
+        currentPaths.insert(member.absolutePath);
+        currentIds.insert(member.id.toString());
+    }
+
+    bool stale = false;
+    for (const FileMember& member : previous.members) {
+        if (currentPaths.contains(member.absolutePath) ||
+            currentIds.contains(member.id.toString())) {
+            continue;
+        }
+        asset.members.append(member);
+        currentIds.insert(member.id.toString());
+        asset.diagnostics.append(
+            tr("'%1' was part of this photo but is no longer on disk.").arg(member.fileName));
+        stale = true;
+    }
+    return stale;
+}
+
+/// Merge a fresh scan onto what storage already holds.
+PhotoAssetList mergeWithStored(const PhotoAssetList& scanned, const PhotoAssetList& stored) {
+    QHash<AssetId, const PhotoAsset*> storedById;
+    for (const PhotoAsset& asset : stored) {
+        storedById.insert(asset.id, &asset);
+    }
+
+    PhotoAssetList result;
+    result.reserve(scanned.size());
+    for (const PhotoAsset& fresh : scanned) {
+        PhotoAsset asset = fresh;
+        if (const PhotoAsset* previous = storedById.value(asset.id, nullptr); previous != nullptr) {
+            if (carryForwardVanishedMembers(*previous, asset)) {
+                asset.pairingState = PairingState::Stale;
+                asset.operationsBlocked = true;
+            }
+
+            // Identity can be reconciled only when membership is unchanged. A
+            // path replacement invalidates prior decisions rather than
+            // inheriting a rejection mark blindly.
+            asset.disposition = previous->membershipRevision == fresh.membershipRevision
+                                    ? previous->disposition
+                                    : Disposition::Neutral;
+        }
+        result.append(asset);
+    }
+    return result;
+}
+
+void bindAsset(QSqlQuery& query, const CollectionId& collection, const PhotoAsset& asset) {
+    query.bindValue(QStringLiteral(":id"), text(asset.id.toString()));
+    query.bindValue(QStringLiteral(":collection"), text(collection.toString()));
+    query.bindValue(QStringLiteral(":stem"), text(asset.stem));
+    query.bindValue(QStringLiteral(":directory"), text(asset.relativeDirectory));
+    query.bindValue(QStringLiteral(":display"), text(asset.displayName));
+    query.bindValue(QStringLiteral(":preview"), text(asset.previewMemberId.toString()));
+    query.bindValue(QStringLiteral(":pairing"), text(pairingToken(asset.pairingState)));
+    query.bindValue(QStringLiteral(":disposition"), asset.disposition == Disposition::Reject
+                                                        ? QStringLiteral("reject")
+                                                        : QStringLiteral("neutral"));
+    query.bindValue(QStringLiteral(":revision"), QString::number(asset.membershipRevision));
+    query.bindValue(QStringLiteral(":blocked"), asset.operationsBlocked ? 1 : 0);
+    query.bindValue(QStringLiteral(":diagnostics"),
+                    text(asset.diagnostics.join(QLatin1Char('\n'))));
+}
+
+void bindMember(QSqlQuery& query, const CollectionId& collection, const PhotoAsset& asset,
+                const FileMember& member, int ordinal) {
+    query.bindValue(QStringLiteral(":id"), text(member.id.toString()));
+    query.bindValue(QStringLiteral(":asset"), text(asset.id.toString()));
+    query.bindValue(QStringLiteral(":collection"), text(collection.toString()));
+    query.bindValue(QStringLiteral(":role"), text(roleToken(member.role)));
+    query.bindValue(QStringLiteral(":path"), text(member.absolutePath));
+    query.bindValue(QStringLiteral(":name"), text(member.fileName));
+    query.bindValue(QStringLiteral(":extension"), text(member.extensionLower));
+    query.bindValue(QStringLiteral(":size"), static_cast<qlonglong>(member.fingerprint.sizeBytes));
+    query.bindValue(QStringLiteral(":modified"),
+                    static_cast<qlonglong>(member.fingerprint.modifiedMsecsUtc));
+    query.bindValue(QStringLiteral(":device"), QString::number(member.fingerprint.native.device));
+    query.bindValue(QStringLiteral(":fileId"), QString::number(member.fingerprint.native.fileId));
+    query.bindValue(QStringLiteral(":known"), member.fingerprint.native.known ? 1 : 0);
+    query.bindValue(QStringLiteral(":symlink"), member.isSymlink ? 1 : 0);
+    query.bindValue(QStringLiteral(":ordinal"), ordinal);
+}
+
+/// Bind and run the disposition update for every identifier, stopping at the
+/// first failure; the caller reports the query's error.
+bool applyDisposition(QSqlQuery& update, const CollectionId& collection, const QList<AssetId>& ids,
+                      const QString& token) {
+    for (const AssetId& assetId : ids) {
+        update.bindValue(QStringLiteral(":disposition"), text(token));
+        update.bindValue(QStringLiteral(":id"), text(assetId.toString()));
+        update.bindValue(QStringLiteral(":collection"), text(collection.toString()));
+        if (!update.exec()) {
+            return false;
+        }
+    }
+    return true;
 }
 
 QString jsonToString(const QJsonObject& object) {
@@ -552,19 +666,6 @@ quint64 SqliteRepository::collectionRevision(const CollectionId& id, QString* er
     return query.value(0).toULongLong();
 }
 
-bool SqliteRepository::bumpRevision(const CollectionId& id, quint64* newRevision, QString* error) {
-    QSqlQuery query(database_);
-    query.prepare(QStringLiteral("UPDATE collections SET revision = revision + 1 WHERE id = :id"));
-    query.bindValue(QStringLiteral(":id"), text(id.toString()));
-    if (!query.exec()) {
-        return fail(error, query, tr("Advancing the collection revision"));
-    }
-    if (newRevision != nullptr) {
-        *newRevision = collectionRevision(id, error);
-    }
-    return true;
-}
-
 PhotoAssetList SqliteRepository::loadAssets(const CollectionId& id, QString* error) const {
     PhotoAssetList assets;
 
@@ -594,8 +695,7 @@ PhotoAssetList SqliteRepository::loadAssets(const CollectionId& id, QString* err
                                 : Disposition::Neutral;
         asset.membershipRevision = query.value(7).toString().toULongLong();
         asset.operationsBlocked = query.value(8).toInt() != 0;
-        const QString diagnostics = query.value(9).toString();
-        if (!diagnostics.isEmpty()) {
+        if (const QString diagnostics = query.value(9).toString(); !diagnostics.isEmpty()) {
             asset.diagnostics = diagnostics.split(QLatin1Char('\n'), Qt::SkipEmptyParts);
         }
         indexById.insert(asset.id.toString(), static_cast<int>(assets.size()));
@@ -639,64 +739,7 @@ PhotoAssetList SqliteRepository::loadAssets(const CollectionId& id, QString* err
 bool SqliteRepository::reconcileAssets(const CollectionId& id, const PhotoAssetList& scanned,
                                        PhotoAssetList* merged, quint64* newRevision,
                                        QString* error) {
-    const PhotoAssetList stored = loadAssets(id, nullptr);
-    QHash<AssetId, const PhotoAsset*> storedById;
-    for (const PhotoAsset& asset : stored) {
-        storedById.insert(asset.id, &asset);
-    }
-
-    PhotoAssetList result;
-    result.reserve(scanned.size());
-
-    for (const PhotoAsset& fresh : scanned) {
-        PhotoAsset asset = fresh;
-        const PhotoAsset* previous = storedById.value(asset.id, nullptr);
-        if (previous != nullptr) {
-            QSet<QString> currentPaths;
-            for (const FileMember& member : asset.members) {
-                currentPaths.insert(member.absolutePath);
-            }
-
-            // A member that disappeared after pairing keeps its place and marks
-            // the asset stale. It is never silently reclassified as JPG-only.
-            //
-            // Retention is keyed on member identity as well as path: a member
-            // row is unique per (id, asset), so re-adding one whose identity a
-            // current member already carries would abort the whole scan on a
-            // primary-key conflict rather than merely mis-describe one photo.
-            QSet<QString> currentIds;
-            for (const FileMember& member : asset.members) {
-                currentIds.insert(member.id.toString());
-            }
-
-            bool stale = false;
-            for (const FileMember& member : previous->members) {
-                if (currentPaths.contains(member.absolutePath) ||
-                    currentIds.contains(member.id.toString())) {
-                    continue;
-                }
-                asset.members.append(member);
-                currentIds.insert(member.id.toString());
-                asset.diagnostics.append(tr("'%1' was part of this photo but is no longer on disk.")
-                                             .arg(member.fileName));
-                stale = true;
-            }
-            if (stale) {
-                asset.pairingState = PairingState::Stale;
-                asset.operationsBlocked = true;
-            }
-
-            // Identity can be reconciled only when membership is unchanged.
-            // A path replacement invalidates prior decisions rather than
-            // inheriting a rejection mark blindly.
-            if (previous->membershipRevision == fresh.membershipRevision) {
-                asset.disposition = previous->disposition;
-            } else {
-                asset.disposition = Disposition::Neutral;
-            }
-        }
-        result.append(asset);
-    }
+    const PhotoAssetList result = mergeWithStored(scanned, loadAssets(id, nullptr));
 
     if (!database_.transaction()) {
         report(error, tr("The scan results could not be stored: no transaction available."));
@@ -741,46 +784,14 @@ bool SqliteRepository::reconcileAssets(const CollectionId& id, const PhotoAssetL
         " :device, :fileId, :known, :symlink, :ordinal)"));
 
     for (const PhotoAsset& asset : result) {
-        insertAsset.bindValue(QStringLiteral(":id"), text(asset.id.toString()));
-        insertAsset.bindValue(QStringLiteral(":collection"), text(id.toString()));
-        insertAsset.bindValue(QStringLiteral(":stem"), text(asset.stem));
-        insertAsset.bindValue(QStringLiteral(":directory"), text(asset.relativeDirectory));
-        insertAsset.bindValue(QStringLiteral(":display"), text(asset.displayName));
-        insertAsset.bindValue(QStringLiteral(":preview"), text(asset.previewMemberId.toString()));
-        insertAsset.bindValue(QStringLiteral(":pairing"), text(pairingToken(asset.pairingState)));
-        insertAsset.bindValue(QStringLiteral(":disposition"),
-                              asset.disposition == Disposition::Reject ? QStringLiteral("reject")
-                                                                       : QStringLiteral("neutral"));
-        insertAsset.bindValue(QStringLiteral(":revision"),
-                              QString::number(asset.membershipRevision));
-        insertAsset.bindValue(QStringLiteral(":blocked"), asset.operationsBlocked ? 1 : 0);
-        insertAsset.bindValue(QStringLiteral(":diagnostics"),
-                              text(asset.diagnostics.join(QLatin1Char('\n'))));
+        bindAsset(insertAsset, id, asset);
         if (!insertAsset.exec()) {
             return rollback(insertAsset, tr("Storing a photo"));
         }
 
         int ordinal = 0;
         for (const FileMember& member : asset.members) {
-            insertMember.bindValue(QStringLiteral(":id"), text(member.id.toString()));
-            insertMember.bindValue(QStringLiteral(":asset"), text(asset.id.toString()));
-            insertMember.bindValue(QStringLiteral(":collection"), text(id.toString()));
-            insertMember.bindValue(QStringLiteral(":role"), text(roleToken(member.role)));
-            insertMember.bindValue(QStringLiteral(":path"), text(member.absolutePath));
-            insertMember.bindValue(QStringLiteral(":name"), text(member.fileName));
-            insertMember.bindValue(QStringLiteral(":extension"), text(member.extensionLower));
-            insertMember.bindValue(QStringLiteral(":size"),
-                                   static_cast<qlonglong>(member.fingerprint.sizeBytes));
-            insertMember.bindValue(QStringLiteral(":modified"),
-                                   static_cast<qlonglong>(member.fingerprint.modifiedMsecsUtc));
-            insertMember.bindValue(QStringLiteral(":device"),
-                                   QString::number(member.fingerprint.native.device));
-            insertMember.bindValue(QStringLiteral(":fileId"),
-                                   QString::number(member.fingerprint.native.fileId));
-            insertMember.bindValue(QStringLiteral(":known"),
-                                   member.fingerprint.native.known ? 1 : 0);
-            insertMember.bindValue(QStringLiteral(":symlink"), member.isSymlink ? 1 : 0);
-            insertMember.bindValue(QStringLiteral(":ordinal"), ordinal++);
+            bindMember(insertMember, id, asset, member, ordinal++);
             if (!insertMember.exec()) {
                 return rollback(insertMember, tr("Storing a file group"));
             }
@@ -818,8 +829,7 @@ bool SqliteRepository::applyDispositions(const CollectionId& id, quint64 expecte
         return false;
     }
 
-    const quint64 actual = collectionRevision(id, nullptr);
-    if (actual != expectedRevision) {
+    if (const quint64 actual = collectionRevision(id, nullptr); actual != expectedRevision) {
         database_.rollback();
         report(error, tr("The collection changed while you were working (revision %1, expected "
                          "%2). Refresh and try again.")
@@ -832,20 +842,8 @@ bool SqliteRepository::applyDispositions(const CollectionId& id, quint64 expecte
     update.prepare(QStringLiteral("UPDATE assets SET disposition = :disposition WHERE id = :id AND "
                                   "collection_id = :collection"));
 
-    const auto applyAll = [&](const QList<AssetId>& ids, const QString& token) {
-        for (const AssetId& assetId : ids) {
-            update.bindValue(QStringLiteral(":disposition"), text(token));
-            update.bindValue(QStringLiteral(":id"), text(assetId.toString()));
-            update.bindValue(QStringLiteral(":collection"), text(id.toString()));
-            if (!update.exec()) {
-                return false;
-            }
-        }
-        return true;
-    };
-
-    if (!applyAll(reject, QStringLiteral("reject")) ||
-        !applyAll(neutral, QStringLiteral("neutral"))) {
+    if (!applyDisposition(update, id, reject, QStringLiteral("reject")) ||
+        !applyDisposition(update, id, neutral, QStringLiteral("neutral"))) {
         const QString message = update.lastError().text();
         database_.rollback();
         report(error, tr("Storing deletion marks failed: %1").arg(message));

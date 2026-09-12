@@ -34,31 +34,68 @@ QList<domain::AssetId> WallSurface::order() const {
     return candidates;
 }
 
-void WallSurface::setCandidates(const QList<domain::AssetId>& positions,
-                                const ui::AssetPresentationMap& presentations, quint64 revision) {
-    presentations_ = presentations;
-
-    // Record where departing tiles used to be, so a second click at the same
-    // coordinates does not immediately hit whatever moved in.
+void WallSurface::recordVanishedTiles(const QList<domain::AssetId>& positions) {
     for (const domain::AssetId& id : positions_) {
-        if (id.isValid() && !positions.contains(id)) {
-            ui::ImageCanvas* tile = tiles_.value(id, nullptr);
-            if (tile != nullptr) {
-                vanished_.append(VanishedTile{tile->geometry(), sinceStart_.elapsed()});
-            }
+        if (!id.isValid() || positions.contains(id)) {
+            continue;
+        }
+        if (const ui::ImageCanvas* tile = tiles_.value(id, nullptr); tile != nullptr) {
+            vanished_.append(VanishedTile{tile->geometry(), sinceStart_.elapsed()});
         }
     }
+}
 
-    positions_ = positions;
-    revision_ = revision;
-
-    // Remove tiles that are gone.
+void WallSurface::removeDepartedTiles() {
     const QList<domain::AssetId> existing = tiles_.keys();
     for (const domain::AssetId& id : existing) {
         if (!positions_.contains(id)) {
             tiles_.take(id)->deleteLater();
         }
     }
+}
+
+void WallSurface::addTile(const domain::AssetId& id) {
+    auto* tile = new ui::ImageCanvas(images_, this);
+    tile->setObjectName(QStringLiteral("wallTile_") + id.toString());
+    tile->setPresentation(presentations_.value(id), revision_);
+    tile->setCaption(presentations_.value(id).displayName);
+    connect(tile, &ui::ImageCanvas::gestureArmed, this, [this, id, tile](const QPoint& at) {
+        armedTile_ = id;
+        armedRevision_ = revision_;
+        armedPosition_ = tile->mapTo(this, at);
+    });
+    connect(tile, &ui::ImageCanvas::eliminateRequested, this,
+            [this, id, tile](ui::ImageCanvas::ActivationSource source) {
+                // A pointer gesture is judged against the layout it was pressed
+                // on. A key has no press, so it acts on the current layout --
+                // and never on whatever a cancelled pointer gesture left behind.
+                const bool pointer =
+                    source == ui::ImageCanvas::ActivationSource::Pointer && armedTile_ == id;
+                const quint64 against = pointer ? armedRevision_ : revision_;
+                const QPoint at =
+                    pointer ? armedPosition_ : tile->mapTo(this, tile->rect().center());
+                armedTile_ = domain::AssetId{};
+                if (acceptGesture(id, at)) {
+                    Q_EMIT eliminateRequested(id, against);
+                }
+            });
+    connect(tile, &ui::ImageCanvas::readinessChanged, this, [this, id](bool ready) {
+        if (ready) {
+            recordAspect(id);
+        }
+    });
+    tile->show();
+    tiles_.insert(id, tile);
+}
+
+void WallSurface::setCandidates(const QList<domain::AssetId>& positions,
+                                const ui::AssetPresentationMap& presentations, quint64 revision) {
+    presentations_ = presentations;
+    recordVanishedTiles(positions);
+
+    positions_ = positions;
+    revision_ = revision;
+    removeDepartedTiles();
 
     // Add tiles that are new, and fill in any created before its presentation
     // was known.
@@ -66,48 +103,16 @@ void WallSurface::setCandidates(const QList<domain::AssetId>& positions,
         if (!id.isValid()) {
             continue; // A placeholder holds a cell but has no tile.
         }
-        if (tiles_.contains(id)) {
-            ui::ImageCanvas* placed = tiles_.value(id);
-            const ui::AssetPresentation& known = presentations_[id];
-            if (!placed->presentation().previewMemberId.isValid() &&
-                known.previewMemberId.isValid()) {
-                placed->setPresentation(known, revision_);
-                placed->setCaption(known.displayName);
-            }
+        if (!tiles_.contains(id)) {
+            addTile(id);
             continue;
         }
-        auto* tile = new ui::ImageCanvas(images_, this);
-        tile->setObjectName(QStringLiteral("wallTile_") + id.toString());
-        tile->setPresentation(presentations_.value(id), revision_);
-        tile->setCaption(presentations_.value(id).displayName);
-        connect(tile, &ui::ImageCanvas::gestureArmed, this, [this, id, tile](const QPoint& at) {
-            armedTile_ = id;
-            armedRevision_ = revision_;
-            armedPosition_ = tile->mapTo(this, at);
-        });
-        connect(tile, &ui::ImageCanvas::eliminateRequested, this,
-                [this, id, tile](ui::ImageCanvas::ActivationSource source) {
-                    // A pointer gesture is judged against the layout it was
-                    // pressed on. A key has no press, so it acts on the current
-                    // layout -- and never on whatever a cancelled pointer
-                    // gesture left behind.
-                    const bool pointer =
-                        source == ui::ImageCanvas::ActivationSource::Pointer && armedTile_ == id;
-                    const quint64 against = pointer ? armedRevision_ : revision_;
-                    const QPoint at =
-                        pointer ? armedPosition_ : tile->mapTo(this, tile->rect().center());
-                    armedTile_ = domain::AssetId{};
-                    if (acceptGesture(id, at)) {
-                        Q_EMIT eliminateRequested(id, against);
-                    }
-                });
-        connect(tile, &ui::ImageCanvas::readinessChanged, this, [this, id](bool ready) {
-            if (ready) {
-                recordAspect(id);
-            }
-        });
-        tile->show();
-        tiles_.insert(id, tile);
+        ui::ImageCanvas* placed = tiles_.value(id);
+        if (const ui::AssetPresentation& known = presentations_[id];
+            !placed->presentation().previewMemberId.isValid() && known.previewMemberId.isValid()) {
+            placed->setPresentation(known, revision_);
+            placed->setCaption(known.displayName);
+        }
     }
 
     relayout();
@@ -148,7 +153,7 @@ void WallSurface::recordAspect(const domain::AssetId& id) {
     if (aspects_.contains(id)) {
         return; // Recorded once per candidate, so the grid cannot oscillate.
     }
-    ui::ImageCanvas* tile = tiles_.value(id, nullptr);
+    const ui::ImageCanvas* tile = tiles_.value(id, nullptr);
     if (tile == nullptr) {
         return;
     }
@@ -196,8 +201,7 @@ ui::ImageCanvas* WallSurface::tileFor(const domain::AssetId& id) const {
     return tiles_.value(id, nullptr);
 }
 
-WallView::WallView(application::IImageService& images) {
-    root_ = new QWidget;
+WallView::WallView(application::IImageService& images) : root_(new QWidget) {
     root_->setObjectName(QStringLiteral("wallView"));
 
     auto* layout = new QVBoxLayout(root_);

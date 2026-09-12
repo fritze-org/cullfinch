@@ -101,9 +101,8 @@ bool DispositionController::persist(const QHash<AssetId, Disposition>& targets, 
     }
 
     quint64 newRevision = revision_;
-    QString storageError;
-    if (!repository_.applyDispositions(collectionId_, revision_, reject, neutral, &newRevision,
-                                       &storageError)) {
+    if (QString storageError; !repository_.applyDispositions(
+            collectionId_, revision_, reject, neutral, &newRevision, &storageError)) {
         if (error != nullptr) {
             *error = std::move(storageError);
         }

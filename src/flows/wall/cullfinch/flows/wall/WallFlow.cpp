@@ -7,6 +7,8 @@
 #include <QJsonValue>
 #include <QSet>
 
+#include <algorithm>
+
 namespace cullfinch::flows::wall {
 namespace {
 
@@ -283,12 +285,8 @@ LayoutMode WallFlow::layoutMode(const FlowState& state) {
 }
 
 bool WallFlow::hasPlaceholders(const FlowState& state) {
-    for (const WallSlot& slot : parse(state).positions) {
-        if (slot.isPlaceholder()) {
-            return true;
-        }
-    }
-    return false;
+    return std::ranges::any_of(parse(state).positions,
+                               [](const WallSlot& slot) { return slot.isPlaceholder(); });
 }
 
 } // namespace cullfinch::flows::wall

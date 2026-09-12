@@ -13,7 +13,9 @@
 #include <QSqlDatabase>
 #include <QTextStream>
 
-#include <functional>
+#include <memory>
+#include <span>
+#include <tuple>
 
 namespace {
 
@@ -38,7 +40,7 @@ int runSmoke(cullfinch::ui::BrowserWindow* window, cullfinch::app::CompositionRo
         return fail(QStringLiteral("the directory could not be opened"));
     }
 
-    const auto pump = [](const std::function<bool()>& done, int timeoutMs) {
+    const auto pump = [](const auto& done, int timeoutMs) {
         QElapsedTimer timer;
         timer.start();
         while (!done() && timer.elapsed() < timeoutMs) {
@@ -71,8 +73,7 @@ int runSmoke(cullfinch::ui::BrowserWindow* window, cullfinch::app::CompositionRo
             return fail(QStringLiteral("no image decoded for flow '%1'").arg(flowId));
         }
 
-        QString error;
-        if (!root.session().discard(&error)) {
+        if (QString error; !root.session().discard(&error)) {
             return fail(QStringLiteral("flow '%1' could not be discarded: %2").arg(flowId, error));
         }
         shell->close();
@@ -147,9 +148,9 @@ struct CommandLine {
 };
 
 /// True when the arguments only ask something that needs no display.
-bool wantsConsoleOnly(int argc, char* argv[]) {
-    for (int index = 1; index < argc; ++index) {
-        const QString argument = QString::fromLocal8Bit(argv[index]);
+bool wantsConsoleOnly(std::span<char* const> arguments) {
+    for (std::size_t index = 1; index < arguments.size(); ++index) {
+        const QString argument = QString::fromLocal8Bit(arguments[index]);
         if (argument == QLatin1String("--version") || argument == QLatin1String("-v") ||
             argument == QLatin1String("--help") || argument == QLatin1String("-h")) {
             return true;
@@ -172,7 +173,7 @@ int main(int argc, char* argv[]) {
     // QApplication first would make them depend on a usable GUI platform
     // plugin, so a packaging check could not even ask which build it is
     // holding -- which is exactly how this was found.
-    if (wantsConsoleOnly(argc, argv)) {
+    if (wantsConsoleOnly({argv, static_cast<std::size_t>(argc)})) {
         QCoreApplication console(argc, argv);
         setApplicationIdentity();
         CommandLine commandLine;
@@ -217,7 +218,8 @@ int main(int argc, char* argv[]) {
         return 1;
     }
 
-    cullfinch::ui::BrowserWindow* window = root.createBrowserWindow();
+    std::unique_ptr<cullfinch::ui::BrowserWindow> owned = root.createBrowserWindow();
+    cullfinch::ui::BrowserWindow* const window = owned.get();
 
     // Clean shutdown waits for the draft. A quit that does not pass through
     // the shell's close event -- the File menu, a session logout, SIGTERM
@@ -270,15 +272,16 @@ int main(int argc, char* argv[]) {
     if (parser.isSet(commandLine.smoke)) {
         if (arguments.isEmpty()) {
             QTextStream(stderr) << "smoke: failed - no directory argument" << Qt::endl;
-            delete window;
             return 2;
         }
-        const int result = runSmoke(window, root, QDir(arguments.first()).absolutePath());
-        delete window;
-        return result;
+        return runSmoke(window, root, QDir(arguments.first()).absolutePath());
     }
 
+    // Ownership moves to Qt here and nowhere else: WA_DeleteOnClose makes the
+    // window delete itself, so `owned` has to let go of it or the two would
+    // both free it.
     window->setAttribute(Qt::WA_DeleteOnClose, true);
+    std::ignore = owned.release();
     if (!arguments.isEmpty()) {
         window->openDirectory(QDir(arguments.first()).absolutePath());
     }

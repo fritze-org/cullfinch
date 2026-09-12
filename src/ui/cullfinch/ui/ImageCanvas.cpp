@@ -177,16 +177,16 @@ void ImageCanvas::focusOutEvent(QFocusEvent* event) {
     // Alt-Tab, a workspace switch, a dialog or the screen locking all land
     // here. Whatever gesture was in flight is abandoned rather than completed
     // against a photo the user is no longer looking at.
-    armed_ = false;
-    dragging_ = false;
+    gesture_.armed = false;
+    gesture_.dragging = false;
     update();
 }
 
 void ImageCanvas::changeEvent(QEvent* event) {
     QWidget::changeEvent(event);
     if (event->type() == QEvent::ActivationChange && !isActiveWindow()) {
-        armed_ = false;
-        dragging_ = false;
+        gesture_.armed = false;
+        gesture_.dragging = false;
         return;
     }
 #if QT_VERSION >= QT_VERSION_CHECK(6, 6, 0)
@@ -195,7 +195,7 @@ void ImageCanvas::changeEvent(QEvent* event) {
         // this widget owns, so the decoded size that was right a moment ago no
         // longer is. Any gesture in flight is disarmed for the same reason a
         // resize disarms one.
-        armed_ = false;
+        gesture_.armed = false;
         if (!presentation_.previewPath.isEmpty()) {
             requestImage(application::ImageRequestClass::Comparison);
             if (inspecting_) {
@@ -210,7 +210,7 @@ void ImageCanvas::resizeEvent(QResizeEvent* event) {
     QWidget::resizeEvent(event);
     // A resize between press and release means the photo under the pointer may
     // not be the one that was pressed.
-    armed_ = false;
+    gesture_.armed = false;
     if (!presentation_.previewPath.isEmpty()) {
         // A larger widget needs more pixels; a later refinement must never swap
         // candidate identities, which is why the member id is part of the match.
@@ -285,26 +285,26 @@ void ImageCanvas::mousePressEvent(QMouseEvent* event) {
         return;
     }
     setFocus(Qt::MouseFocusReason);
-    armed_ = true;
-    dragging_ = inspecting_;
-    dragMoved_ = false;
-    dragOrigin_ = event->pos();
-    if (dragging_) {
+    gesture_.armed = true;
+    gesture_.dragging = inspecting_;
+    gesture_.moved = false;
+    gesture_.origin = event->pos();
+    if (gesture_.dragging) {
         setCursor(Qt::ClosedHandCursor);
     }
     Q_EMIT gestureArmed(event->pos());
 }
 
 void ImageCanvas::mouseMoveEvent(QMouseEvent* event) {
-    if (!dragging_ || full_.isNull()) {
+    if (!gesture_.dragging || full_.isNull()) {
         QWidget::mouseMoveEvent(event);
         return;
     }
-    const QPoint delta = event->pos() - dragOrigin_;
+    const QPoint delta = event->pos() - gesture_.origin;
     if (delta.manhattanLength() > 2) {
-        dragMoved_ = true;
+        gesture_.moved = true;
     }
-    dragOrigin_ = event->pos();
+    gesture_.origin = event->pos();
 
     centre_.setX(std::clamp(centre_.x() - static_cast<qreal>(delta.x()) / (full_.width() / zoom_),
                             0.0, 1.0));
@@ -319,10 +319,10 @@ void ImageCanvas::mouseReleaseEvent(QMouseEvent* event) {
         QWidget::mouseReleaseEvent(event);
         return;
     }
-    const bool wasDragging = dragging_;
-    const bool wasArmed = armed_;
-    dragging_ = false;
-    armed_ = false;
+    const bool wasDragging = gesture_.dragging;
+    const bool wasArmed = gesture_.armed;
+    gesture_.dragging = false;
+    gesture_.armed = false;
     if (inspecting_) {
         setCursor(Qt::OpenHandCursor);
     }
@@ -332,7 +332,7 @@ void ImageCanvas::mouseReleaseEvent(QMouseEvent* event) {
         return;
     }
     // A pan gesture is not an elimination.
-    if (wasDragging && dragMoved_) {
+    if (wasDragging && gesture_.moved) {
         return;
     }
     if (inspecting_) {

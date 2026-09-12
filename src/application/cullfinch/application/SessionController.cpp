@@ -111,8 +111,8 @@ bool SessionController::start(const QString& flowId, const domain::SelectionSnap
         return false;
     }
 
-    const domain::ValidationResult validation = flow->validate(selection, options);
-    if (!validation.valid) {
+    if (const domain::ValidationResult validation = flow->validate(selection, options);
+        !validation.valid) {
         if (error != nullptr) {
             *error = validation.message;
         }
@@ -131,8 +131,7 @@ bool SessionController::start(const QString& flowId, const domain::SelectionSnap
     // underneath it.
     dispositions_.setMarkingEnabled(false);
 
-    QString writeError;
-    if (!writeSession(SessionLifecycle::Active, &writeError)) {
+    if (QString writeError; !writeSession(SessionLifecycle::Active, &writeError)) {
         // The draft exists in memory; the user is told it is not yet durable.
         Q_EMIT errorOccurred(writeError);
     }
@@ -175,15 +174,17 @@ bool SessionController::resume(const StoredSession& stored,
     for (const domain::PhotoAsset& asset : currentAssets) {
         currentRevisions.insert(asset.id, asset.membershipRevision);
     }
-    QStringList changed;
+    // The first mismatch decides; the loop leaves through one exit so the reason
+    // and the stop stay in one place.
+    QString changed;
     for (const AssetId& id : stored.snapshot.orderedAssetIds) {
         const auto current = currentRevisions.constFind(id);
         if (current == currentRevisions.constEnd()) {
-            changed.append(tr("a photo is no longer present"));
-            break;
+            changed = tr("a photo is no longer present");
+        } else if (*current != stored.snapshot.membershipRevisions.value(id)) {
+            changed = tr("a photo's file group changed");
         }
-        if (*current != stored.snapshot.membershipRevisions.value(id)) {
-            changed.append(tr("a photo's file group changed"));
+        if (!changed.isEmpty()) {
             break;
         }
     }
@@ -191,7 +192,7 @@ bool SessionController::resume(const StoredSession& stored,
         if (error != nullptr) {
             *error = tr("The saved comparison cannot be resumed because %1. Start a new "
                         "comparison; your deletion marks are unaffected.")
-                         .arg(changed.first());
+                         .arg(changed);
         }
         return false;
     }
@@ -441,8 +442,8 @@ bool SessionController::finish(QString* error) {
         return false;
     }
 
-    QString storageError;
-    if (!repository_.saveSession(toStoredSession(SessionLifecycle::Finished), &storageError)) {
+    if (QString storageError;
+        !repository_.saveSession(toStoredSession(SessionLifecycle::Finished), &storageError)) {
         // The marks are durable; only the session record lagged behind.
         Q_EMIT errorOccurred(
             tr("Deletion marks were applied, but the comparison record could not be updated: %1")
@@ -461,8 +462,7 @@ bool SessionController::discard(QString* error) {
     autosaveTimer_.stop();
 
     const QString id = flow_->descriptor().id;
-    QString storageError;
-    if (!repository_.deleteSession(sessionId_, &storageError)) {
+    if (QString storageError; !repository_.deleteSession(sessionId_, &storageError)) {
         if (error != nullptr) {
             *error = tr("The comparison draft could not be discarded: %1").arg(storageError);
         }

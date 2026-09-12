@@ -34,9 +34,9 @@ public:
     [[nodiscard]] ui::ImageCanvas* rightCanvas() { return right_; }
 
 private:
-    void eliminate(const domain::AssetId& id);
+    void eliminate(const domain::AssetId& id) const;
     void updateDecisionAvailability();
-    void applyLinkedView(const QPointF& centre, qreal zoom, ui::ImageCanvas* source);
+    void applyLinkedView(const QPointF& centre, qreal zoom, const ui::ImageCanvas* source);
 
     QWidget* root_ = nullptr;
     ui::ImageCanvas* left_ = nullptr;

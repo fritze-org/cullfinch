@@ -91,10 +91,10 @@ void CompositionRoot::registerFlows() {
                             });
 }
 
-ui::BrowserWindow* CompositionRoot::createBrowserWindow() {
+std::unique_ptr<ui::BrowserWindow> CompositionRoot::createBrowserWindow() {
     const ui::AppContext context{*repository_, *collection_, *session_,  *dispositions_,
                                  *operations_, flows_,       flowViews_, *images_};
-    return new ui::BrowserWindow(context);
+    return std::make_unique<ui::BrowserWindow>(context);
 }
 
 } // namespace cullfinch::app
