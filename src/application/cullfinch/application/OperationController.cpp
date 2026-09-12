@@ -10,7 +10,7 @@ namespace cullfinch::application {
 namespace {
 
 /// The journal record a plan starts from: one entry per physical file, every one
-/// of them still at "planned" because nothing has moved yet.
+/// of them still at the planned step because nothing has moved yet.
 OperationRecord plannedRecord(const domain::OperationPlan& plan) {
     OperationRecord record;
     record.plan = plan;
@@ -23,7 +23,7 @@ OperationRecord plannedRecord(const domain::OperationPlan& plan) {
             entry.memberId = member.memberId;
             entry.assetId = group.assetId;
             entry.sourcePath = member.sourcePath;
-            entry.lastDurableStep = QStringLiteral("planned");
+            entry.lastDurableStep = operationStep::planned;
             record.members.append(entry);
         }
     }
@@ -170,7 +170,20 @@ OperationController::unfinished(const domain::CollectionId& collectionId) const 
     return repository_.unfinishedOperations(collectionId, &error);
 }
 
-bool OperationController::recover(const domain::OperationId& operationId, QString* error) {
+QList<OperationRecord>
+OperationController::needingRecovery(const domain::CollectionId& collectionId) const {
+    QList<OperationRecord> result;
+    for (const OperationRecord& record : unfinished(collectionId)) {
+        if (needsRecoveryAttention(record)) {
+            result.append(record);
+        }
+    }
+    return result;
+}
+
+bool OperationController::applyRecovery(
+    const domain::OperationId& operationId,
+    OperationRecord (IOperationExecutor::*apply)(const OperationRecord&), QString* error) {
     QString storageError;
     const std::optional<OperationRecord> stored =
         repository_.loadOperation(operationId, &storageError);
@@ -181,8 +194,10 @@ bool OperationController::recover(const domain::OperationId& operationId, QStrin
         return false;
     }
 
-    OperationRecord recovered = executor_.recover(*stored);
+    OperationRecord recovered = (executor_.*apply)(*stored);
     recovered.updatedUtc = QDateTime::currentDateTimeUtc();
+    // Journalled before anyone is told: what the executor found is worth no
+    // less than what it did, and a second attempt must start from it.
     if (!persist(recovered, error)) {
         return false;
     }
@@ -196,6 +211,18 @@ bool OperationController::recover(const domain::OperationId& operationId, QStrin
         return false;
     }
     return true;
+}
+
+bool OperationController::recover(const domain::OperationId& operationId, QString* error) {
+    return applyRecovery(operationId, &IOperationExecutor::recover, error);
+}
+
+bool OperationController::retryTrash(const domain::OperationId& operationId, QString* error) {
+    return applyRecovery(operationId, &IOperationExecutor::retryTrash, error);
+}
+
+bool OperationController::confirmTrashed(const domain::OperationId& operationId, QString* error) {
+    return applyRecovery(operationId, &IOperationExecutor::confirmTrashed, error);
 }
 
 } // namespace cullfinch::application

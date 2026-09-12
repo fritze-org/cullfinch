@@ -8,6 +8,7 @@ cullfinch_add_library(
           cullfinch/ui/ComparisonShell.cpp
           cullfinch/ui/FlowView.cpp
           cullfinch/ui/ImageCanvas.cpp
+          cullfinch/ui/RecoveryDialog.cpp
           cullfinch/ui/ReviewDialog.cpp
   HEADERS cullfinch/ui/AssetListModel.h
           cullfinch/ui/AssetPresentation.h
@@ -15,5 +16,6 @@ cullfinch_add_library(
           cullfinch/ui/ComparisonShell.h
           cullfinch/ui/FlowView.h
           cullfinch/ui/ImageCanvas.h
+          cullfinch/ui/RecoveryDialog.h
           cullfinch/ui/ReviewDialog.h
   PUBLIC_DEPS cullfinch::cullfinch_application Qt6::Widgets)

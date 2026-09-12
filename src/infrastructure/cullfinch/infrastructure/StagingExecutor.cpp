@@ -28,6 +28,7 @@ namespace {
 using application::JournalWriter;
 using application::OperationMemberRecord;
 using application::OperationRecord;
+namespace step = application::operationStep;
 using domain::OperationState;
 using domain::PlannedGroup;
 using domain::PlannedMember;
@@ -35,11 +36,6 @@ using domain::PlannedMember;
 QString tr(const char* text) {
     return QCoreApplication::translate("cullfinch", text);
 }
-
-constexpr auto kStepPlanned = "planned";
-constexpr auto kStepStaged = "staged";
-constexpr auto kStepRestored = "restored";
-constexpr auto kStepTrashed = "trashed";
 
 std::filesystem::path toPath(const QString& value) {
     return std::filesystem::path(value.toStdString());
@@ -94,8 +90,7 @@ QString writeManifest(const PlannedGroup& group, const QString& directory,
     for (const PlannedMember& member : group.members) {
         QString staged;
         for (const OperationMemberRecord& record : members) {
-            if (record.memberId == member.memberId &&
-                record.lastDurableStep == QLatin1String(kStepStaged)) {
+            if (record.memberId == member.memberId && record.lastDurableStep == step::staged) {
                 staged = record.stagingPath;
                 break;
             }
@@ -235,7 +230,7 @@ void recordStagingIntent(OperationRecord& record, const PlannedGroup& group,
     for (const PlannedMember& member : group.members) {
         if (OperationMemberRecord* entry = entryFor(record, member.memberId); entry != nullptr) {
             entry->stagingPath = QDir(directory).absoluteFilePath(member.fileName);
-            entry->lastDurableStep = QLatin1String(kStepPlanned);
+            entry->lastDurableStep = step::planned;
         }
     }
 }
@@ -255,7 +250,7 @@ QStringList putBackMoved(OperationRecord& record, const QList<PlannedMember>& mo
         }
         if (OperationMemberRecord* entry = entryFor(record, member.memberId); entry != nullptr) {
             entry->stagingPath.clear();
-            entry->lastDurableStep = QLatin1String(kStepRestored);
+            entry->lastDurableStep = step::restored;
         }
     }
     return problems;
@@ -285,8 +280,7 @@ bool journalSaysTrashed(const OperationRecord& record, const PlannedGroup& group
     }
     return std::ranges::all_of(group.members, [&record](const PlannedMember& member) {
         const int index = indexOfMember(record, member.memberId);
-        return index >= 0 &&
-               record.members.at(index).lastDurableStep == QLatin1String(kStepTrashed);
+        return index >= 0 && record.members.at(index).lastDurableStep == step::trashed;
     });
 }
 
@@ -327,7 +321,7 @@ void restoreMember(const PlannedMember& member, const QString& staged, Operation
         // Never moved, or already put back.
         found.anyFound = true;
         entry.stagingPath.clear();
-        entry.lastDurableStep = QLatin1String(kStepPlanned);
+        entry.lastDurableStep = step::planned;
         return;
     }
     if (!stagedExists) {
@@ -364,7 +358,7 @@ void restoreMember(const PlannedMember& member, const QString& staged, Operation
         return;
     }
     entry.stagingPath.clear();
-    entry.lastDurableStep = QLatin1String(kStepRestored);
+    entry.lastDurableStep = step::restored;
     ++found.restored;
 }
 
@@ -388,9 +382,25 @@ GroupRestore restoreGroup(OperationRecord& record, const PlannedGroup& group,
 void markGroupTrashed(OperationRecord& record, const PlannedGroup& group) {
     for (const PlannedMember& member : group.members) {
         if (OperationMemberRecord* entry = entryFor(record, member.memberId); entry != nullptr) {
-            entry->lastDurableStep = QLatin1String(kStepTrashed);
+            entry->lastDurableStep = step::trashed;
         }
     }
+}
+
+/// Where this group's files were staged.
+QString stagingDirectoryOf(const OperationRecord& record, const PlannedGroup& group) {
+    return QDir(record.plan.stagingRoot).absoluteFilePath(group.stagingDirectoryName);
+}
+
+/// True when every member of the group is at the step only a person can settle.
+bool journalSaysUncertain(const OperationRecord& record, const PlannedGroup& group) {
+    if (group.members.isEmpty()) {
+        return false;
+    }
+    return std::ranges::all_of(group.members, [&record](const PlannedMember& member) {
+        const int index = indexOfMember(record, member.memberId);
+        return index >= 0 && record.members.at(index).lastDurableStep == step::uncertain;
+    });
 }
 
 /// Decide what a group that vanished whole means, and report whether it is
@@ -419,6 +429,10 @@ bool vanishedGroupReachedTrash(OperationRecord& record, const PlannedGroup& grou
                         .arg(group.members.size()));
     for (const PlannedMember& member : group.members) {
         if (OperationMemberRecord* entry = entryFor(record, member.memberId); entry != nullptr) {
+            // A step of its own: this is not "staged", and the difference is
+            // what lets the recovery screen offer the one thing that settles
+            // it -- a person saying they have seen the group in Trash.
+            entry->lastDurableStep = step::uncertain;
             entry->error = tr("Not found in staging or at the original path.");
         }
     }
@@ -614,7 +628,7 @@ OperationRecord StagingExecutor::executeGroup(const OperationRecord& input,
 
         if (OperationMemberRecord* entry = entryFor(record, member.memberId); entry != nullptr) {
             entry->stagingPath = destination;
-            entry->lastDurableStep = QLatin1String(kStepStaged);
+            entry->lastDurableStep = step::staged;
         }
         movedMembers.append(member);
 
@@ -708,8 +722,7 @@ OperationRecord StagingExecutor::recover(const OperationRecord& input) {
             continue;
         }
 
-        const QString directory =
-            QDir(record.plan.stagingRoot).absoluteFilePath(group.stagingDirectoryName);
+        const QString directory = stagingDirectoryOf(record, group);
         const GroupRestore found = restoreGroup(record, group, directory);
         problems.append(found.problems);
         stillStaged += found.stillStaged;
@@ -759,6 +772,99 @@ OperationRecord StagingExecutor::recover(const OperationRecord& input) {
     // and may be retried. Reporting this as "completed" would falsely imply the
     // photos reached Trash.
     return withState(record, OperationState::Planned, QString());
+}
+
+OperationRecord StagingExecutor::retryTrash(const OperationRecord& input) {
+    OperationRecord record = input;
+
+    // Every retry revalidates its preconditions, and this one validates the
+    // whole plan before it asks Trash for anything. A group left at its
+    // original paths means the plan no longer describes the work on disk;
+    // trashing the rest would turn a repairable interruption into a half-done
+    // operation nobody planned.
+    QList<qsizetype> retryable;
+    QStringList problems;
+    for (qsizetype index = 0; index < record.plan.groups.size(); ++index) {
+        const PlannedGroup& group = record.plan.groups.at(index);
+        if (journalSaysTrashed(record, group)) {
+            continue;
+        }
+
+        const QString directory = stagingDirectoryOf(record, group);
+        if (!QFileInfo::exists(directory)) {
+            problems.append(tr("'%1' is not in staging, so Trash cannot be asked for it again. "
+                               "Restore this operation and review it again.")
+                                .arg(group.displayName));
+            continue;
+        }
+        // Existence proves nothing after a crash: only the group that was
+        // reviewed, complete and unchanged, is handed to Trash.
+        if (const std::optional<QString> absent = absentFromStaging(group, directory);
+            absent.has_value()) {
+            problems.append(tr("'%1' is not complete in staging ('%2' is missing or is no longer "
+                               "the file that was reviewed), so it was not moved to Trash.")
+                                .arg(group.displayName, *absent));
+            continue;
+        }
+        retryable.append(index);
+    }
+
+    if (!problems.isEmpty()) {
+        return withState(record, OperationState::NeedsRecovery, problems.join(QLatin1String(" ")));
+    }
+
+    record.state = OperationState::Trashing;
+    for (const qsizetype index : retryable) {
+        const PlannedGroup& group = record.plan.groups.at(index);
+        const QString directory = stagingDirectoryOf(record, group);
+
+        // Cleared per group, exactly as execution does: a path left over from
+        // the previous group would send recovery to the wrong manifest.
+        record.trashPath.clear();
+        QString trashPath;
+        if (QString trashError; !trash_.moveToTrash(directory, &trashPath, &trashError)) {
+            // The complete group is retained. Retry Trash or Restore remain the
+            // only options; there is never a fall back to permanent deletion.
+            return withState(record, OperationState::NeedsRecovery,
+                             tr("The photo was staged but could not be moved to Trash: %1 The "
+                                "complete group is kept in '%2'; retry Trash or restore it.")
+                                 .arg(trashError, directory));
+        }
+        record.trashPath = std::move(trashPath);
+        markGroupTrashed(record, group);
+    }
+    return withState(record, OperationState::Completed, QString());
+}
+
+OperationRecord StagingExecutor::confirmTrashed(const OperationRecord& input) {
+    OperationRecord record = input;
+
+    int confirmed = 0;
+    for (const PlannedGroup& group : record.plan.groups) {
+        if (!journalSaysUncertain(record, group)) {
+            continue;
+        }
+        markGroupTrashed(record, group);
+        for (const PlannedMember& member : group.members) {
+            if (OperationMemberRecord* entry = entryFor(record, member.memberId);
+                entry != nullptr) {
+                entry->error.clear();
+            }
+        }
+        ++confirmed;
+    }
+
+    if (confirmed == 0) {
+        return withState(record, OperationState::NeedsRecovery,
+                         tr("No photo in this operation is waiting for a Trash outcome to be "
+                            "confirmed."));
+    }
+
+    // Nothing was moved here: a person answered the one question the filesystem
+    // cannot. Reconciling through recovery is what turns that answer into a
+    // state, and it re-reads the disk rather than trusting the claim for the
+    // groups nobody was asked about.
+    return recover(record);
 }
 
 } // namespace cullfinch::infrastructure
