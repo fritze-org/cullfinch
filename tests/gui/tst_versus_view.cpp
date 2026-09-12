@@ -211,7 +211,9 @@ void TestVersusView::linkingTheViewsConvergesThePanesAtOnce() {
     startVersusOn(4);
 
     auto* link = shell_->findChild<QCheckBox*>(QStringLiteral("versusLinkViews"));
-    QVERIFY(link != nullptr);
+    if (link == nullptr) {
+        QFAIL("the versus view has no link-views control");
+    }
     QVERIFY(!link->isChecked());
 
     ui::ImageCanvas* left = view_->leftCanvas();

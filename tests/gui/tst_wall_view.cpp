@@ -277,7 +277,9 @@ void TestWallView::anEliminatedTileStaysInItsCellMarkedEliminated() {
     QVERIFY(guitests::settleWindowSize(shell_, kWallWindowSize));
     const domain::AssetId victim = view_->surface()->order().at(2);
     ui::ImageCanvas* tile = view_->surface()->tileFor(victim);
-    QVERIFY(tile != nullptr);
+    if (tile == nullptr) {
+        QFAIL("the wall has no tile for the photo it is about to eliminate");
+    }
     QVERIFY(!tile->isRejected());
     const QRect cell = tile->geometry();
     const QImage surviving = tile->grab().toImage();
@@ -325,14 +327,15 @@ void TestWallView::aPlaceholderWithNoCandidateStillHoldsItsCell() {
     // because no flow in this build can produce that state any more.
     ui::AssetPresentationMap presentations;
     QList<flows::wall::WallSlot> positions;
-    for (const domain::AssetId& id : view_->surface()->order()) {
-        presentations.insert(id, view_->surface()->tileFor(id)->presentation());
-        positions.append(flows::wall::WallSlot{id, false});
-    }
-
     QHash<domain::AssetId, QRect> before;
-    for (const flows::wall::WallSlot& slot : positions) {
-        before.insert(slot.id, view_->surface()->tileFor(slot.id)->geometry());
+    for (const domain::AssetId& id : view_->surface()->order()) {
+        ui::ImageCanvas* placed = view_->surface()->tileFor(id);
+        if (placed == nullptr) {
+            QFAIL("a candidate on the wall has no tile");
+        }
+        presentations.insert(id, placed->presentation());
+        positions.append(flows::wall::WallSlot{id, false});
+        before.insert(id, placed->geometry());
     }
 
     const domain::AssetId anonymous = positions.at(3).id;
@@ -344,8 +347,11 @@ void TestWallView::aPlaceholderWithNoCandidateStillHoldsItsCell() {
     QVERIFY(view_->surface()->tileFor(anonymous) == nullptr);
     QCOMPARE(view_->surface()->order().size(), 5);
     for (const domain::AssetId& id : view_->surface()->order()) {
-        QVERIFY2(view_->surface()->tileFor(id) != nullptr, "a survivor lost its tile");
-        QCOMPARE(view_->surface()->tileFor(id)->geometry(), before.value(id));
+        ui::ImageCanvas* survivor = view_->surface()->tileFor(id);
+        if (survivor == nullptr) {
+            QFAIL("a survivor lost its tile");
+        }
+        QCOMPARE(survivor->geometry(), before.value(id));
     }
 }
 
@@ -356,7 +362,11 @@ void TestWallView::aTileCreatedBeforeItsPresentationPicksItUp() {
     ui::AssetPresentationMap presentations;
     QList<flows::wall::WallSlot> positions;
     for (const domain::AssetId& id : view_->surface()->order()) {
-        presentations.insert(id, view_->surface()->tileFor(id)->presentation());
+        ui::ImageCanvas* placed = view_->surface()->tileFor(id);
+        if (placed == nullptr) {
+            QFAIL("a candidate on the wall has no tile");
+        }
+        presentations.insert(id, placed->presentation());
         positions.append(flows::wall::WallSlot{id, false});
     }
 
@@ -370,7 +380,9 @@ void TestWallView::aTileCreatedBeforeItsPresentationPicksItUp() {
     QCoreApplication::processEvents();
 
     ui::ImageCanvas* tile = view_->surface()->tileFor(late);
-    QVERIFY(tile != nullptr);
+    if (tile == nullptr) {
+        QFAIL("the wall created no tile for the candidate it was handed");
+    }
     QVERIFY(!tile->presentation().previewMemberId.isValid());
     QVERIFY(!tile->isReady());
 
@@ -392,8 +404,8 @@ void TestWallView::aTileCreatedBeforeItsPresentationPicksItUp() {
     view_->surface()->setCandidates(positions, presentations,
                                     view_->surface()->layoutRevision() + 1);
 
-    QVERIFY(GuiFixture::waitFor([&]() { return view_->surface()->tileFor(late)->isReady(); }));
-    QCOMPARE(view_->surface()->tileFor(late)->presentation().id, late);
+    QVERIFY(GuiFixture::waitFor([tile]() { return tile->isReady(); }));
+    QCOMPARE(tile->presentation().id, late);
 }
 
 void TestWallView::undoReinstatesThePhotoAndItsPosition() {
