@@ -442,12 +442,15 @@ bool SessionController::finish(QString* error) {
     // become durable together or not at all: a crash or a refused second
     // write between them must never leave marks applied to a session that
     // still looks resumable.
-    std::optional<DispositionController::PendingRejections> pending;
+    DispositionController::PendingRejections pending;
     QString transactionError;
     if (const bool committed = repository_.runInTransaction(
             [this, &pending, &transactionError, &summary]() {
-                pending = dispositions_.beginRejections(summary.draftRejected, &transactionError);
-                if (!pending.has_value()) {
+                if (const std::optional<DispositionController::PendingRejections> begun =
+                        dispositions_.beginRejections(summary.draftRejected, &transactionError);
+                    begun.has_value()) {
+                    pending = *begun;
+                } else {
                     return false;
                 }
                 return repository_.saveSession(toStoredSession(SessionLifecycle::Finished),
@@ -462,7 +465,7 @@ bool SessionController::finish(QString* error) {
         return false;
     }
 
-    dispositions_.commitRejections(*pending, commandText);
+    dispositions_.commitRejections(pending, commandText);
 
     clearSession();
     Q_EMIT sessionEnded(id, true);
