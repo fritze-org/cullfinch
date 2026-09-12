@@ -297,7 +297,8 @@ void WallView::setState(const domain::FlowState& state, const domain::FlowSummar
     // which is precisely what fixed-position mode exists to prevent. The
     // surface also needs the placeholder's candidate to draw its tile as
     // eliminated instead of leaving a blank cell.
-    surface_->setCandidates(flows::wall::WallFlow::positions(state), presentations_, revision_);
+    const QList<flows::wall::WallSlot> positions = flows::wall::WallFlow::positions(state);
+    surface_->setCandidates(positions, presentations_, revision_);
 
     updatingControls_ = true;
     fixedPositions_->setChecked(flows::wall::WallFlow::layoutMode(state) ==
@@ -307,8 +308,15 @@ void WallView::setState(const domain::FlowState& state, const domain::FlowSummar
 
     // Finishing may retain any number of survivors, including zero, and the
     // empty wall still offers Undo and Finish.
+    //
+    // The surface stays up while any cell still names a photo, which is not the
+    // same as having a survivor: in fixed-position mode the cells left after
+    // the last elimination hold the eliminated photos themselves, and hiding
+    // them would take the spatial record away exactly when the wall is
+    // emptiest and the user is most likely to want Undo.
     emptyLabel_->setVisible(summary.remaining.isEmpty());
-    surface_->setVisible(!summary.remaining.isEmpty());
+    surface_->setVisible(std::ranges::any_of(
+        positions, [](const flows::wall::WallSlot& slot) { return slot.id.isValid(); }));
 }
 
 void WallView::setFullscreenPresentation(bool fullscreen) {

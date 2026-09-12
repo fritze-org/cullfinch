@@ -51,6 +51,7 @@ private slots:
     void aTileCreatedBeforeItsPresentationPicksItUp();
     void undoReinstatesThePhotoAndItsPosition();
     void anEmptyWallStillOffersUndoAndFinish();
+    void anEmptiedFixedWallStillShowsWhatWasEliminated();
     void keyboardOnlyCullingWorks();
     void resizingBetweenPressAndReleaseDoesNotMisfire();
     void aGestureIsBoundToTheLayoutItWasPressedOn();
@@ -459,6 +460,60 @@ void TestWallView::anEmptyWallStillOffersUndoAndFinish() {
 
     undo->trigger();
     QVERIFY(GuiFixture::waitFor([&]() { return session.summary().remaining.size() == 1; }));
+}
+
+void TestWallView::anEmptiedFixedWallStillShowsWhatWasEliminated() {
+    startWallOn(6);
+    application::SessionController& session = fixture_->root().session();
+
+    auto* fixed = shell_->findChild<QCheckBox*>(QStringLiteral("wallFixedPositions"));
+    auto* compact = shell_->findChild<QPushButton*>(QStringLiteral("wallCompact"));
+    if (fixed == nullptr || compact == nullptr) {
+        QFAIL("the wall view has no layout controls");
+    }
+    fixed->setChecked(true);
+    QVERIFY(GuiFixture::waitFor([&]() {
+        return flows::wall::WallFlow::layoutMode(session.state()) ==
+               flows::wall::LayoutMode::FixedPositions;
+    }));
+
+    const QList<domain::AssetId> culled = view_->surface()->order();
+    while (!session.summary().remaining.isEmpty()) {
+        QString error;
+        QJsonObject payload;
+        payload.insert(QStringLiteral("assetId"), session.summary().remaining.first().toString());
+        QVERIFY2(session.dispatch(QStringLiteral("eliminate"), payload, &error), qPrintable(error));
+    }
+    QCoreApplication::processEvents();
+
+    // No survivors, but every cell is still held, and in fixed-position mode a
+    // held cell is a photo marked as eliminated. Hiding the wall here would
+    // take the spatial record away exactly where Undo needs it.
+    QVERIFY(view_->surface()->isVisible());
+    QVERIFY(view_->surface()->order().isEmpty());
+    for (const domain::AssetId& id : culled) {
+        ui::ImageCanvas* tile = view_->surface()->tileFor(id);
+        if (tile == nullptr) {
+            QFAIL("an eliminated photo lost the cell that was holding it");
+        }
+        QVERIFY(tile->isRejected());
+    }
+
+    auto* empty = shell_->findChild<QLabel*>(QStringLiteral("wallEmptyLabel"));
+    if (empty == nullptr) {
+        QFAIL("the wall view has no empty-wall label");
+    }
+    QVERIFY(empty->isVisible());
+    QVERIFY(compact->isEnabled());
+
+    // Compacting an emptied wall leaves nothing to show, and the label carries
+    // the state on its own.
+    QTest::mouseClick(compact, Qt::LeftButton);
+    QVERIFY(GuiFixture::waitFor(
+        [&]() { return !flows::wall::WallFlow::hasPlaceholders(session.state()); }));
+    QCoreApplication::processEvents();
+    QVERIFY(!view_->surface()->isVisible());
+    QVERIFY(empty->isVisible());
 }
 
 void TestWallView::keyboardOnlyCullingWorks() {
