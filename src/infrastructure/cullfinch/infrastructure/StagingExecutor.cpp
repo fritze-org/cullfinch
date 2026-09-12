@@ -538,6 +538,12 @@ domain::PlanningResult StagingExecutor::preflight(const domain::OperationPlan& p
                                       tr("The file group changed and must be resolved again.")});
             continue;
         }
+        if (asset->disposition != domain::Disposition::Reject) {
+            result.blocked.append(
+                domain::PlanningIssue{group.assetId, group.displayName,
+                                      tr("This photo is no longer marked for deletion.")});
+            continue;
+        }
 
         QString blocker = memberBlocker(group, *asset, stagingDevice, plan.stagingRoot);
         if (blocker.isEmpty()) {

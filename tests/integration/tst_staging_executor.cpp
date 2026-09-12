@@ -123,6 +123,7 @@ private slots:
     void preservesOpaqueRawBytes();
     void preflightBlocksAGroupWhoseFileChanged();
     void preflightBlocksAGroupWhoseRawDisappeared();
+    void preflightBlocksAGroupWhoseMarkWasCleared();
     void aFailedTrashKeepsTheCompleteGroupForRecovery();
     void neverOverwritesOnRestore();
     void recoveryPutsStagedFilesBack();
@@ -267,6 +268,30 @@ void TestStagingExecutor::preflightBlocksAGroupWhoseRawDisappeared() {
         executor.preflight(planning.plan, scan(collection), &error);
     QVERIFY(verified.hasBlockers());
     QVERIFY(QFileInfo::exists(collection.filePath(QStringLiteral("A.JPG"))));
+}
+
+void TestStagingExecutor::preflightBlocksAGroupWhoseMarkWasCleared() {
+    TempCollection collection;
+    collection.addJpeg(QStringLiteral("A.JPG"));
+    collection.addRaw(QStringLiteral("A.RAF"));
+
+    const domain::PhotoAssetList assets = markAll(scan(collection));
+    const domain::PlanningResult planning = domain::OperationPlanner::plan(
+        domain::CollectionId(QStringLiteral("c1")), 1,
+        QDir(collection.path()).absoluteFilePath(QStringLiteral(".cullfinch-staging")), assets);
+
+    // The reject mark is cleared from another window; nothing on disk changes.
+    domain::PhotoAssetList current = assets;
+    current.first().disposition = domain::Disposition::Neutral;
+
+    FakeTrashAdapter trash;
+    const infrastructure::StagingExecutor executor(trash);
+    QString error;
+    const domain::PlanningResult verified = executor.preflight(planning.plan, current, &error);
+    QVERIFY(verified.hasBlockers());
+    QVERIFY(verified.blocked.first().reason.contains(QStringLiteral("no longer marked")));
+    QVERIFY(QFileInfo::exists(collection.filePath(QStringLiteral("A.JPG"))));
+    QVERIFY(QFileInfo::exists(collection.filePath(QStringLiteral("A.RAF"))));
 }
 
 void TestStagingExecutor::aFailedTrashKeepsTheCompleteGroupForRecovery() {
