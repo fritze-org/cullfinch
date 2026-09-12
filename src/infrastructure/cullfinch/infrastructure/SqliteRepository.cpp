@@ -739,7 +739,21 @@ PhotoAssetList SqliteRepository::loadAssets(const CollectionId& id, QString* err
 bool SqliteRepository::reconcileAssets(const CollectionId& id, const PhotoAssetList& scanned,
                                        PhotoAssetList* merged, quint64* newRevision,
                                        QString* error) {
-    const PhotoAssetList result = mergeWithStored(scanned, loadAssets(id, nullptr));
+    // A failed read must not be mistaken for "nothing stored yet". loadAssets
+    // reports failure and returns an empty list, mergeWithStored would then find
+    // no previous state for any photo, and the replacement transaction below
+    // would delete every stored disposition -- losing the collection's deletion
+    // marks to a transient read error. Refuse the reconciliation instead.
+    QString readError;
+    const PhotoAssetList stored = loadAssets(id, &readError);
+    if (!readError.isEmpty()) {
+        report(error, tr("The stored collection could not be read, so the scan results were not "
+                         "applied: %1")
+                          .arg(readError));
+        return false;
+    }
+
+    const PhotoAssetList result = mergeWithStored(scanned, stored);
 
     if (!database_.transaction()) {
         report(error, tr("The scan results could not be stored: no transaction available."));
