@@ -30,6 +30,8 @@ private slots:
     void executesAReviewedPlanAndJournalsEveryStep();
     void aRefusedJournalWriteStopsTheRunBeforeAnythingMoves();
     void aChangedGroupInvalidatesThePlan();
+    void aMarkClearedAfterReviewInvalidatesThePlan();
+    void anIdleRescanDoesNotInvalidateThePlan();
     void recoverPutsAnInterruptedOperationBack();
 
 private:
@@ -168,6 +170,49 @@ void TestOperationController::aChangedGroupInvalidatesThePlan() {
     QVERIFY(QFileInfo::exists(collection_->filePath(QStringLiteral("B.JPG"))));
     // Nothing was recorded for a plan that never started.
     QVERIFY(!repository_->loadOperation(plan.id, &error).has_value());
+}
+
+void TestOperationController::aMarkClearedAfterReviewInvalidatesThePlan() {
+    const domain::OperationPlan plan = reviewedPlan();
+    QSignalSpy invalidated(controller_.get(), &application::OperationController::planInvalidated);
+
+    // The reject mark on B is cleared from another window between review and
+    // execution; nothing on disk changes.
+    domain::PhotoAssetList current = scan();
+    for (domain::PhotoAsset& asset : current) {
+        if (asset.stem == QStringLiteral("B")) {
+            asset.disposition = domain::Disposition::Neutral;
+        }
+    }
+
+    QString error;
+    QVERIFY(!controller_->execute(plan, current, &error));
+    QCOMPARE(invalidated.size(), 1);
+    QCOMPARE(trash_->callCount(), 0);
+    QVERIFY(QFileInfo::exists(collection_->filePath(QStringLiteral("A.JPG"))));
+    QVERIFY(QFileInfo::exists(collection_->filePath(QStringLiteral("A.RAF"))));
+    QVERIFY(QFileInfo::exists(collection_->filePath(QStringLiteral("B.JPG"))));
+    // Nothing was recorded for a plan that never started.
+    QVERIFY(!repository_->loadOperation(plan.id, &error).has_value());
+}
+
+void TestOperationController::anIdleRescanDoesNotInvalidateThePlan() {
+    // Seed the repository with the marks review saw, so reconcileAssets has
+    // something to carry the disposition forward from.
+    repository_->setAssets(collectionId_, scan());
+    const domain::OperationPlan plan = reviewedPlan();
+
+    // A window activation triggers a rescan that changes nothing structurally
+    // or in the marks, but still bumps the collection revision.
+    domain::PhotoAssetList merged;
+    quint64 newRevision = 0;
+    QString error;
+    QVERIFY2(repository_->reconcileAssets(collectionId_, scan(), &merged, &newRevision, &error),
+             qPrintable(error));
+    QVERIFY(newRevision > plan.collectionRevision);
+
+    QVERIFY2(controller_->execute(plan, merged, &error), qPrintable(error));
+    QCOMPARE(trash_->callCount(), 2);
 }
 
 void TestOperationController::recoverPutsAnInterruptedOperationBack() {
