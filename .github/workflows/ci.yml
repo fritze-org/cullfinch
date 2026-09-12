@@ -149,7 +149,7 @@ jobs:
         if: matrix.preset == 'ci-linux-asan'
         run: |
           llvm_major="${CULLFINCH_LLVM_VERSION%%.*}"
-          curl -fsSL -o /tmp/llvm.sh https://apt.llvm.org/llvm.sh
+          curl -fsSL --proto '=https' --tlsv1.2 -o /tmp/llvm.sh https://apt.llvm.org/llvm.sh
           chmod +x /tmp/llvm.sh
           sudo /tmp/llvm.sh "${llvm_major}"
           clang="$(command -v "clang-${llvm_major}" || true)"
@@ -345,7 +345,7 @@ jobs:
         if: runner.os == 'Linux'
         run: |
           llvm_major="${CULLFINCH_LLVM_VERSION%%.*}"
-          curl -fsSL -o /tmp/llvm.sh https://apt.llvm.org/llvm.sh
+          curl -fsSL --proto '=https' --tlsv1.2 -o /tmp/llvm.sh https://apt.llvm.org/llvm.sh
           chmod +x /tmp/llvm.sh
           sudo /tmp/llvm.sh "${llvm_major}"
           # llvm.sh installs clang, lldb, lld and clangd, but clang-tidy ships
