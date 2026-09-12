@@ -53,7 +53,16 @@ public:
     [[nodiscard]] qreal zoom() const { return zoom_; }
     void setNormalisedView(const QPointF& centre, qreal zoom);
 
+    /// Marks this photo as the one the flow is keeping, such as the versus
+    /// survivor. Drawn as a border, so it reads alongside the platform focus
+    /// indicator rather than replacing it.
     void setSelectionHighlighted(bool highlighted);
+    [[nodiscard]] bool isSelectionHighlighted() const { return highlighted_; }
+
+    /// Marks this photo as eliminated. A host that leaves an eliminated photo
+    /// on screen -- the wall's fixed-position placeholder does -- needs the
+    /// mark to be legible, which is why it is a cross and a label and not a
+    /// colour.
     void setRejected(bool rejected);
     [[nodiscard]] bool isRejected() const { return rejected_; }
 

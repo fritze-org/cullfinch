@@ -5,11 +5,13 @@
 #include <cullfinch/views/versus/VersusView.h>
 
 #include <QAction>
+#include <QCheckBox>
 #include <QFocusEvent>
 #include <QLabel>
 #include <QPointF>
 #include <QPushButton>
 #include <QTest>
+#include <QWheelEvent>
 
 #include <tuple>
 
@@ -27,6 +29,8 @@ private slots:
     void showsTwoPreviewsAndRejectsTheClickedPhoto();
     void keepButtonsEliminateTheOtherSide();
     void decisionsAreDisabledUntilBothPreviewsAreReady();
+    void theCompletedScreenShowsTheSurvivingPhoto();
+    void linkingTheViewsConvergesThePanesAtOnce();
     void undoRestoresTheExactPreviousMatch();
     void aRepeatedClickOnADecidedMatchDecidesNothing();
     void spaceEntersInspectionAndAPanDoesNotEliminate();
@@ -148,6 +152,109 @@ void TestVersusView::decisionsAreDisabledUntilBothPreviewsAreReady() {
     QVERIFY(GuiFixture::waitFor(
         [this]() { return view_->leftCanvas()->isReady() && view_->rightCanvas()->isReady(); }));
     QVERIFY(keepLeft->isEnabled());
+}
+
+void TestVersusView::theCompletedScreenShowsTheSurvivingPhoto() {
+    // Two candidates: one decision completes the bracket.
+    startVersusOn(2);
+    application::SessionController& session = fixture_->root().session();
+
+    const flows::versus::MatchView match = flows::versus::VersusFlow::pendingMatch(session.state());
+    QVERIFY(match.isValid());
+    QTest::mouseClick(view_->leftCanvas(), Qt::LeftButton, Qt::NoModifier,
+                      view_->leftCanvas()->rect().center());
+    QVERIFY(GuiFixture::waitFor([&]() { return session.summary().complete; }));
+    QCoreApplication::processEvents();
+
+    // "Show the survivor" means the photo, not only its name: the pane keeps
+    // it, marked as the one being kept, and the opposing pane goes away rather
+    // than sitting there empty.
+    ui::ImageCanvas* left = view_->leftCanvas();
+    QCOMPARE(left->presentation().id, match.right);
+    QVERIFY(left->isSelectionHighlighted());
+    QVERIFY(!view_->rightCanvas()->isVisible());
+    QVERIFY(GuiFixture::waitFor([left]() { return left->isReady(); }));
+
+    auto* survivor = shell_->findChild<QLabel*>(QStringLiteral("versusSurvivorLabel"));
+    QVERIFY(survivor != nullptr);
+    QVERIFY(survivor->isVisible());
+
+    // Re-rendering the same completed state must leave the pane alone: the
+    // session reports state more than once, and re-presenting the survivor
+    // would restart its decode and blank the pane it is being shown in.
+    view_->setState(session.state(), session.summary());
+    QVERIFY(left->isReady());
+    QCOMPARE(left->presentation().id, match.right);
+    QVERIFY(left->isSelectionHighlighted());
+
+    // Clicking the survivor decides nothing; Finish and Undo stay available.
+    QTest::mouseClick(left, Qt::LeftButton, Qt::NoModifier, left->rect().center());
+    QCoreApplication::processEvents();
+    QCOMPARE(session.summary().draftRejected.size(), 1);
+
+    // Undo comes back to the match, which is where both panes and the mark were
+    // left behind.
+    auto* undo = shell_->findChild<QAction*>(QStringLiteral("comparisonUndo"));
+    QVERIFY(undo != nullptr);
+    QVERIFY(undo->isEnabled());
+    undo->trigger();
+    QVERIFY(GuiFixture::waitFor([&]() { return session.summary().draftRejected.isEmpty(); }));
+    QCoreApplication::processEvents();
+
+    QVERIFY(view_->rightCanvas()->isVisible());
+    QVERIFY(!left->isSelectionHighlighted());
+    QCOMPARE(left->presentation().id, match.left);
+    QCOMPARE(view_->rightCanvas()->presentation().id, match.right);
+}
+
+void TestVersusView::linkingTheViewsConvergesThePanesAtOnce() {
+    startVersusOn(4);
+
+    auto* link = shell_->findChild<QCheckBox*>(QStringLiteral("versusLinkViews"));
+    if (link == nullptr) {
+        QFAIL("the versus view has no link-views control");
+    }
+    QVERIFY(!link->isChecked());
+
+    ui::ImageCanvas* left = view_->leftCanvas();
+    ui::ImageCanvas* right = view_->rightCanvas();
+
+    // Frame the left pane while the panes are independent.
+    const QPointF centre(0.25, 0.75);
+    const qreal zoom = 2.0;
+    left->setNormalisedView(centre, zoom);
+    QCOMPARE(right->zoom(), 1.0);
+
+    // Ticking the box has to link them now. Waiting for the next pan would
+    // leave two differently framed photos while the box says they are linked.
+    link->setChecked(true);
+    QCOMPARE(right->normalisedCentre(), centre);
+    QCOMPARE(right->zoom(), zoom);
+
+    // And they stay together afterwards: a zoom on one pane reaches the other.
+    right->setInspecting(true);
+    // Inspection asks for the pixels sharpness is judged on, and the pane says
+    // whether they have arrived.
+    QVERIFY(GuiFixture::waitFor([right]() { return right->isFullResolutionReady(); }));
+    QWheelEvent wheel(QPointF(right->rect().center()), right->mapToGlobal(right->rect().center()),
+                      QPoint(0, 0), QPoint(0, 120), Qt::NoButton, Qt::NoModifier, Qt::NoScrollPhase,
+                      false);
+    QCoreApplication::sendEvent(right, &wheel);
+    QVERIFY(right->zoom() > zoom);
+    QCOMPARE(left->zoom(), right->zoom());
+
+    // Unticking makes them independent again: the panes keep whatever framing
+    // they had, and a zoom on one no longer moves the other.
+    link->setChecked(false);
+    const qreal linkedZoom = left->zoom();
+    left->setInspecting(true);
+    QVERIFY(GuiFixture::waitFor([left]() { return left->isFullResolutionReady(); }));
+    QWheelEvent again(QPointF(left->rect().center()), left->mapToGlobal(left->rect().center()),
+                      QPoint(0, 0), QPoint(0, 120), Qt::NoButton, Qt::NoModifier, Qt::NoScrollPhase,
+                      false);
+    QCoreApplication::sendEvent(left, &again);
+    QVERIFY(left->zoom() > linkedZoom);
+    QCOMPARE(right->zoom(), linkedZoom);
 }
 
 void TestVersusView::undoRestoresTheExactPreviousMatch() {
