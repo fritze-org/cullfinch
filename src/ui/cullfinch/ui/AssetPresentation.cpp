@@ -10,8 +10,7 @@ AssetPresentation AssetPresentation::from(const domain::PhotoAsset& asset) {
     presentation.rawCount = asset.rawCount();
     presentation.pairingText = domain::pairingStateName(asset.pairingState);
 
-    const domain::FileMember* preview = asset.preview();
-    if (preview != nullptr) {
+    if (const domain::FileMember* preview = asset.preview(); preview != nullptr) {
         presentation.previewMemberId = preview->id;
         presentation.previewPath = preview->absolutePath;
         presentation.previewFingerprint = preview->fingerprint;

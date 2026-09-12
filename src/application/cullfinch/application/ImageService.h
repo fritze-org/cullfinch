@@ -57,7 +57,7 @@ class IImageService : public QObject {
     Q_OBJECT
 
 public:
-    explicit IImageService(QObject* parent = nullptr) : QObject(parent) {}
+    using QObject::QObject;
 
     /// @return the request identifier, for cancellation.
     virtual quint64 request(const ImageRequest& request) = 0;

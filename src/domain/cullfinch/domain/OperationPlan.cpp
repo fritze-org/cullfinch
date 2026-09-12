@@ -4,6 +4,8 @@
 #include <QCoreApplication>
 #include <QHash>
 
+#include <algorithm>
+
 namespace cullfinch::domain {
 namespace {
 
@@ -14,61 +16,64 @@ QString tr(const char* text) {
 } // namespace
 
 QString operationStateName(OperationState state) {
+    using enum OperationState;
     switch (state) {
-    case OperationState::Planned:
+    case Planned:
         return tr("Planned");
-    case OperationState::Staging:
+    case Staging:
         return tr("Staging");
-    case OperationState::Staged:
+    case Staged:
         return tr("Staged");
-    case OperationState::Trashing:
+    case Trashing:
         return tr("Moving to Trash");
-    case OperationState::Completed:
+    case Completed:
         return tr("Completed");
-    case OperationState::Restoring:
+    case Restoring:
         return tr("Restoring");
-    case OperationState::Failed:
+    case Failed:
         return tr("Failed");
-    case OperationState::NeedsRecovery:
+    case NeedsRecovery:
         break;
     }
     return tr("Needs recovery");
 }
 
 QString operationStateToken(OperationState state) {
+    using enum OperationState;
     switch (state) {
-    case OperationState::Planned:
+    case Planned:
         return QStringLiteral("planned");
-    case OperationState::Staging:
+    case Staging:
         return QStringLiteral("staging");
-    case OperationState::Staged:
+    case Staged:
         return QStringLiteral("staged");
-    case OperationState::Trashing:
+    case Trashing:
         return QStringLiteral("trashing");
-    case OperationState::Completed:
+    case Completed:
         return QStringLiteral("completed");
-    case OperationState::Restoring:
+    case Restoring:
         return QStringLiteral("restoring");
-    case OperationState::Failed:
+    case Failed:
         return QStringLiteral("failed");
-    case OperationState::NeedsRecovery:
+    case NeedsRecovery:
         break;
     }
     return QStringLiteral("needs-recovery");
 }
 
 OperationState operationStateFromToken(const QString& token) {
+    using enum OperationState;
     static const QHash<QString, OperationState> states = {
-        {QStringLiteral("planned"), OperationState::Planned},
-        {QStringLiteral("staging"), OperationState::Staging},
-        {QStringLiteral("staged"), OperationState::Staged},
-        {QStringLiteral("trashing"), OperationState::Trashing},
-        {QStringLiteral("completed"), OperationState::Completed},
-        {QStringLiteral("restoring"), OperationState::Restoring},
-        {QStringLiteral("failed"), OperationState::Failed},
-        {QStringLiteral("needs-recovery"), OperationState::NeedsRecovery}};
+        {QStringLiteral("planned"), Planned},
+        {QStringLiteral("staging"), Staging},
+        {QStringLiteral("staged"), Staged},
+        {QStringLiteral("trashing"), Trashing},
+        {QStringLiteral("completed"), Completed},
+        {QStringLiteral("restoring"), Restoring},
+        {QStringLiteral("failed"), Failed},
+        {QStringLiteral("needs-recovery"), NeedsRecovery}};
     // An unreadable token is treated as needing recovery: never as completed.
-    return states.value(token, OperationState::NeedsRecovery);
+    return states.value(token, NeedsRecovery);
 }
 
 qint64 PlannedGroup::totalBytes() const {
@@ -82,12 +87,8 @@ qint64 PlannedGroup::totalBytes() const {
 }
 
 bool PlannedGroup::containsMember(const MemberId& id) const {
-    for (const PlannedMember& member : members) {
-        if (member.memberId == id) {
-            return true;
-        }
-    }
-    return false;
+    return std::ranges::any_of(
+        members, [&id](const PlannedMember& member) { return member.memberId == id; });
 }
 
 int OperationPlan::physicalFileCount() const {
@@ -163,8 +164,8 @@ PlanningResult OperationPlanner::plan(const CollectionId& collectionId, quint64 
     }
 
     for (const PhotoAsset& asset : candidates) {
-        const auto conflict = conflictReason.constFind(asset.id);
-        if (conflict != conflictReason.constEnd()) {
+        if (const auto conflict = conflictReason.constFind(asset.id);
+            conflict != conflictReason.constEnd()) {
             result.blocked.append(PlanningIssue{asset.id, asset.displayName, *conflict});
             continue;
         }

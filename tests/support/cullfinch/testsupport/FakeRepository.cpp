@@ -19,7 +19,10 @@ bool FakeRepository::open(QString* error) {
     return true;
 }
 
-void FakeRepository::close() {}
+void FakeRepository::close() {
+    // Nothing to release: the fake keeps its rows in memory for the lifetime of
+    // the instance, so a test can inspect them after closing.
+}
 
 std::optional<domain::CollectionId>
 FakeRepository::ensureCollection(const QString& rootPath, bool recursive, QString* error) {

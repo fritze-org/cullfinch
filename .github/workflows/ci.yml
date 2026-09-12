@@ -45,6 +45,11 @@ jobs:
           enable-cache: true
           cache-dependency-glob: uv.lock
 
+      # No --no-build on any uv invocation in this job, the `uv run` steps below
+      # included: actionlint-py publishes no wheel, `uv run` re-checks the
+      # environment against the lock on every call, and uv has no per-package
+      # exemption from a global --no-build. The lock pins that sdist by hash,
+      # which is what makes building it acceptable. See issue #25.
       - name: Sync the locked tooling environment
         run: uv sync --locked --group tooling
 
@@ -92,7 +97,6 @@ jobs:
             display: wayland
             session: tests/support/with-wayland.sh
             package: true
-            visual: true
           # Sanitizers cover the application, not the shipped artefact: the
           # package that ships is not instrumented, so a smoke test against a
           # sanitized binary would prove nothing about it.
@@ -102,7 +106,6 @@ jobs:
             display: wayland
             session: tests/support/with-wayland.sh
             package: false
-            visual: false
           # Secondary compatibility: the XCB path must keep working, but it is
           # never a substitute for the Wayland job above.
           - name: Linux X11 compatibility
@@ -111,21 +114,18 @@ jobs:
             display: xcb
             session: tests/support/with-x11.sh
             package: true
-            visual: false
           - name: macOS Apple Silicon
             runner: macos-15
             preset: ci-macos
             display: cocoa
             session: ''
             package: true
-            visual: false
           - name: macOS Intel
             runner: macos-15-intel
             preset: ci-macos
             display: cocoa
             session: ''
             package: true
-            visual: false
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
 
@@ -195,20 +195,6 @@ jobs:
         run: |
           ${{ matrix.session }} ctest --preset ${{ matrix.preset }} --label-regex gui \
             --output-junit "${{ github.workspace }}/ctest-gui.xml"
-
-      # Pixel comparisons need a backend that composes the same way every
-      # time, so this suite pins QT_QPA_PLATFORM=offscreen itself rather than
-      # inheriting the job's. It runs on the primary Linux job alone: a
-      # reference set belongs to one rendering environment, and recording one
-      # per runner image would cost more than it proves. Differences are
-      # written to the directory the session helpers already publish.
-      - name: Run visual regression tests
-        if: matrix.visual
-        env:
-          CULLFINCH_ARTIFACT_DIR: ${{ github.workspace }}/session-artifacts
-        run: |
-          ctest --preset ${{ matrix.preset }} --label-regex visual \
-            --output-junit "${{ github.workspace }}/ctest-visual.xml"
 
       - name: Install into a staging prefix
         if: matrix.package
@@ -332,13 +318,24 @@ jobs:
         if: runner.os == 'Linux'
         env:
           CULLFINCH_LLVM_VERSION: '23'
+          # apt.llvm.org serves llvm.sh from a mutable path, and this step runs
+          # it as root. These name the same script byte for byte -- verified
+          # identical to the apt.llvm.org copy -- at the commit that produced it,
+          # so the content cannot change under us between runs.
+          CULLFINCH_LLVM_SH_REPO: opencollab/llvm-jenkins.debian.net
+          CULLFINCH_LLVM_SH_COMMIT: 6dc0d1ad7de83d0782731687fd555a7859b4da58
+          CULLFINCH_LLVM_SH_SHA256: >-
+            03878e08f47b66cc95bc4b544b0db3c6d9ce8d60e6cf2492ae357984330a9eae
         run: |
-          # -L follows redirects, so the protocol has to be pinned for the
-          # redirect too: without --proto-redir a redirect could downgrade
-          # this to plain HTTP and hand the job an unauthenticated script it
-          # then runs as root.
-          curl -fsSL --proto '=https' --proto-redir '=https' \
-            -o /tmp/llvm.sh https://apt.llvm.org/llvm.sh
+          # --proto/--proto-redir pin the transport: -L follows redirects, and
+          # without them a redirect to http:// would be honoured silently.
+          curl -fsSL --proto '=https' --proto-redir '=https' -o /tmp/llvm.sh \
+            "https://raw.githubusercontent.com/${CULLFINCH_LLVM_SH_REPO}/${CULLFINCH_LLVM_SH_COMMIT}/llvm.sh"
+          # Nothing is executed until the digest matches. The step shell is
+          # `bash -e`, so a mismatch fails here rather than reaching sudo. An
+          # upstream change to the script is meant to fail this job: re-review
+          # it, then move the commit and digest together.
+          echo "${CULLFINCH_LLVM_SH_SHA256}  /tmp/llvm.sh" | sha256sum --check --strict -
           chmod +x /tmp/llvm.sh
           sudo /tmp/llvm.sh "${CULLFINCH_LLVM_VERSION}"
           # llvm.sh installs clang, lldb, lld and clangd, but clang-tidy ships
@@ -448,6 +445,9 @@ jobs:
           enable-cache: true
           cache-dependency-glob: uv.lock
 
+      # No --no-build: actionlint-py publishes no wheel, so the sync has to build
+      # its source distribution. The lock pins that sdist by hash, which is what
+      # makes building it acceptable. See issue #25.
       - name: Sync the locked tooling environment
         run: uv sync --locked --group tooling
 

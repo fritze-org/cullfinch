@@ -27,7 +27,7 @@ belongs with it.
 
 - Linux x86-64, primarily on **native Wayland**, with X11 as a compatibility backend
 - macOS (Apple Silicon or Intel)
-- A C++20 compiler, CMake 3.28+, Ninja and Git
+- A C++23 compiler, CMake 3.28+, Ninja and Git
 
 Qt comes from vcpkg, which CMake bootstraps for you. You do **not** need a system Qt, and
 Cullfinch will never use one it finds by accident.

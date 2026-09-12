@@ -83,17 +83,18 @@ bool AssetFilterProxy::filterAcceptsRow(int sourceRow, const QModelIndex& source
     const auto disposition = static_cast<domain::Disposition>(
         sourceModel()->data(index, AssetListModel::DispositionRole).toInt());
 
+    using enum Mode;
+    using enum domain::PairingState;
     switch (mode_) {
-    case Mode::All:
+    case All:
         return true;
-    case Mode::NeedsAttention:
+    case NeedsAttention:
         // The diagnostic view: RAW-only, ambiguous and stale groups.
-        return state == domain::PairingState::RawOnly || state == domain::PairingState::Ambiguous ||
-               state == domain::PairingState::Stale ||
+        return state == RawOnly || state == Ambiguous || state == Stale ||
                !sourceModel()->data(index, AssetListModel::OperableRole).toBool();
-    case Mode::Rejected:
+    case Rejected:
         return disposition == domain::Disposition::Reject;
-    case Mode::Comparable:
+    case Comparable:
         break;
     }
     return sourceModel()->data(index, AssetListModel::ComparableRole).toBool() &&
@@ -314,8 +315,7 @@ bool BrowserWindow::openDirectory(const QString& path) {
             shell_->close();
         }
     }
-    QString error;
-    if (!context_.collection.open(path, recursiveAction_->isChecked(), &error)) {
+    if (QString error; !context_.collection.open(path, recursiveAction_->isChecked(), &error)) {
         reportError(error);
         return false;
     }
@@ -368,15 +368,16 @@ QList<domain::AssetId> BrowserWindow::selectedAssetIds() const {
     for (const QModelIndex& index : selected) {
         sourceIndexes.append(proxy_->mapToSource(index));
     }
-    std::sort(sourceIndexes.begin(), sourceIndexes.end(),
-              [](const QModelIndex& lhs, const QModelIndex& rhs) { return lhs.row() < rhs.row(); });
+    std::ranges::sort(sourceIndexes, [](const QModelIndex& lhs, const QModelIndex& rhs) {
+        return lhs.row() < rhs.row();
+    });
     for (const QModelIndex& index : sourceIndexes) {
         ids.append(model_->idForRow(index.row()));
     }
     return ids;
 }
 
-void BrowserWindow::selectAssets(const QList<domain::AssetId>& ids) {
+void BrowserWindow::selectAssets(const QList<domain::AssetId>& ids) const {
     QItemSelection selection;
     for (const domain::AssetId& id : ids) {
         const int row = model_->rowForId(id);
@@ -507,8 +508,8 @@ void BrowserWindow::reviewFileOperations() {
         return;
     }
 
-    QString error;
-    if (!context_.operations.execute(dialog.plan(), context_.collection.assets(), &error)) {
+    if (QString error;
+        !context_.operations.execute(dialog.plan(), context_.collection.assets(), &error)) {
         reportError(error);
         context_.collection.refresh();
         return;
@@ -570,16 +571,14 @@ void BrowserWindow::offerResume() {
     const application::StoredSession& latest = saved.first();
     switch (resumePrompt_(latest)) {
     case ResumeChoice::Resume: {
-        QString resumeError;
-        if (!resumeSession(latest, &resumeError)) {
+        if (QString resumeError; !resumeSession(latest, &resumeError)) {
             // An unknown or newer state version is reported, never reinterpreted.
             reportError(resumeError);
         }
         break;
     }
     case ResumeChoice::Discard: {
-        QString deleteError;
-        if (!context_.repository.deleteSession(latest.id, &deleteError)) {
+        if (QString deleteError; !context_.repository.deleteSession(latest.id, &deleteError)) {
             reportError(deleteError);
         }
         break;

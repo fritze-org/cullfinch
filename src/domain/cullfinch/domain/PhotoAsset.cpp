@@ -6,18 +6,19 @@
 namespace cullfinch::domain {
 
 QString pairingStateName(PairingState state) {
+    using enum PairingState;
     switch (state) {
-    case PairingState::Provisional:
+    case Provisional:
         return QCoreApplication::translate("cullfinch", "Scanning");
-    case PairingState::Resolved:
+    case Resolved:
         return QCoreApplication::translate("cullfinch", "JPG + RAW");
-    case PairingState::JpegOnly:
+    case JpegOnly:
         return QCoreApplication::translate("cullfinch", "JPG only");
-    case PairingState::RawOnly:
+    case RawOnly:
         return QCoreApplication::translate("cullfinch", "RAW only");
-    case PairingState::Ambiguous:
+    case Ambiguous:
         return QCoreApplication::translate("cullfinch", "Needs resolution");
-    case PairingState::Stale:
+    case Stale:
         break;
     }
     return QCoreApplication::translate("cullfinch", "Changed on disk");
@@ -35,14 +36,15 @@ bool PhotoAsset::isOperable() const {
     if (operationsBlocked) {
         return false;
     }
+    using enum PairingState;
     switch (pairingState) {
-    case PairingState::Resolved:
-    case PairingState::JpegOnly:
-    case PairingState::RawOnly:
+    case Resolved:
+    case JpegOnly:
+    case RawOnly:
         return !members.isEmpty();
-    case PairingState::Provisional:
-    case PairingState::Ambiguous:
-    case PairingState::Stale:
+    case Provisional:
+    case Ambiguous:
+    case Stale:
         break;
     }
     return false;

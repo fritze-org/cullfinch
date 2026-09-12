@@ -246,7 +246,7 @@ void TestBrowserWindow::aSecondInstanceOpensTheCollectionReadOnly() {
     app::CompositionRoot second(options);
     QString error;
     QVERIFY2(second.initialise(&error), qPrintable(error));
-    std::unique_ptr<ui::BrowserWindow> window(second.createBrowserWindow());
+    const std::unique_ptr<ui::BrowserWindow> window = second.createBrowserWindow();
 
     QSignalSpy readOnly(&second.collection(), &application::CollectionController::readOnlyChanged);
     QVERIFY2(window->openDirectory(fixture_->collection().path()),

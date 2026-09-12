@@ -3,7 +3,7 @@
 Reference images for `tst_visual_regression`, the suite that renders the production views
 offscreen and compares the pixels. They are the one place in this repository where committed
 binaries are the point rather than an accident — see
-[decision 0008](../../../docs/decisions/0008-visual-regression-references.md).
+[decision 0009](../../../docs/decisions/0009-visual-regression-references.md).
 
 ## Layout
 

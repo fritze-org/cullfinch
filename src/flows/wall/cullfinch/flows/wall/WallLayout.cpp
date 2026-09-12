@@ -28,7 +28,7 @@ qreal fittedArea(const QSizeF& size, qreal cellWidth, qreal cellHeight) {
 WallLayoutResult WallLayout::compute(const QSizeF& viewport, const QList<LayoutItem>& items,
                                      const WallLayoutOptions& options) {
     WallLayoutResult result;
-    const int count = static_cast<int>(items.size());
+    const auto count = static_cast<int>(items.size());
     if (count == 0 || viewport.width() <= 0.0 || viewport.height() <= 0.0) {
         return result;
     }

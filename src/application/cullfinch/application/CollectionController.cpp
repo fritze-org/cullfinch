@@ -21,31 +21,9 @@ CollectionController::CollectionController(IAssetRepository& repository, IScanSe
 
     connect(&scanner_, &IScanService::scanFinished, this,
             [this](quint64 generation, const domain::AssociationResult& result) {
-                if (generation != generation_) {
-                    return;
+                if (generation == generation_) {
+                    applyScanResult(result);
                 }
-                scanning_ = false;
-
-                domain::PhotoAssetList merged;
-                quint64 newRevision = revision_;
-                QString error;
-                if (!repository_.reconcileAssets(collectionId_, result.assets, &merged,
-                                                 &newRevision, &error)) {
-                    Q_EMIT errorOccurred(tr("The scan results could not be stored: %1").arg(error));
-                    // The in-memory view still reflects the filesystem, but
-                    // marks and drafts stay with what storage last accepted.
-                    assets_ = result.assets;
-                } else {
-                    assets_ = merged;
-                    if (revision_ != newRevision) {
-                        revision_ = newRevision;
-                        Q_EMIT revisionChanged(revision_);
-                    }
-                }
-
-                Q_EMIT diagnosticsChanged(result.diagnostics);
-                Q_EMIT assetsChanged();
-                Q_EMIT scanStateChanged(false);
             });
 
     connect(&scanner_, &IScanService::scanFailed, this,
@@ -62,6 +40,30 @@ CollectionController::CollectionController(IAssetRepository& repository, IScanSe
     // rather than a direct edit of the asset set.
     connect(&scanner_, &IScanService::externalChangeDetected, this,
             [this](const QString&) { refresh(); });
+}
+
+void CollectionController::applyScanResult(const domain::AssociationResult& result) {
+    scanning_ = false;
+
+    domain::PhotoAssetList merged;
+    quint64 newRevision = revision_;
+    if (QString error;
+        !repository_.reconcileAssets(collectionId_, result.assets, &merged, &newRevision, &error)) {
+        Q_EMIT errorOccurred(tr("The scan results could not be stored: %1").arg(error));
+        // The in-memory view still reflects the filesystem, but marks and
+        // drafts stay with what storage last accepted.
+        assets_ = result.assets;
+    } else {
+        assets_ = merged;
+        if (revision_ != newRevision) {
+            revision_ = newRevision;
+            Q_EMIT revisionChanged(revision_);
+        }
+    }
+
+    Q_EMIT diagnosticsChanged(result.diagnostics);
+    Q_EMIT assetsChanged();
+    Q_EMIT scanStateChanged(false);
 }
 
 CollectionController::~CollectionController() {

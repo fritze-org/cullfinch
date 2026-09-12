@@ -1,4 +1,4 @@
-# 0008 — Visual regression references are committed, and keyed by rendering environment
+# 0009 — Visual regression references are committed, and keyed by rendering environment
 
 Status: accepted · Date: 2026-09-12
 

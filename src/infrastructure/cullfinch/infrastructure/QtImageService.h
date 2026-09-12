@@ -59,6 +59,13 @@ public:
 private:
     void deliver(const application::ImageResult& result);
     [[nodiscard]] bool isCancelled(quint64 requestId, quint64 generation) const;
+    /// Decode one request and deliver it. Runs on a pool thread, which is why it
+    /// touches nothing but the mutex-guarded members.
+    void decodeAndDeliver(const application::ImageRequest& request, quint64 requestId,
+                          const QString& key);
+    /// Insert under the byte budget, evicting least-recently-used entries first.
+    /// An image larger than the whole budget is delivered but never cached.
+    void cacheImage(const QString& key, const QImage& image);
 
     QThreadPool pool_;
     QAtomicInteger<quint64> nextRequestId_ = 1;

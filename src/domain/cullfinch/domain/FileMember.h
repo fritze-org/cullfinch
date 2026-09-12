@@ -52,10 +52,7 @@ struct FileFingerprint {
         return sizeBytes == other.sizeBytes && modifiedMsecsUtc == other.modifiedMsecsUtc;
     }
 
-    friend bool operator==(const FileFingerprint& lhs, const FileFingerprint& rhs) noexcept {
-        return lhs.sizeBytes == rhs.sizeBytes && lhs.modifiedMsecsUtc == rhs.modifiedMsecsUtc &&
-               lhs.native == rhs.native;
-    }
+    friend bool operator==(const FileFingerprint& lhs, const FileFingerprint& rhs) = default;
 };
 
 /// One physical file belonging to exactly one photo asset.

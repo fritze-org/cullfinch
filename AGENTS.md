@@ -115,7 +115,7 @@ These were all found the expensive way. Most cost a full CI round.
   redesign from the regression it was meant to catch. Only pixels the suite masks or pins are
   reproducible; adding a case that renders unmasked text makes it font-dependent, which is what
   the per-environment reference directories are for. See
-  [decision 0008](docs/decisions/0008-visual-regression-references.md).
+  [decision 0009](docs/decisions/0009-visual-regression-references.md).
 - **Do not `git add -A`.** Spec revisions get dropped in the working tree as inputs; `docs/design.md`
   is the copy the project keeps.
 

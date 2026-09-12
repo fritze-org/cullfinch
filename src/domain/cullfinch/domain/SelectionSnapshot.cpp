@@ -10,6 +10,31 @@ QString tr(const char* text) {
     return QCoreApplication::translate("cullfinch", text);
 }
 
+/// Why this asset cannot enter a comparison, or an empty string when it can.
+///
+/// Split out of `selectEligible` so the decision is one flat chain rather than a
+/// switch nested inside a branch inside the loop.
+QString exclusionReason(const PhotoAsset& asset) {
+    using enum PairingState;
+    if (asset.disposition == Disposition::Reject) {
+        return tr("Already marked for deletion. Unmark it first to compare it again.");
+    }
+    switch (asset.pairingState) {
+    case Provisional:
+        return tr("Still being scanned; its file group is not final yet.");
+    case RawOnly:
+        return tr("RAW only, with no JPG preview to display.");
+    case Ambiguous:
+        return tr("The file group needs resolution before it can be compared.");
+    case Stale:
+        return tr("The files changed on disk. Refresh the collection first.");
+    case Resolved:
+    case JpegOnly:
+        break;
+    }
+    return asset.isComparable() ? QString() : tr("No displayable preview.");
+}
+
 } // namespace
 
 SelectionSnapshot SelectionSnapshot::freeze(const CollectionId& collectionId,
@@ -40,32 +65,7 @@ SelectionEligibility selectEligible(const CollectionId& collectionId, quint64 co
     accepted.reserve(selected.size());
 
     for (const PhotoAsset& asset : selected) {
-        QString reason;
-        if (asset.disposition == Disposition::Reject) {
-            reason = tr("Already marked for deletion. Unmark it first to compare it again.");
-        } else {
-            switch (asset.pairingState) {
-            case PairingState::Provisional:
-                reason = tr("Still being scanned; its file group is not final yet.");
-                break;
-            case PairingState::RawOnly:
-                reason = tr("RAW only, with no JPG preview to display.");
-                break;
-            case PairingState::Ambiguous:
-                reason = tr("The file group needs resolution before it can be compared.");
-                break;
-            case PairingState::Stale:
-                reason = tr("The files changed on disk. Refresh the collection first.");
-                break;
-            case PairingState::Resolved:
-            case PairingState::JpegOnly:
-                if (!asset.isComparable()) {
-                    reason = tr("No displayable preview.");
-                }
-                break;
-            }
-        }
-
+        const QString reason = exclusionReason(asset);
         if (reason.isEmpty()) {
             accepted.append(asset);
         } else {

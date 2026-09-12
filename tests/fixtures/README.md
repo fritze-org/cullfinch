@@ -2,7 +2,7 @@
 
 This directory holds one thing: the reference images the visual regression suite compares against,
 under [`visual/`](visual/). Those are expected *outputs*, and an expected output a test generates
-is not an expectation — see [decision 0008](../../docs/decisions/0008-visual-regression-references.md).
+is not an expectation — see [decision 0009](../../docs/decisions/0009-visual-regression-references.md).
 
 Every image fixture cullfinch tests *with* is **generated at run time** by
 `tests/support/cullfinch/testsupport/TempCollection`, not committed here. See

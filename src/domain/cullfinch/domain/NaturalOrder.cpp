@@ -35,8 +35,7 @@ int compareDigitRun(const QString& lhs, qsizetype& i, const QString& rhs, qsizet
     if (lhsRun.size() != rhsRun.size()) {
         return lhsRun.size() < rhsRun.size() ? -1 : 1;
     }
-    const int digits = lhsRun.compare(rhsRun);
-    if (digits != 0) {
+    if (const int digits = lhsRun.compare(rhsRun); digits != 0) {
         return digits < 0 ? -1 : 1;
     }
     if (lhsPadding != rhsPadding) {
@@ -56,8 +55,7 @@ int naturalCompare(const QString& lhs, const QString& rhs) {
         const QChar right = rhs.at(j);
 
         if (isDigit(left) && isDigit(right)) {
-            const int numeric = compareDigitRun(lhs, i, rhs, j);
-            if (numeric != 0) {
+            if (const int numeric = compareDigitRun(lhs, i, rhs, j); numeric != 0) {
                 return numeric;
             }
             continue;
@@ -65,9 +63,8 @@ int naturalCompare(const QString& lhs, const QString& rhs) {
 
         // Case-insensitive first, so `a.jpg` and `A.jpg` stay adjacent, then a
         // case-sensitive tiebreak so the ordering is total.
-        const QChar leftFolded = left.toCaseFolded();
-        const QChar rightFolded = right.toCaseFolded();
-        if (leftFolded != rightFolded) {
+        if (const QChar leftFolded = left.toCaseFolded(), rightFolded = right.toCaseFolded();
+            leftFolded != rightFolded) {
             return leftFolded < rightFolded ? -1 : 1;
         }
         if (left != right) {
