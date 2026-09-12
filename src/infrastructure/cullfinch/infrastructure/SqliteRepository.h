@@ -83,7 +83,7 @@ private:
     /// short and its captures explicit.
     bool applyDispositionsLocked(const domain::CollectionId& id, quint64 expectedRevision,
                                  const QList<domain::AssetId>& reject,
-                                 const QList<domain::AssetId>& neutral, QString* error);
+                                 const QList<domain::AssetId>& neutral, QString* error) const;
 
     QString databaseFile_;
     QString connectionName_;

@@ -876,7 +876,8 @@ bool SqliteRepository::reconcileAssets(const CollectionId& id, const PhotoAssetL
 
 bool SqliteRepository::applyDispositionsLocked(const CollectionId& id, quint64 expectedRevision,
                                                const QList<AssetId>& reject,
-                                               const QList<AssetId>& neutral, QString* error) {
+                                               const QList<AssetId>& neutral,
+                                               QString* error) const {
     if (const quint64 actual = collectionRevision(id, nullptr); actual != expectedRevision) {
         report(error, tr("The collection changed while you were working (revision %1, "
                          "expected %2). Refresh and try again.")
