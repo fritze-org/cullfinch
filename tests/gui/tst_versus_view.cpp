@@ -179,6 +179,14 @@ void TestVersusView::theCompletedScreenShowsTheSurvivingPhoto() {
     QVERIFY(survivor != nullptr);
     QVERIFY(survivor->isVisible());
 
+    // Re-rendering the same completed state must leave the pane alone: the
+    // session reports state more than once, and re-presenting the survivor
+    // would restart its decode and blank the pane it is being shown in.
+    view_->setState(session.state(), session.summary());
+    QVERIFY(left->isReady());
+    QCOMPARE(left->presentation().id, match.right);
+    QVERIFY(left->isSelectionHighlighted());
+
     // Clicking the survivor decides nothing; Finish and Undo stay available.
     QTest::mouseClick(left, Qt::LeftButton, Qt::NoModifier, left->rect().center());
     QCoreApplication::processEvents();

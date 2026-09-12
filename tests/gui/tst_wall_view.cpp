@@ -374,6 +374,14 @@ void TestWallView::aTileCreatedBeforeItsPresentationPicksItUp() {
     QVERIFY(!tile->presentation().previewMemberId.isValid());
     QVERIFY(!tile->isReady());
 
+    // The same state again leaves it as it is: there is still nothing to fill
+    // it in with, and a tile is never re-presented with what it already has.
+    view_->surface()->setCandidates(positions, presentations,
+                                    view_->surface()->layoutRevision() + 1);
+    QCoreApplication::processEvents();
+    QVERIFY2(view_->surface()->tileFor(late) == tile, "the waiting tile was replaced");
+    QVERIFY(!tile->presentation().previewMemberId.isValid());
+
     // When they arrive, the tile picks its photo up rather than staying blank.
     for (const domain::PhotoAsset& asset : fixture_->root().collection().assets()) {
         if (asset.id == late) {
