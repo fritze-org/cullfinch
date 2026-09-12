@@ -54,9 +54,6 @@ private:
     /// Remember where tiles that are about to leave used to be, so a repeat
     /// click at those coordinates does not hit whatever moves in.
     void recordVanishedTiles(const QList<flows::wall::WallSlot>& positions);
-    /// True while any wall position still refers to this candidate, whether it
-    /// survives there or is held as an eliminated placeholder.
-    [[nodiscard]] bool isOnTheWall(const domain::AssetId& id) const;
     /// Drop the tiles whose candidates are no longer on the wall.
     void removeDepartedTiles();
     /// Create the tile for one candidate and wire its gestures.

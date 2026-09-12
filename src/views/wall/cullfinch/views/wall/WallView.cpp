@@ -17,6 +17,13 @@ QString tr(const char* text) {
     return QCoreApplication::translate("cullfinch", text);
 }
 
+/// True while any of these wall positions refers to this candidate, whether it
+/// survives there or is held as an eliminated placeholder.
+bool holdsCandidate(const QList<flows::wall::WallSlot>& positions, const domain::AssetId& id) {
+    return std::ranges::any_of(positions,
+                               [&id](const flows::wall::WallSlot& slot) { return slot.id == id; });
+}
+
 } // namespace
 
 WallSurface::WallSurface(application::IImageService& images, QWidget* parent)
@@ -36,18 +43,11 @@ QList<domain::AssetId> WallSurface::order() const {
     return candidates;
 }
 
-bool WallSurface::isOnTheWall(const domain::AssetId& id) const {
-    return std::ranges::any_of(positions_,
-                               [&id](const flows::wall::WallSlot& slot) { return slot.id == id; });
-}
-
 void WallSurface::recordVanishedTiles(const QList<flows::wall::WallSlot>& positions) {
     for (const flows::wall::WallSlot& slot : positions_) {
-        const bool stays = std::ranges::any_of(
-            positions, [&slot](const flows::wall::WallSlot& next) { return next.id == slot.id; });
-        if (!slot.id.isValid() || stays) {
-            // An eliminated candidate whose cell is being held has not
-            // vanished: its tile is still there, marked as eliminated.
+        // An eliminated candidate whose cell is being held has not vanished:
+        // its tile is still there, marked as eliminated.
+        if (!slot.id.isValid() || holdsCandidate(positions, slot.id)) {
             continue;
         }
         if (const ui::ImageCanvas* tile = tiles_.value(slot.id, nullptr); tile != nullptr) {
@@ -59,7 +59,7 @@ void WallSurface::recordVanishedTiles(const QList<flows::wall::WallSlot>& positi
 void WallSurface::removeDepartedTiles() {
     const QList<domain::AssetId> existing = tiles_.keys();
     for (const domain::AssetId& id : existing) {
-        if (!isOnTheWall(id)) {
+        if (!holdsCandidate(positions_, id)) {
             tiles_.take(id)->deleteLater();
         }
     }
