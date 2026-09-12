@@ -1,6 +1,7 @@
 // SPDX-License-Identifier: GPL-3.0-or-later
 #include <DesktopIntegration.h>
 
+#include <QDir>
 #include <QIcon>
 #include <QTest>
 
@@ -108,20 +109,26 @@ void TestDesktopIntegration::portalPreferenceIsAppliedOnlyWhereNothingIsConfigur
 }
 
 void TestDesktopIntegration::anAppImageMountIsNotOursToSearch() {
-    QVERIFY(isUnreachableIconThemePath(QStringLiteral("/tmp/.mount_kittyAbc123/share/icons")));
-    // Only that prefix. A directory a user genuinely put in /tmp, and one that
-    // merely contains the mount point further along, both stay.
+    // The temporary directory this process would use, which is where an
+    // AppImage launched in the same environment mounted itself -- not a
+    // hardcoded /tmp, which TMPDIR overrides and macOS never uses.
+    const QString temporary = QDir::tempPath();
+
+    QVERIFY(isUnreachableIconThemePath(temporary + QStringLiteral("/.mount_kittyAbc/share/icons")));
+    // Only that. A directory a user genuinely put in the temporary directory,
+    // and one that merely contains the mount point further along, both stay.
     QVERIFY(!isUnreachableIconThemePath(QStringLiteral("/usr/share/icons")));
-    QVERIFY(!isUnreachableIconThemePath(QStringLiteral("/tmp/icons")));
-    QVERIFY(!isUnreachableIconThemePath(QStringLiteral("/home/me/tmp/.mount_x/share/icons")));
+    QVERIFY(!isUnreachableIconThemePath(temporary + QStringLiteral("/icons")));
+    QVERIFY(!isUnreachableIconThemePath(QStringLiteral("/home/me") + temporary +
+                                        QStringLiteral("/.mount_x/share/icons")));
     QVERIFY(!isUnreachableIconThemePath(QString()));
 }
 
 void TestDesktopIntegration::reachablePathsKeepTheirOrderAndNothingElse() {
-    const QStringList searchPaths{QStringLiteral("/tmp/.mount_termAbc/share/icons"),
-                                  QStringLiteral("/home/me/.local/share/icons"),
-                                  QStringLiteral("/usr/share/icons"),
-                                  QStringLiteral("/tmp/.mount_termAbc/share/pixmaps")};
+    const QString mount = QDir::tempPath() + QStringLiteral("/.mount_termAbc/share/");
+    const QStringList searchPaths{
+        mount + QStringLiteral("icons"), QStringLiteral("/home/me/.local/share/icons"),
+        QStringLiteral("/usr/share/icons"), mount + QStringLiteral("pixmaps")};
 
     QCOMPARE(reachableIconThemePaths(searchPaths),
              QStringList({QStringLiteral("/home/me/.local/share/icons"),
@@ -140,7 +147,7 @@ void TestDesktopIntegration::pruningLeavesTheSearchPathsWithoutTheMount() {
     const QStringList kept{QStringLiteral("/usr/share/icons")};
     {
         const ScopedIconThemePaths paths{
-            QStringList({QStringLiteral("/tmp/.mount_termAbc/share/icons")}) + kept};
+            QStringList({QDir::tempPath() + QStringLiteral("/.mount_termAbc/share/icons")}) + kept};
         pruneUnreachableIconThemePaths();
         QCOMPARE(QIcon::themeSearchPaths(), kept);
     }

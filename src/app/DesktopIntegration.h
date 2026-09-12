@@ -44,12 +44,13 @@ void preferPortalDialogs();
 
 /// Whether an icon theme search path belongs to another program's AppImage.
 ///
-/// AppImages mount themselves under /tmp/.mount_<name><random> and some put
-/// that mount at the front of XDG_DATA_DIRS. Every GUI program started from
-/// such an AppImage -- a terminal emulator, most often -- inherits it, and Qt
-/// then treats the bundle's icon theme as a system theme. A bundle that ships
-/// eleven icons behind an index.theme declaring 649 directories turns a single
-/// icon miss into 649 probes across a compressed FUSE mount.
+/// AppImages mount themselves at <temporary directory>/.mount_<name><random>,
+/// and some put that mount at the front of XDG_DATA_DIRS. Every GUI program
+/// started from such an AppImage -- a terminal emulator, most often --
+/// inherits it, and Qt then treats the bundle's icon theme as a system theme.
+/// A bundle that ships eleven icons behind an index.theme declaring 649
+/// directories turns a single icon miss into 649 probes across a compressed
+/// FUSE mount.
 ///
 /// Such a path is never ours to search: the icons in it belong to the program
 /// holding the mount open, and the mount disappears when that program exits.

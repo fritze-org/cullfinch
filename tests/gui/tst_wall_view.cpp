@@ -96,7 +96,7 @@ void TestWallView::startWallOn(int count) {
 
     shell_ = fixture_->window()->activeShell();
     QVERIFY(shell_ != nullptr);
-    std::ignore = guitests::settleWindowSize(shell_, kWallWindowSize);
+    QVERIFY(guitests::settleWindowSize(shell_, kWallWindowSize));
     view_ = dynamic_cast<views::wall::WallView*>(shell_->view());
     QVERIFY(view_ != nullptr);
 
@@ -243,7 +243,7 @@ void TestWallView::fixedPositionsKeepSurvivorsInPlaceUntilCompact() {
     // Spatial memory is preserved: the survivor did not move. Both readings
     // have to be taken at the same surface size, so a window manager that
     // revised it in between is undone first; it would move every tile.
-    std::ignore = guitests::settleWindowSize(shell_, kWallWindowSize);
+    QVERIFY(guitests::settleWindowSize(shell_, kWallWindowSize));
     QCOMPARE(view_->surface()->tileFor(neighbour)->geometry(), before);
     QVERIFY(compact->isEnabled());
 
@@ -272,7 +272,7 @@ void TestWallView::undoReinstatesThePhotoAndItsPosition() {
 
     // The same photo, in the same deterministic position -- read at the size
     // the first reading was taken at, for the reason above.
-    std::ignore = guitests::settleWindowSize(shell_, kWallWindowSize);
+    QVERIFY(guitests::settleWindowSize(shell_, kWallWindowSize));
     QCOMPARE(view_->surface()->order(), before);
     QCOMPARE(view_->surface()->tileFor(before.at(2))->geometry(), victimGeometry);
 }

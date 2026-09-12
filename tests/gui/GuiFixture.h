@@ -130,13 +130,21 @@ inline void settleWindow(QWidget* window) {
 /// tile geometry read before the revert, compared after it.
 ///
 /// So the request is repeated whenever it is taken back, and accepted only
-/// once it has held still. Bounded and never fatal, like settleWindow(): a
-/// window manager is entitled to refuse a size, and a caller that cares can
-/// look at the result.
+/// once it has held still. Bounded, and in itself never fatal, like
+/// settleWindow(): a window manager is entitled to refuse a size. A caller
+/// whose measurements only mean something at that size should assert the
+/// result, as the wall suite does -- "the window never settled" is a far
+/// better failure than two geometries that disagree for no stated reason.
 inline bool settleWindowSize(QWidget* window, const QSize& size, int timeoutMs = 5000) {
     if (window == nullptr) {
         return false;
     }
+
+    // One budget for the whole operation: waiting for exposure is part of it,
+    // not extra time on top of it.
+    QElapsedTimer overall;
+    overall.start();
+
     window->resize(size);
     std::ignore = QTest::qWaitForWindowExposed(window, timeoutMs);
 
@@ -144,9 +152,7 @@ inline bool settleWindowSize(QWidget* window, const QSize& size, int timeoutMs =
     // which is what this is buying; the dozen calls the wall suite makes cost
     // it a few seconds in total.
     const int holdMs = 250;
-    QElapsedTimer overall;
     QElapsedTimer held;
-    overall.start();
     held.start();
     while (overall.elapsed() < timeoutMs) {
         if (window->size() != size) {
