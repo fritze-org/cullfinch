@@ -1,4 +1,4 @@
-# 0004 — Image fixtures are generated at run time
+# 0004 — Input image fixtures are generated at run time
 
 Status: accepted · Date: 2026-09-10
 

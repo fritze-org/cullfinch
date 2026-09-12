@@ -97,6 +97,7 @@ jobs:
             display: wayland
             session: tests/support/with-wayland.sh
             package: true
+            visual: true
           # Sanitizers cover the application, not the shipped artefact: the
           # package that ships is not instrumented, so a smoke test against a
           # sanitized binary would prove nothing about it.
@@ -106,6 +107,7 @@ jobs:
             display: wayland
             session: tests/support/with-wayland.sh
             package: false
+            visual: false
           # Secondary compatibility: the XCB path must keep working, but it is
           # never a substitute for the Wayland job above.
           - name: Linux X11 compatibility
@@ -114,18 +116,21 @@ jobs:
             display: xcb
             session: tests/support/with-x11.sh
             package: true
+            visual: false
           - name: macOS Apple Silicon
             runner: macos-15
             preset: ci-macos
             display: cocoa
             session: ''
             package: true
+            visual: false
           - name: macOS Intel
             runner: macos-15-intel
             preset: ci-macos
             display: cocoa
             session: ''
             package: true
+            visual: false
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
 
@@ -195,6 +200,25 @@ jobs:
         run: |
           ${{ matrix.session }} ctest --preset ${{ matrix.preset }} --label-regex gui \
             --output-junit "${{ github.workspace }}/ctest-gui.xml"
+
+      # Pixel comparisons need a backend that composes the same way every
+      # time, so this suite pins QT_QPA_PLATFORM=offscreen itself rather than
+      # inheriting the job's. It runs on the primary Linux job alone: a
+      # reference set belongs to one rendering environment, and recording one
+      # per runner image would cost more than it proves. Differences are
+      # written to the directory the session helpers already publish.
+      - name: Run visual regression tests
+        if: matrix.visual
+        env:
+          CULLFINCH_ARTIFACT_DIR: ${{ github.workspace }}/session-artifacts
+          # Without this, an environment whose digest is not recorded skips
+          # every case and the job passes having compared nothing. A gating
+          # job would rather be told: a runner image that changes its fonts
+          # fails here instead of quietly retiring the suite.
+          CULLFINCH_REQUIRE_VISUAL_REFERENCES: '1'
+        run: |
+          ctest --preset ${{ matrix.preset }} --label-regex visual \
+            --output-junit "${{ github.workspace }}/ctest-visual.xml"
 
       - name: Install into a staging prefix
         if: matrix.package

@@ -64,6 +64,7 @@ failure: that is somebody adding a case without recording it.
   cullfinch's own widget rendering and nothing beyond it: it says nothing about desktop
   composition, window decorations or physical output colour, which is what the compositor and
   output smoke checks are for.
-- **Gap:** a runner image that changes its fonts changes the digest, and the font-dependent cases
-  then skip until somebody records the new environment. `CULLFINCH_REQUIRE_VISUAL_REFERENCES=1`
-  turns that skip into a failure for a job that would rather be told.
+- A runner image that changes its fonts changes the digest, and the cases keyed to it would then
+  skip — a gating job passing having compared nothing. The CI step therefore sets
+  `CULLFINCH_REQUIRE_VISUAL_REFERENCES=1`, so that turns into a failure and somebody re-records
+  rather than the suite quietly retiring. A developer's machine, which is not gating, still skips.

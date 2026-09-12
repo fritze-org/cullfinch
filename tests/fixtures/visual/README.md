@@ -55,5 +55,5 @@ the diff; everything else is washed out so the difference reads as "here, in thi
 
 | Variable | Effect |
 |---|---|
-| `CULLFINCH_REQUIRE_VISUAL_REFERENCES` | An environment with no recorded references fails instead of skipping |
+| `CULLFINCH_REQUIRE_VISUAL_REFERENCES` | An environment with no recorded references fails instead of skipping. Set on the CI step, so a runner image that changes its fonts fails here rather than passing having compared nothing |
 | `CULLFINCH_VISUAL_REFERENCE_DIR` | Read references from somewhere other than this directory |

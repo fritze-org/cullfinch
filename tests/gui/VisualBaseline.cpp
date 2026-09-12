@@ -25,7 +25,6 @@
 
 #include <algorithm>
 #include <cstdlib>
-#include <tuple>
 
 namespace cullfinch::guitests {
 namespace {
@@ -225,6 +224,14 @@ bool VisualBaseline::write(const QString& path, const QImage& image, QString* er
     return true;
 }
 
+QString VisualBaseline::saveArtifact(const QString& path, const QImage& image) const {
+    QString error;
+    if (write(path, image, &error)) {
+        return QStringLiteral("wrote %1").arg(path);
+    }
+    return QStringLiteral("could not write %1 (%2)").arg(path, error);
+}
+
 void VisualBaseline::writeEnvironmentReport() const {
     // Recorded next to the evidence either way: a reference that turns out to
     // have been taken somewhere unexpected is otherwise very hard to notice.
@@ -254,16 +261,15 @@ VisualBaseline::Outcome VisualBaseline::record(const QString& caseName,
 VisualBaseline::Outcome VisualBaseline::missing(const QString& caseName, const QString& directory,
                                                 const QString& referencePath, const QImage& actual,
                                                 QString* report) const {
-    QString error;
     const QString candidate =
         artifactRoot_ + QLatin1Char('/') + caseName + QStringLiteral("-candidate.png");
-    std::ignore = write(candidate, actual, &error);
 
-    *report = QStringLiteral("%1: no reference at %2 for this rendering environment\n"
-                             "%3\n"
-                             "candidate written to %4\n"
-                             "record it with CULLFINCH_UPDATE_VISUAL_REFERENCES=1")
-                  .arg(caseName, referencePath, environment_.report, candidate);
+    *report =
+        QStringLiteral("%1: no reference at %2 for this rendering environment\n"
+                       "%3\n"
+                       "%4\n"
+                       "record it with CULLFINCH_UPDATE_VISUAL_REFERENCES=1")
+            .arg(caseName, referencePath, environment_.report, saveArtifact(candidate, actual));
 
     // A directory that exists but is missing this case is a suite somebody
     // extended without recording the new rendering: that is a failure. A
@@ -279,7 +285,6 @@ VisualBaseline::Outcome VisualBaseline::verify(const QString& caseName,
                                                QString* report) const {
     const QImage reference = QImage(referencePath).convertToFormat(QImage::Format_RGB32);
     const QString stem = artifactRoot_ + QLatin1Char('/') + caseName;
-    QString error;
 
     if (reference.isNull()) {
         *report = QStringLiteral("%1: %2 is not a readable image").arg(caseName, referencePath);
@@ -287,13 +292,13 @@ VisualBaseline::Outcome VisualBaseline::verify(const QString& caseName,
     }
 
     if (reference.size() != actual.size()) {
-        std::ignore = write(stem + QStringLiteral("-actual.png"), actual, &error);
-        *report = QStringLiteral("%1: rendered %2x%3, reference is %4x%5")
+        *report = QStringLiteral("%1: rendered %2x%3, reference is %4x%5\n%6")
                       .arg(caseName)
                       .arg(actual.width())
                       .arg(actual.height())
                       .arg(reference.width())
-                      .arg(reference.height());
+                      .arg(reference.height())
+                      .arg(saveArtifact(stem + QStringLiteral("-actual.png"), actual));
         return Outcome::Differed;
     }
 
@@ -310,17 +315,16 @@ VisualBaseline::Outcome VisualBaseline::verify(const QString& caseName,
         return Outcome::Matched;
     }
 
-    std::ignore = write(stem + QStringLiteral("-actual.png"), actual, &error);
-    std::ignore = write(stem + QStringLiteral("-expected.png"), reference, &error);
-    std::ignore = write(stem + QStringLiteral("-diff.png"), difference.map, &error);
-    *report = QStringLiteral("%1: %2 of %3 pixels differ by more than %4 (worst %5); "
-                             "images written to %6-*.png")
+    *report = QStringLiteral("%1: %2 of %3 pixels differ by more than %4 (worst %5)\n"
+                             "%6\n%7\n%8")
                   .arg(caseName)
                   .arg(difference.differing)
                   .arg(total)
                   .arg(tolerance.channelDelta)
                   .arg(difference.worst)
-                  .arg(stem);
+                  .arg(saveArtifact(stem + QStringLiteral("-actual.png"), actual),
+                       saveArtifact(stem + QStringLiteral("-expected.png"), reference),
+                       saveArtifact(stem + QStringLiteral("-diff.png"), difference.map));
     return Outcome::Differed;
 }
 

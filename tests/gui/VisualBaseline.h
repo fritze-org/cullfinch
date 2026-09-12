@@ -122,6 +122,9 @@ private:
 
     [[nodiscard]] QString referenceDirectory(VisualScope scope) const;
     [[nodiscard]] bool write(const QString& path, const QImage& image, QString* error) const;
+    /// Write one piece of evidence and say what actually happened, so a
+    /// report never sends somebody looking for a file that is not there.
+    [[nodiscard]] QString saveArtifact(const QString& path, const QImage& image) const;
     void writeEnvironmentReport() const;
 
     [[nodiscard]] Outcome record(const QString& caseName, const QString& referencePath,
