@@ -27,7 +27,7 @@ class IScanService : public QObject {
     Q_OBJECT
 
 public:
-    explicit IScanService(QObject* parent = nullptr) : QObject(parent) {}
+    using QObject::QObject;
 
     virtual void requestScan(const ScanRequest& request) = 0;
     /// Stop watching and abandon in-flight work for every generation.
@@ -108,6 +108,10 @@ signals:
 
 private:
     void startScan();
+    /// Reconcile a finished scan into storage and republish the asset set. Not
+    /// inline in the `scanFinished` connection: it is the longest step in the
+    /// controller and reads better with a name.
+    void applyScanResult(const domain::AssociationResult& result);
 
     IAssetRepository& repository_;
     IScanService& scanner_;

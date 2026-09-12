@@ -54,7 +54,7 @@ public:
     bool initialise(QString* error);
 
     /// Owned by the caller after this call; created on first use.
-    [[nodiscard]] ui::BrowserWindow* createBrowserWindow();
+    [[nodiscard]] std::unique_ptr<ui::BrowserWindow> createBrowserWindow();
 
     [[nodiscard]] application::FlowRegistry& flows() { return flows_; }
     [[nodiscard]] ui::FlowViewRegistry& flowViews() { return flowViews_; }

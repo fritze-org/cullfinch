@@ -1,6 +1,8 @@
 // SPDX-License-Identifier: GPL-3.0-or-later
 #include <cullfinch/application/FlowRegistry.h>
 
+#include <algorithm>
+
 namespace cullfinch::application {
 
 bool FlowRegistry::registerFlow(const domain::FlowDescriptor& descriptor, FlowFactory factory) {
@@ -15,12 +17,8 @@ bool FlowRegistry::registerFlow(const domain::FlowDescriptor& descriptor, FlowFa
 }
 
 bool FlowRegistry::contains(const QString& flowId) const {
-    for (const Entry& entry : entries_) {
-        if (entry.descriptor.id == flowId) {
-            return true;
-        }
-    }
-    return false;
+    return std::ranges::any_of(
+        entries_, [&flowId](const Entry& entry) { return entry.descriptor.id == flowId; });
 }
 
 QList<domain::FlowDescriptor> FlowRegistry::descriptors() const {

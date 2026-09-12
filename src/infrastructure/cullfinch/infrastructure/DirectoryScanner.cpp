@@ -29,8 +29,8 @@ domain::NativeIdentity nativeIdentityOf(const QFileInfo& info) {
     // lstat, not stat: a symlink reports its own identity so it is never
     // mistaken for the file it points at.
     struct stat status = {};
-    const QByteArray encoded = QFile::encodeName(info.absoluteFilePath());
-    if (::lstat(encoded.constData(), &status) == 0) {
+    if (const QByteArray encoded = QFile::encodeName(info.absoluteFilePath());
+        ::lstat(encoded.constData(), &status) == 0) {
         identity.device = static_cast<quint64>(status.st_dev);
         identity.fileId = static_cast<quint64>(status.st_ino);
         identity.known = true;
@@ -183,8 +183,8 @@ void DirectoryScanner::rewatch(const QString& rootPath, bool recursive) {
         return;
     }
 
-    const QStringList watchedDirectories = watcher_.directories();
-    if (!watchedDirectories.isEmpty()) {
+    if (const QStringList watchedDirectories = watcher_.directories();
+        !watchedDirectories.isEmpty()) {
         watcher_.removePaths(watchedDirectories);
     }
 
@@ -205,8 +205,7 @@ void DirectoryScanner::setWatchEnabled(bool enabled) {
     watchEnabled_ = enabled;
     if (!enabled) {
         debounce_.stop();
-        const QStringList directories = watcher_.directories();
-        if (!directories.isEmpty()) {
+        if (const QStringList directories = watcher_.directories(); !directories.isEmpty()) {
             watcher_.removePaths(directories);
         }
         return;

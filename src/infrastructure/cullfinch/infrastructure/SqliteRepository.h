@@ -67,8 +67,6 @@ public:
 
 private:
     bool migrate(QString* error);
-    [[nodiscard]] bool bumpRevision(const domain::CollectionId& id, quint64* newRevision,
-                                    QString* error);
 
     QString databaseFile_;
     QString connectionName_;

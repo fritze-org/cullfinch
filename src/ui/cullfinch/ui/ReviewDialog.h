@@ -17,7 +17,7 @@ class ReviewDialog : public QDialog {
     Q_OBJECT
 
 public:
-    ReviewDialog(const domain::PlanningResult& planning, QWidget* parent = nullptr);
+    explicit ReviewDialog(const domain::PlanningResult& planning, QWidget* parent = nullptr);
 
     [[nodiscard]] bool executionRequested() const { return executionRequested_; }
     [[nodiscard]] const domain::OperationPlan& plan() const { return planning_.plan; }

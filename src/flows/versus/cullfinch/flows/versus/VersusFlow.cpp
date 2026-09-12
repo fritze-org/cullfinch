@@ -258,7 +258,7 @@ FlowState VersusFlow::initialise(const SelectionSnapshot& selection,
     Bracket bracket;
     bracket.valid = true;
     bracket.input = selection.orderedAssetIds;
-    const int candidates = static_cast<int>(selection.orderedAssetIds.size());
+    const auto candidates = static_cast<int>(selection.orderedAssetIds.size());
     bracket.bracketSize = nextPowerOfTwo(std::max(candidates, 1));
 
     // Standard seeding: candidate i takes the bracket position holding seed
@@ -399,7 +399,7 @@ QList<AssetId> VersusFlow::bracketSlots(const FlowState& state) {
 }
 
 QList<int> VersusFlow::seedOrder(int bracketSize) {
-    QList<int> order{1};
+    QList order{1};
     while (order.size() < bracketSize) {
         const int total = static_cast<int>(order.size()) * 2;
         QList<int> expanded;

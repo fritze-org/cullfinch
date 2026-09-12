@@ -103,14 +103,21 @@ private:
     QString caption_;
 
     bool inspecting_ = false;
-    /// True between press and release of a gesture that could still eliminate.
-    /// Losing focus, changing scale or being resized disarms it: a decision
-    /// must come from a gesture the user completed on the photo they were
-    /// looking at, not one interrupted by the desktop.
-    bool armed_ = false;
-    bool dragging_ = false;
-    bool dragMoved_ = false;
-    QPoint dragOrigin_;
+
+    /// The pointer gesture in progress, if any.
+    ///
+    /// `armed` is true between press and release of a gesture that could still
+    /// eliminate. Losing focus, changing scale or being resized disarms it: a
+    /// decision must come from a gesture the user completed on the photo they
+    /// were looking at, not one interrupted by the desktop.
+    struct Gesture {
+        bool armed = false;
+        bool dragging = false;
+        bool moved = false;
+        QPoint origin;
+    };
+    Gesture gesture_;
+
     QPointF centre_{0.5, 0.5};
     qreal zoom_ = 1.0;
 

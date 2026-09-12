@@ -16,8 +16,7 @@ QString tr(const char* text) {
 
 } // namespace
 
-VersusView::VersusView(application::IImageService& images) {
-    root_ = new QWidget;
+VersusView::VersusView(application::IImageService& images) : root_(new QWidget) {
     root_->setObjectName(QStringLiteral("versusView"));
     root_->setFocusPolicy(Qt::StrongFocus);
 
@@ -78,10 +77,10 @@ VersusView::VersusView(application::IImageService& images) {
         right_, &ui::ImageCanvas::viewChanged, root_,
         [this](const QPointF& centre, qreal zoom) { applyLinkedView(centre, zoom, right_); });
 
-    auto* keepLeftShortcut = new QShortcut(QKeySequence(Qt::Key_Left), root_);
+    const auto* keepLeftShortcut = new QShortcut(QKeySequence(Qt::Key_Left), root_);
     QObject::connect(keepLeftShortcut, &QShortcut::activated, root_,
                      [this]() { eliminate(rightId_); });
-    auto* keepRightShortcut = new QShortcut(QKeySequence(Qt::Key_Right), root_);
+    const auto* keepRightShortcut = new QShortcut(QKeySequence(Qt::Key_Right), root_);
     QObject::connect(keepRightShortcut, &QShortcut::activated, root_,
                      [this]() { eliminate(leftId_); });
 }
@@ -98,7 +97,7 @@ void VersusView::setPresentations(const ui::AssetPresentationMap& presentations)
     rightId_ = domain::AssetId();
 }
 
-void VersusView::applyLinkedView(const QPointF& centre, qreal zoom, ui::ImageCanvas* source) {
+void VersusView::applyLinkedView(const QPointF& centre, qreal zoom, const ui::ImageCanvas* source) {
     if (!linkViews_->isChecked() || applyingLinkedView_) {
         return;
     }
@@ -168,7 +167,7 @@ void VersusView::updateDecisionAvailability() {
     }
 }
 
-void VersusView::eliminate(const domain::AssetId& id) {
+void VersusView::eliminate(const domain::AssetId& id) const {
     if (!sink_ || !id.isValid() || complete_ || matchNode_ < 0) {
         return;
     }
