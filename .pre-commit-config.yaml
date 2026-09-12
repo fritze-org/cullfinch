@@ -22,11 +22,11 @@ exclude: |
 
 repos:
   # ---------------------------------------------------------------- C++ format
-  # Track the same LLVM release line as CULLFINCH_LLVM_VERSION in
-  # .github/workflows/ci.yml, the single source of truth for the LLVM release
-  # this project's clang-tidy and sanitizer jobs are pinned to. That pin can
-  # briefly run ahead of this rev: apt.llvm.org serves a continuous branch
-  # snapshot, while this hook only mirrors LLVM's tagged releases.
+  # Track the same LLVM major as CULLFINCH_LLVM_MAJOR in
+  # .github/workflows/ci.yml, which also pins the exact apt.llvm.org and
+  # Homebrew releases the clang-tidy and sanitizer jobs use. Those two run on
+  # independent release schedules and, mirroring only tagged releases, this
+  # hook will not always agree with either on the patch digit.
   - repo: https://github.com/pre-commit/mirrors-clang-format
     rev: e2b496dc2bd8340c2524cb9a2d2a943cde1bb6df  # frozen: v23.1.1
     hooks:

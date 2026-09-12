@@ -28,14 +28,20 @@ env:
   VCPKG_DISABLE_METRICS: '1'
   CULLFINCH_VCPKG_CACHE: '${{ github.workspace }}/.vcpkg'
   # Single source of truth for the LLVM toolchain used by the clang-tidy and
-  # sanitizer jobs: the Linux apt.llvm.org pin, the macOS llvm@N formula, and
-  # the sanitizer job's compiler all resolve from this exact release, and the
-  # analysis jobs assert the installed clang-tidy matches it. Bump this in
-  # step with the clang-format rev pinned in .pre-commit-config.yaml when a
-  # new LLVM release ships -- apt.llvm.org's branch snapshot can run ahead of
-  # the latest tagged release clang-format mirrors, so the two need not
-  # always agree on the patch digit.
-  CULLFINCH_LLVM_VERSION: '23.1.2'
+  # sanitizer jobs. apt.llvm.org (Linux) and Homebrew's llvm@N formula
+  # (macOS) release patch versions on their own, unsynchronised schedules --
+  # in practice they are essentially never at the same point release at the
+  # same time -- so each installation channel gets its own exact pin here,
+  # sharing only the major version. The analysis jobs assert the installed
+  # clang-tidy matches the pin for their own platform, so a channel that
+  # silently moved to a new point release fails loudly instead of quietly
+  # changing which diagnostics fire. Bump these when a new LLVM release
+  # ships; the clang-format rev in .pre-commit-config.yaml tracks the same
+  # major but, mirroring only tagged releases, will not always agree with
+  # either channel on the patch digit.
+  CULLFINCH_LLVM_MAJOR: '23'
+  CULLFINCH_LLVM_VERSION_APT: '23.1.2'
+  CULLFINCH_LLVM_VERSION_BREW: '23.1.0'
 
 jobs:
   pre-commit:
@@ -148,19 +154,18 @@ jobs:
       - name: Install the pinned LLVM (Linux sanitizers job)
         if: matrix.preset == 'ci-linux-asan'
         run: |
-          llvm_major="${CULLFINCH_LLVM_VERSION%%.*}"
           curl -fsSL --proto '=https' --tlsv1.2 -o /tmp/llvm.sh https://apt.llvm.org/llvm.sh
           chmod +x /tmp/llvm.sh
-          sudo /tmp/llvm.sh "${llvm_major}"
-          clang="$(command -v "clang-${llvm_major}" || true)"
-          clangxx="$(command -v "clang++-${llvm_major}" || true)"
+          sudo /tmp/llvm.sh "${CULLFINCH_LLVM_MAJOR}"
+          clang="$(command -v "clang-${CULLFINCH_LLVM_MAJOR}" || true)"
+          clangxx="$(command -v "clang++-${CULLFINCH_LLVM_MAJOR}" || true)"
           if [ -z "${clang}" ] || [ -z "${clangxx}" ]; then
-            echo "apt.llvm.org did not provide clang-${llvm_major}/clang++-${llvm_major}" >&2
+            echo "apt.llvm.org did not provide clang-${CULLFINCH_LLVM_MAJOR}/clang++-${CULLFINCH_LLVM_MAJOR}" >&2
             exit 1
           fi
           installed_version="$("${clang}" --version | grep -oE '[0-9]+\.[0-9]+\.[0-9]+' | head -1)"
-          if [ "${installed_version}" != "${CULLFINCH_LLVM_VERSION}" ]; then
-            echo "clang-${llvm_major} installed ${installed_version}, pinned to ${CULLFINCH_LLVM_VERSION}; bump CULLFINCH_LLVM_VERSION or investigate the runner image" >&2
+          if [ "${installed_version}" != "${CULLFINCH_LLVM_VERSION_APT}" ]; then
+            echo "clang-${CULLFINCH_LLVM_MAJOR} installed ${installed_version}, pinned to ${CULLFINCH_LLVM_VERSION_APT}; bump CULLFINCH_LLVM_VERSION_APT or investigate the runner image" >&2
             exit 1
           fi
           {
@@ -338,30 +343,31 @@ jobs:
       # not ship clang-tidy, and mixing versions changes the diagnostics.
       # ubuntu-24.04 ships clang-tidy 18, below the supported minimum, and the
       # version guard rightly refuses it. apt.llvm.org is the documented
-      # provisioning path for a pinned toolchain; CULLFINCH_LLVM_VERSION also
-      # matches the clang-format hook and Homebrew's llvm@N on macOS, so one
-      # LLVM release produces every diagnostic this project enforces.
+      # provisioning path for a pinned toolchain; CULLFINCH_LLVM_MAJOR also
+      # matches the clang-format hook and Homebrew's llvm@N on macOS, so the
+      # same LLVM release line produces every diagnostic this project
+      # enforces (the "Verify" step below checks the exact patch per
+      # platform, since apt.llvm.org and Homebrew do not release in lockstep).
       - name: Install the pinned LLVM (Linux)
         if: runner.os == 'Linux'
         run: |
-          llvm_major="${CULLFINCH_LLVM_VERSION%%.*}"
           curl -fsSL --proto '=https' --tlsv1.2 -o /tmp/llvm.sh https://apt.llvm.org/llvm.sh
           chmod +x /tmp/llvm.sh
-          sudo /tmp/llvm.sh "${llvm_major}"
+          sudo /tmp/llvm.sh "${CULLFINCH_LLVM_MAJOR}"
           # llvm.sh installs clang, lldb, lld and clangd, but clang-tidy ships
           # in its own package that the script does not pull in.
           sudo apt-get install --no-install-recommends -y \
-            "clang-tidy-${llvm_major}"
-          tidy="$(command -v "clang-tidy-${llvm_major}" || true)"
+            "clang-tidy-${CULLFINCH_LLVM_MAJOR}"
+          tidy="$(command -v "clang-tidy-${CULLFINCH_LLVM_MAJOR}" || true)"
           if [ -z "${tidy}" ]; then
-            echo "apt.llvm.org did not provide clang-tidy-${llvm_major}" >&2
+            echo "apt.llvm.org did not provide clang-tidy-${CULLFINCH_LLVM_MAJOR}" >&2
             exit 1
           fi
           "${tidy}" --version
           {
             echo "CULLFINCH_CLANG_TIDY_EXECUTABLE=${tidy}"
-            echo "CC=clang-${llvm_major}"
-            echo "CXX=clang++-${llvm_major}"
+            echo "CC=clang-${CULLFINCH_LLVM_MAJOR}"
+            echo "CXX=clang++-${CULLFINCH_LLVM_MAJOR}"
           } >> "$GITHUB_ENV"
 
       # No fallback to the unversioned `llvm` formula: if Homebrew no longer
@@ -370,8 +376,7 @@ jobs:
       - name: Locate the pinned LLVM (macOS)
         if: runner.os == 'macOS'
         run: |
-          llvm_major="${CULLFINCH_LLVM_VERSION%%.*}"
-          prefix="$(brew --prefix "llvm@${llvm_major}")"
+          prefix="$(brew --prefix "llvm@${CULLFINCH_LLVM_MAJOR}")"
           echo "CULLFINCH_CLANG_TIDY_EXECUTABLE=${prefix}/bin/clang-tidy" >> "$GITHUB_ENV"
           echo "SDKROOT=$(xcrun --show-sdk-path)" >> "$GITHUB_ENV"
 
@@ -416,11 +421,18 @@ jobs:
 
           # Asserted here, not just at install time: a silently upgraded
           # runner image must fail the job, not just log a stale version
-          # string from before the toolchain drifted.
+          # string from before the toolchain drifted. apt.llvm.org and
+          # Homebrew release on their own schedules, so each platform is
+          # checked against its own pin.
+          if [ "${{ runner.os }}" = "macOS" ]; then
+            expected="${CULLFINCH_LLVM_VERSION_BREW}"
+          else
+            expected="${CULLFINCH_LLVM_VERSION_APT}"
+          fi
           installed_version="$("${CULLFINCH_CLANG_TIDY_EXECUTABLE}" --version \
             | grep -oE '[0-9]+\.[0-9]+\.[0-9]+' | head -1)"
-          if [ "${installed_version}" != "${CULLFINCH_LLVM_VERSION}" ]; then
-            echo "clang-tidy reports ${installed_version}, but CULLFINCH_LLVM_VERSION pins ${CULLFINCH_LLVM_VERSION}" >&2
+          if [ "${installed_version}" != "${expected}" ]; then
+            echo "clang-tidy reports ${installed_version}, but the pin for this platform is ${expected}" >&2
             exit 1
           fi
           echo "clang-tidy ${installed_version} matches the pin"
