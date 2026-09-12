@@ -49,6 +49,13 @@ public:
     /// colour-policy version. A replaced file can never reuse an old image.
     [[nodiscard]] static QString cacheKey(const application::ImageRequest& request);
 
+    /// Test-only: hold decode results instead of delivering them, so a test
+    /// can observe UI state a result would otherwise already have reached. A
+    /// result computed while held is queued, never dropped, and delivered
+    /// once releaseHeldResultsForTesting() is called.
+    void holdResultsForTesting();
+    void releaseHeldResultsForTesting();
+
 private:
     void deliver(const application::ImageResult& result);
     [[nodiscard]] bool isCancelled(quint64 requestId, quint64 generation) const;
@@ -66,6 +73,11 @@ private:
     /// Design setting, not a measured optimum.
     qint64 budgetBytes_ = 512LL * 1024 * 1024;
     int allocationLimitMegabytes_ = 512;
+
+    /// Guarded by mutex_. Off in production; a test flips it on to hold
+    /// results for a bounded window.
+    bool holdResults_ = false;
+    QList<application::ImageResult> heldResults_;
 };
 
 } // namespace cullfinch::infrastructure
