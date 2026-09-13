@@ -91,8 +91,10 @@ void TestVersusView::startVersusOn(int count) {
     // deliberately corrupt fixture never becomes ready, so this is not fatal
     // here; callers assert readiness when they depend on it.
     std::ignore = GuiFixture::waitFor([this]() {
-        return (view_->leftCanvas()->isReady() || view_->leftCanvas()->hasError()) &&
-               (view_->rightCanvas()->isReady() || view_->rightCanvas()->hasError());
+        return (view_->leftCanvas()->preview()->isReady() ||
+                view_->leftCanvas()->preview()->hasError()) &&
+               (view_->rightCanvas()->preview()->isReady() ||
+                view_->rightCanvas()->preview()->hasError());
     });
 }
 
@@ -145,12 +147,14 @@ void TestVersusView::decisionsAreDisabledUntilBothPreviewsAreReady() {
     auto* keepLeft = shell_->findChild<QPushButton*>(QStringLiteral("versusKeepLeft"));
     QVERIFY(keepLeft != nullptr);
     // Before both previews arrive, nobody can judge the pair.
-    if (!view_->leftCanvas()->isReady() || !view_->rightCanvas()->isReady()) {
+    if (!view_->leftCanvas()->preview()->isReady() || !view_->rightCanvas()->preview()->isReady()) {
         QVERIFY(!keepLeft->isEnabled());
     }
 
-    QVERIFY(GuiFixture::waitFor(
-        [this]() { return view_->leftCanvas()->isReady() && view_->rightCanvas()->isReady(); }));
+    QVERIFY(GuiFixture::waitFor([this]() {
+        return view_->leftCanvas()->preview()->isReady() &&
+               view_->rightCanvas()->preview()->isReady();
+    }));
     QVERIFY(keepLeft->isEnabled());
 }
 
@@ -173,7 +177,7 @@ void TestVersusView::theCompletedScreenShowsTheSurvivingPhoto() {
     QCOMPARE(left->presentation().id, match.right);
     QVERIFY(left->isSelectionHighlighted());
     QVERIFY(!view_->rightCanvas()->isVisible());
-    QVERIFY(GuiFixture::waitFor([left]() { return left->isReady(); }));
+    QVERIFY(GuiFixture::waitFor([left]() { return left->preview()->isReady(); }));
 
     auto* survivor = shell_->findChild<QLabel*>(QStringLiteral("versusSurvivorLabel"));
     QVERIFY(survivor != nullptr);
@@ -183,7 +187,7 @@ void TestVersusView::theCompletedScreenShowsTheSurvivingPhoto() {
     // session reports state more than once, and re-presenting the survivor
     // would restart its decode and blank the pane it is being shown in.
     view_->setState(session.state(), session.summary());
-    QVERIFY(left->isReady());
+    QVERIFY(left->preview()->isReady());
     QCOMPARE(left->presentation().id, match.right);
     QVERIFY(left->isSelectionHighlighted());
 
@@ -235,7 +239,7 @@ void TestVersusView::linkingTheViewsConvergesThePanesAtOnce() {
     right->setInspecting(true);
     // Inspection asks for the pixels sharpness is judged on, and the pane says
     // whether they have arrived.
-    QVERIFY(GuiFixture::waitFor([right]() { return right->isFullResolutionReady(); }));
+    QVERIFY(GuiFixture::waitFor([right]() { return right->preview()->isFullResolutionReady(); }));
     QWheelEvent wheel(QPointF(right->rect().center()), right->mapToGlobal(right->rect().center()),
                       QPoint(0, 0), QPoint(0, 120), Qt::NoButton, Qt::NoModifier, Qt::NoScrollPhase,
                       false);
@@ -248,7 +252,7 @@ void TestVersusView::linkingTheViewsConvergesThePanesAtOnce() {
     link->setChecked(false);
     const qreal linkedZoom = left->zoom();
     left->setInspecting(true);
-    QVERIFY(GuiFixture::waitFor([left]() { return left->isFullResolutionReady(); }));
+    QVERIFY(GuiFixture::waitFor([left]() { return left->preview()->isFullResolutionReady(); }));
     QWheelEvent again(QPointF(left->rect().center()), left->mapToGlobal(left->rect().center()),
                       QPoint(0, 0), QPoint(0, 120), Qt::NoButton, Qt::NoModifier, Qt::NoScrollPhase,
                       false);
@@ -284,8 +288,10 @@ void TestVersusView::undoRestoresTheExactPreviousMatch() {
     auto* redo = shell_->findChild<QAction*>(QStringLiteral("comparisonRedo"));
     QVERIFY(redo != nullptr);
     QVERIFY(redo->isEnabled());
-    QVERIFY(GuiFixture::waitFor(
-        [this]() { return view_->leftCanvas()->isReady() && view_->rightCanvas()->isReady(); }));
+    QVERIFY(GuiFixture::waitFor([this]() {
+        return view_->leftCanvas()->preview()->isReady() &&
+               view_->rightCanvas()->preview()->isReady();
+    }));
     QTest::mouseClick(view_->leftCanvas(), Qt::LeftButton, Qt::NoModifier,
                       view_->leftCanvas()->rect().center());
     QVERIFY(GuiFixture::waitFor([&]() { return session.summary().draftRejected.size() == 1; }));
@@ -361,7 +367,7 @@ void TestVersusView::losingFocusMidGestureDecidesNothing() {
     QCOMPARE(session.summary().draftRejected.size(), 0);
 
     // A fresh, uninterrupted gesture still decides.
-    QVERIFY(GuiFixture::waitFor([this]() { return view_->leftCanvas()->isReady(); }));
+    QVERIFY(GuiFixture::waitFor([this]() { return view_->leftCanvas()->preview()->isReady(); }));
     QTest::mouseClick(left, Qt::LeftButton, Qt::NoModifier, centre);
     QVERIFY(GuiFixture::waitFor([&]() { return session.summary().draftRejected.size() == 1; }));
 }
@@ -397,9 +403,9 @@ void TestVersusView::aDecodeErrorIsNotARejection() {
     application::SessionController& session = fixture_->root().session();
 
     ui::ImageCanvas* broken = nullptr;
-    if (view_->leftCanvas()->hasError()) {
+    if (view_->leftCanvas()->preview()->hasError()) {
         broken = view_->leftCanvas();
-    } else if (view_->rightCanvas()->hasError()) {
+    } else if (view_->rightCanvas()->preview()->hasError()) {
         broken = view_->rightCanvas();
     }
     if (broken == nullptr) {
@@ -409,7 +415,7 @@ void TestVersusView::aDecodeErrorIsNotARejection() {
     QTest::mouseClick(broken, Qt::LeftButton, Qt::NoModifier, broken->rect().center());
     QCoreApplication::processEvents();
     QCOMPARE(session.summary().draftRejected.size(), 0);
-    QVERIFY(!broken->errorText().isEmpty());
+    QVERIFY(!broken->preview()->errorText().isEmpty());
 }
 
 QTEST_MAIN(TestVersusView)

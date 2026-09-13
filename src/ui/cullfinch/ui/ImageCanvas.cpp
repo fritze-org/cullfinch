@@ -3,6 +3,7 @@
 
 #include <QEvent>
 #include <QFocusEvent>
+#include <QImage>
 #include <QKeyEvent>
 #include <QMouseEvent>
 #include <QPainter>
@@ -21,24 +22,22 @@ constexpr qreal kMinZoom = 1.0;
 } // namespace
 
 ImageCanvas::ImageCanvas(application::IImageService& images, QWidget* parent)
-    : QWidget(parent), images_(images) {
+    : QWidget(parent), preview_(new PreviewLoader(images, this)) {
     setFocusPolicy(Qt::StrongFocus);
     setMinimumSize(64, 64);
     setSizePolicy(QSizePolicy::Expanding, QSizePolicy::Expanding);
     setMouseTracking(false);
 
-    connect(&images_, &application::IImageService::imageReady, this, &ImageCanvas::onImageReady);
+    // Whatever the loader reports -- new pixels, a decode failure, a cleared
+    // error -- is something drawn or described here.
+    connect(preview_, &PreviewLoader::changed, this, [this]() {
+        updateAccessibility();
+        update();
+    });
 }
 
 void ImageCanvas::setPresentation(const AssetPresentation& presentation, quint64 generation) {
     presentation_ = presentation;
-    generation_ = generation;
-    fitted_ = QImage();
-    full_ = QImage();
-    nativeSize_ = QSize();
-    ready_ = false;
-    fullResolutionReady_ = false;
-    errorText_.clear();
     inspecting_ = false;
     centre_ = QPointF(0.5, 0.5);
     zoom_ = 1.0;
@@ -48,68 +47,33 @@ void ImageCanvas::setPresentation(const AssetPresentation& presentation, quint64
     highlighted_ = false;
     rejected_ = false;
 
+    // Sets this canvas's own state first: the loader reports readiness as it
+    // takes the new source, and a host that answers that signal by asking what
+    // is on screen must not be told about the photo that just left.
+    preview_->setSource(presentation_, generation);
+
     updateAccessibility();
-    Q_EMIT readinessChanged(false);
     update();
 
-    if (!presentation_.previewPath.isEmpty()) {
-        requestImage(application::ImageRequestClass::Comparison);
+    if (preview_->hasSource()) {
+        requestFittedPreview();
     }
 }
 
 void ImageCanvas::clearPresentation() {
-    setPresentation(AssetPresentation{}, generation_);
+    setPresentation(AssetPresentation{}, preview_->generation());
 }
 
-void ImageCanvas::requestImage(application::ImageRequestClass kind) {
-    application::ImageRequest request;
-    request.memberId = presentation_.previewMemberId;
-    request.path = presentation_.previewPath;
-    request.fingerprint = presentation_.previewFingerprint;
-    request.kind = kind;
-    request.generation = generation_;
-
-    if (kind == application::ImageRequestClass::Comparison) {
-        // Screen-sized, accounting for the device pixel ratio so a fitted image
-        // is never upscaled from too few pixels.
-        const qreal ratio = devicePixelRatioF();
-        request.targetSize =
-            QSize(static_cast<int>(width() * ratio), static_cast<int>(height() * ratio));
-        request.priority = 100;
-        fitRequestId_ = images_.request(request);
-    } else {
-        request.targetSize = QSize(); // Native resolution.
-        request.priority = 50;
-        fullRequestId_ = images_.request(request);
-    }
+QSize ImageCanvas::fittedTargetPixels() const {
+    const qreal ratio = devicePixelRatioF();
+    return {static_cast<int>(width() * ratio), static_cast<int>(height() * ratio)};
 }
 
-void ImageCanvas::onImageReady(const application::ImageResult& result) {
-    if (result.generation != generation_ || !(result.memberId == presentation_.previewMemberId)) {
-        return; // A superseded request, or another canvas's image.
-    }
-
-    if (!result.success) {
-        // A decode error is a reported failure, never a rejection decision.
-        errorText_ = result.error;
-        ready_ = false;
-        Q_EMIT readinessChanged(false);
-        update();
-        return;
-    }
-
-    nativeSize_ = result.nativeSize;
-    if (result.requestId == fitRequestId_) {
-        fitted_ = result.image;
-        errorText_.clear();
-        ready_ = true;
-        Q_EMIT readinessChanged(true);
-    } else if (result.requestId == fullRequestId_) {
-        full_ = result.image;
-        fullResolutionReady_ = true;
-    }
-    updateAccessibility();
-    update();
+void ImageCanvas::requestFittedPreview() {
+    // A larger widget needs more pixels; a later refinement must never swap
+    // candidate identities, which is why the member id is part of the match the
+    // loader makes.
+    preview_->requestFitted(fittedTargetPixels());
 }
 
 void ImageCanvas::updateAccessibility() {
@@ -122,12 +86,14 @@ void ImageCanvas::updateAccessibility() {
         name = tr("%1, eliminated").arg(name);
     }
     setAccessibleName(name);
-    setAccessibleDescription(errorText_.isEmpty() ? presentation_.pairingText : errorText_);
+    setAccessibleDescription(preview_->hasError() ? preview_->errorText()
+                                                  : presentation_.pairingText);
     setToolTip(name);
 }
 
 QRectF ImageCanvas::imageRect() const {
-    const QSize source = fitted_.isNull() ? nativeSize_ : fitted_.size();
+    const QSize source =
+        preview_->fitted().isNull() ? preview_->nativeSize() : preview_->fitted().size();
     if (source.isEmpty() || width() <= 0 || height() <= 0) {
         return {};
     }
@@ -143,8 +109,8 @@ void ImageCanvas::setInspecting(bool inspecting) {
         return;
     }
     inspecting_ = inspecting;
-    if (inspecting_ && !fullResolutionReady_ && !presentation_.previewPath.isEmpty()) {
-        requestImage(application::ImageRequestClass::FullResolution);
+    if (inspecting_ && !preview_->isFullResolutionReady() && preview_->hasSource()) {
+        preview_->requestFullResolution();
     }
     if (!inspecting_) {
         centre_ = QPointF(0.5, 0.5);
@@ -207,10 +173,10 @@ void ImageCanvas::changeEvent(QEvent* event) {
         // longer is. Any gesture in flight is disarmed for the same reason a
         // resize disarms one.
         gesture_.armed = false;
-        if (!presentation_.previewPath.isEmpty()) {
-            requestImage(application::ImageRequestClass::Comparison);
+        if (preview_->hasSource()) {
+            requestFittedPreview();
             if (inspecting_) {
-                requestImage(application::ImageRequestClass::FullResolution);
+                preview_->requestFullResolution();
             }
         }
     }
@@ -222,10 +188,8 @@ void ImageCanvas::resizeEvent(QResizeEvent* event) {
     // A resize between press and release means the photo under the pointer may
     // not be the one that was pressed.
     gesture_.armed = false;
-    if (!presentation_.previewPath.isEmpty()) {
-        // A larger widget needs more pixels; a later refinement must never swap
-        // candidate identities, which is why the member id is part of the match.
-        requestImage(application::ImageRequestClass::Comparison);
+    if (preview_->hasSource()) {
+        requestFittedPreview();
     }
 }
 
@@ -234,29 +198,32 @@ void ImageCanvas::paintEvent(QPaintEvent* event) {
     QPainter painter(this);
     painter.fillRect(rect(), palette().window());
 
-    if (!errorText_.isEmpty()) {
+    const QImage& fitted = preview_->fitted();
+    const QImage& full = preview_->full();
+
+    if (preview_->hasError()) {
         painter.setPen(palette().color(QPalette::WindowText));
         painter.drawText(rect().adjusted(12, 12, -12, -12), Qt::AlignCenter | Qt::TextWordWrap,
-                         tr("%1\n\nPress R to retry.").arg(errorText_));
-    } else if (fitted_.isNull()) {
+                         tr("%1\n\nPress R to retry.").arg(preview_->errorText()));
+    } else if (fitted.isNull()) {
         painter.setPen(palette().color(QPalette::WindowText));
         painter.drawText(rect(), Qt::AlignCenter,
-                         presentation_.previewPath.isEmpty() ? tr("No photo") : tr("Loading…"));
-    } else if (inspecting_ && !full_.isNull()) {
+                         preview_->hasSource() ? tr("Loading…") : tr("No photo"));
+    } else if (inspecting_ && !full.isNull()) {
         // 100% inspection: the visible window into the native-resolution image.
         const qreal ratio = devicePixelRatioF();
         const QSizeF viewport(width() * ratio / zoom_, height() * ratio / zoom_);
-        const QRectF source(std::clamp(centre_.x() * full_.width() - viewport.width() / 2.0, 0.0,
-                                       std::max(0.0, full_.width() - viewport.width())),
-                            std::clamp(centre_.y() * full_.height() - viewport.height() / 2.0, 0.0,
-                                       std::max(0.0, full_.height() - viewport.height())),
-                            std::min<qreal>(viewport.width(), full_.width()),
-                            std::min<qreal>(viewport.height(), full_.height()));
+        const QRectF source(std::clamp(centre_.x() * full.width() - viewport.width() / 2.0, 0.0,
+                                       std::max(0.0, full.width() - viewport.width())),
+                            std::clamp(centre_.y() * full.height() - viewport.height() / 2.0, 0.0,
+                                       std::max(0.0, full.height() - viewport.height())),
+                            std::min<qreal>(viewport.width(), full.width()),
+                            std::min<qreal>(viewport.height(), full.height()));
         painter.setRenderHint(QPainter::SmoothPixmapTransform, true);
-        painter.drawImage(rect(), full_, source);
+        painter.drawImage(rect(), full, source);
     } else {
         painter.setRenderHint(QPainter::SmoothPixmapTransform, true);
-        painter.drawImage(imageRect(), fitted_);
+        painter.drawImage(imageRect(), fitted);
     }
 
     if (rejected_) {
@@ -280,8 +247,9 @@ void ImageCanvas::paintEvent(QPaintEvent* event) {
     if (inspecting_) {
         painter.setPen(palette().color(QPalette::Text));
         painter.drawText(rect().adjusted(8, 8, -8, -8), Qt::AlignTop | Qt::AlignLeft,
-                         fullResolutionReady_ ? tr("Inspecting at 100%")
-                                              : tr("Inspecting — loading full resolution…"));
+                         preview_->isFullResolutionReady()
+                             ? tr("Inspecting at 100%")
+                             : tr("Inspecting — loading full resolution…"));
     }
 
     if (highlighted_ || hasFocus()) {
@@ -307,7 +275,8 @@ void ImageCanvas::mousePressEvent(QMouseEvent* event) {
 }
 
 void ImageCanvas::mouseMoveEvent(QMouseEvent* event) {
-    if (!gesture_.dragging || full_.isNull()) {
+    const QImage& full = preview_->full();
+    if (!gesture_.dragging || full.isNull()) {
         QWidget::mouseMoveEvent(event);
         return;
     }
@@ -317,9 +286,9 @@ void ImageCanvas::mouseMoveEvent(QMouseEvent* event) {
     }
     gesture_.origin = event->pos();
 
-    centre_.setX(std::clamp(centre_.x() - static_cast<qreal>(delta.x()) / (full_.width() / zoom_),
-                            0.0, 1.0));
-    centre_.setY(std::clamp(centre_.y() - static_cast<qreal>(delta.y()) / (full_.height() / zoom_),
+    centre_.setX(
+        std::clamp(centre_.x() - static_cast<qreal>(delta.x()) / (full.width() / zoom_), 0.0, 1.0));
+    centre_.setY(std::clamp(centre_.y() - static_cast<qreal>(delta.y()) / (full.height() / zoom_),
                             0.0, 1.0));
     Q_EMIT viewChanged(centre_, zoom_);
     update();
@@ -349,7 +318,7 @@ void ImageCanvas::mouseReleaseEvent(QMouseEvent* event) {
     if (inspecting_) {
         return;
     }
-    if (!ready_) {
+    if (!preview_->isReady()) {
         return; // Decision input stays disabled until the preview is ready.
     }
     if (!rect().contains(event->pos())) {
@@ -371,17 +340,14 @@ void ImageCanvas::keyPressEvent(QKeyEvent* event) {
         event->accept();
         return;
     case Qt::Key_R:
-        if (!errorText_.isEmpty()) {
-            errorText_.clear();
-            requestImage(application::ImageRequestClass::Comparison);
-            Q_EMIT retryRequested();
+        if (preview_->retryFitted(fittedTargetPixels())) {
             event->accept();
             return;
         }
         break;
     case Qt::Key_Delete:
     case Qt::Key_Backspace:
-        if (ready_ && !inspecting_) {
+        if (preview_->isReady() && !inspecting_) {
             Q_EMIT eliminateRequested(ActivationSource::Keyboard);
             event->accept();
             return;

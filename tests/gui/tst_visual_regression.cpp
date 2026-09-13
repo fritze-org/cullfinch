@@ -367,7 +367,8 @@ void TestVisualRegression::theVersusPanesAreUnchanged() {
     // Equal available area is the versus layout's promise. It is asserted here
     // rather than read out of the pixels, because the panes are about to be
     // pinned to a stated size.
-    QVERIFY(GuiFixture::waitFor([left, right]() { return left->isReady() && right->isReady(); }));
+    QVERIFY(GuiFixture::waitFor(
+        [left, right]() { return left->preview()->isReady() && right->preview()->isReady(); }));
     QVERIFY2(std::abs(left->width() - right->width()) <= 1 && left->height() == right->height(),
              "the versus panes are not laid out at equal area");
 

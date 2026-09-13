@@ -65,9 +65,9 @@ VersusView::VersusView(application::IImageService& images) : root_(new QWidget) 
     QObject::connect(keepLeft_, &QPushButton::clicked, root_, [this]() { eliminate(rightId_); });
     QObject::connect(keepRight_, &QPushButton::clicked, root_, [this]() { eliminate(leftId_); });
 
-    QObject::connect(left_, &ui::ImageCanvas::readinessChanged, root_,
+    QObject::connect(left_->preview(), &ui::PreviewLoader::readinessChanged, root_,
                      [this](bool) { updateDecisionAvailability(); });
-    QObject::connect(right_, &ui::ImageCanvas::readinessChanged, root_,
+    QObject::connect(right_->preview(), &ui::PreviewLoader::readinessChanged, root_,
                      [this](bool) { updateDecisionAvailability(); });
 
     QObject::connect(
@@ -192,7 +192,8 @@ void VersusView::setState(const domain::FlowState& state, const domain::FlowSumm
 void VersusView::updateDecisionAvailability() {
     // Decision input stays disabled until both required previews are ready, so
     // nobody judges a pair they cannot yet see.
-    const bool ready = !complete_ && matchNode_ >= 0 && left_->isReady() && right_->isReady();
+    const bool ready = !complete_ && matchNode_ >= 0 && left_->preview()->isReady() &&
+                       right_->preview()->isReady();
     keepLeft_->setEnabled(ready);
     keepRight_->setEnabled(ready);
 
@@ -205,7 +206,7 @@ void VersusView::eliminate(const domain::AssetId& id) const {
     if (!sink_ || !id.isValid() || complete_ || matchNode_ < 0) {
         return;
     }
-    if (!left_->isReady() || !right_->isReady()) {
+    if (!left_->preview()->isReady() || !right_->preview()->isReady()) {
         return;
     }
 
