@@ -2,6 +2,7 @@
 #include <cullfinch/infrastructure/DirectoryScanner.h>
 #include <cullfinch/testsupport/TempCollection.h>
 
+#include <QCoreApplication>
 #include <QFile>
 #include <QSignalSpy>
 #include <QTest>
@@ -26,6 +27,7 @@ private slots:
     void discardsResultsFromASupersededGeneration();
     void reportsCaseDistinctStemsWithoutMerging();
     void reportsAScanFailureThroughSignal();
+    void dropsResultsQueuedBeforeCancellation();
     void survivesDestructionWhileAScanIsInFlight();
 };
 
@@ -221,6 +223,42 @@ void TestDirectoryScanner::reportsAScanFailureThroughSignal() {
     QVERIFY(failed.wait(15000));
     QCOMPARE(failed.first().at(0).toULongLong(), 1ULL);
     QVERIFY(!failed.first().at(1).toString().isEmpty());
+}
+
+void TestDirectoryScanner::dropsResultsQueuedBeforeCancellation() {
+    TempCollection collection;
+    collection.addJpeg(QStringLiteral("A.JPG"));
+
+    infrastructure::DirectoryScanner scanner;
+    QSignalSpy finished(&scanner, &application::IScanService::scanFinished);
+    QSignalSpy failed(&scanner, &application::IScanService::scanFailed);
+
+    application::ScanRequest ok;
+    ok.collectionId = domain::CollectionId(QStringLiteral("c1"));
+    ok.rootPath = collection.path();
+    ok.config = domain::AssociationConfig::defaults();
+    ok.generation = 1;
+    scanner.requestScan(ok);
+    // The worker has now emitted "finished" -- queued for delivery, but
+    // nothing has pumped the event loop yet to actually deliver it.
+    QVERIFY(QThreadPool::globalInstance()->waitForDone(15000));
+    scanner.cancelAll();
+
+    application::ScanRequest bad = ok;
+    bad.rootPath = QStringLiteral("/definitely/not/a/directory");
+    bad.generation = 3;
+    scanner.requestScan(bad);
+    // Same for "failed".
+    QVERIFY(QThreadPool::globalInstance()->waitForDone(15000));
+    scanner.cancelAll();
+
+    // Only now deliver both queued results. The generation check that must
+    // catch these is the one at delivery time, not the worker's own check
+    // (which passed, since neither task was superseded when it ran).
+    QCoreApplication::processEvents();
+
+    QCOMPARE(finished.count(), 0);
+    QCOMPARE(failed.count(), 0);
 }
 
 void TestDirectoryScanner::survivesDestructionWhileAScanIsInFlight() {

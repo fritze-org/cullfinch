@@ -211,12 +211,12 @@ void DirectoryScanner::requestScan(const application::ScanRequest& request) {
             // scanner, which this task must never touch.
             const domain::StemAssociationResolver resolver;
             // Classification happens only once enumeration of the association scope
-            // has finished for this generation.
+            // has finished for this generation. Superseded-by-now results are not
+            // filtered out here: the connected lambda's own check, at delivery
+            // time, is what must catch that anyway, so a second check here would
+            // only ever save the cost of one queued emit.
             const domain::AssociationResult result =
                 resolver.resolve(collectionId, files, config, /*scopeComplete=*/true);
-            if (state->generation.loadRelaxed() != generation) {
-                return; // Superseded while resolving; nothing to deliver.
-            }
             Q_EMIT state->finished(generation, result);
         });
 }
