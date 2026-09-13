@@ -30,6 +30,14 @@ cullfinch_add_test(
   DEPS cullfinch::cullfinch_domain cullfinch::cullfinch_testsupport
   LABELS unit PLATFORM offscreen)
 
+# The offer logic on its own: what a stopped operation's journal allows a person to do is decided
+# without a filesystem, so it is pinned down without one.
+cullfinch_add_test(
+  tst_recovery_offers
+  SOURCES unit/tst_recovery_offers.cpp
+  DEPS cullfinch::cullfinch_application
+  LABELS unit PLATFORM offscreen)
+
 cullfinch_add_test(
   tst_versus_flow
   SOURCES unit/tst_versus_flow.cpp

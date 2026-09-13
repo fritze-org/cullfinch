@@ -1,9 +1,13 @@
 // SPDX-License-Identifier: GPL-3.0-or-later
 #include <cullfinch/flows/wall/WallFlow.h>
 
+#include <QJsonArray>
 #include <QJsonObject>
+#include <QJsonValue>
 #include <QSet>
 #include <QTest>
+
+#include <utility>
 
 using namespace cullfinch;
 using cullfinch::flows::wall::LayoutMode;
@@ -47,6 +51,11 @@ private slots:
     void eliminatingRemovesOnlyTheNamedPhoto();
     void reflowPreservesRelativeOrder();
     void fixedPositionsLeaveAPlaceholderUntilCompact();
+    void aPlaceholderKeepsTheEliminatedCandidate();
+    void refusesASecondEliminationOfAHeldPlaceholder();
+    void restoresADraftWhosePlaceholdersAreAnonymous();
+    void refusesADraftWhosePlaceholderNamesNoCandidate();
+    void refusesADraftWhoseCellsContradictItsDecisions();
     void switchingBackToReflowCompacts();
     void finishesWithAnyNumberOfSurvivorsIncludingZero();
     void refusesARepeatEliminationOfAVanishedTile();
@@ -129,6 +138,156 @@ void TestWallFlow::fixedPositionsLeaveAPlaceholderUntilCompact() {
                  .accepted);
 }
 
+void TestWallFlow::aPlaceholderKeepsTheEliminatedCandidate() {
+    const WallFlow flow;
+    const domain::SelectionSnapshot selection = snapshotOf(4);
+    domain::FlowState state = flow.initialise(selection, domain::FlowOptions{});
+
+    QJsonObject mode;
+    mode.insert(QStringLiteral("mode"), QStringLiteral("fixed"));
+    state = flow.reduce(state, action(QLatin1String(flows::wall::kActionSetLayoutMode), mode,
+                                      state.revision))
+                .state;
+
+    const domain::AssetId target = selection.orderedAssetIds.at(1);
+    state = flow.reduce(state, eliminate(target, state.revision)).state;
+
+    // The placeholder names the photo whose cell it is holding, which is what
+    // lets the wall leave that photo in place marked as eliminated instead of
+    // showing an anonymous gap.
+    const flows::wall::WallSlot held = WallFlow::positions(state).at(1);
+    QVERIFY(held.isPlaceholder());
+    QVERIFY(held.rejected);
+    QCOMPARE(held.id, target);
+
+    // It is still not a survivor, and the identity survives a save and reload.
+    QVERIFY(!WallFlow::candidates(state).contains(target));
+    QVERIFY(!flow.summarise(state).remaining.contains(target));
+
+    domain::VersionedFlowState saved;
+    saved.flowId = state.flowId;
+    saved.schemaVersion = state.schemaVersion;
+    saved.revision = state.revision;
+    saved.payload = state.payload;
+    const domain::RestoreResult restored = flow.restore(saved);
+    QVERIFY(restored.restored);
+    QCOMPARE(WallFlow::positions(restored.state).at(1).id, target);
+    QVERIFY(WallFlow::positions(restored.state).at(1).rejected);
+}
+
+void TestWallFlow::refusesASecondEliminationOfAHeldPlaceholder() {
+    const WallFlow flow;
+    const domain::SelectionSnapshot selection = snapshotOf(3);
+    domain::FlowState state = flow.initialise(selection, domain::FlowOptions{});
+
+    QJsonObject mode;
+    mode.insert(QStringLiteral("mode"), QStringLiteral("fixed"));
+    state = flow.reduce(state, action(QLatin1String(flows::wall::kActionSetLayoutMode), mode,
+                                      state.revision))
+                .state;
+
+    const domain::AssetId target = selection.orderedAssetIds.first();
+    const domain::FlowState after = flow.reduce(state, eliminate(target, state.revision)).state;
+
+    // Its tile is still on the wall, so a second gesture can reach it. One
+    // photo is one decision: the repeat is refused rather than duplicated.
+    QVERIFY(!flow.reduce(after, eliminate(target, after.revision)).accepted);
+    QCOMPARE(flow.summarise(after).draftRejected.size(), 1);
+}
+
+void TestWallFlow::restoresADraftWhosePlaceholdersAreAnonymous() {
+    const WallFlow flow;
+    const domain::SelectionSnapshot selection = snapshotOf(3);
+
+    // A draft written before placeholders kept their candidate: the cell is a
+    // bare null. It still restores, and the cell is still held -- there is
+    // simply no photo to show in it.
+    QJsonArray positions;
+    positions.append(selection.orderedAssetIds.at(0).toString());
+    positions.append(QJsonValue(QJsonValue::Null));
+    positions.append(selection.orderedAssetIds.at(2).toString());
+
+    QJsonObject payload;
+    payload.insert(QStringLiteral("slots"), positions);
+    payload.insert(QStringLiteral("rejected"),
+                   QJsonArray{selection.orderedAssetIds.at(1).toString()});
+    payload.insert(QStringLiteral("input"), domain::toJsonArray(selection.orderedAssetIds));
+    payload.insert(QStringLiteral("layoutMode"), QStringLiteral("fixed"));
+
+    domain::VersionedFlowState saved;
+    saved.flowId = QLatin1String(flows::wall::kFlowId);
+    saved.schemaVersion = flows::wall::kStateSchemaVersion;
+    saved.revision = 7;
+    saved.payload = payload;
+
+    const domain::RestoreResult restored = flow.restore(saved);
+    QVERIFY(restored.restored);
+    QCOMPARE(WallFlow::positions(restored.state).size(), 3);
+    QVERIFY(WallFlow::positions(restored.state).at(1).isPlaceholder());
+    QVERIFY(!WallFlow::positions(restored.state).at(1).id.isValid());
+    QVERIFY(WallFlow::hasPlaceholders(restored.state));
+    QCOMPARE(WallFlow::candidates(restored.state).size(), 2);
+
+    // And the restored draft keeps working: a further elimination writes the
+    // anonymous cell back out as it found it rather than inventing a candidate
+    // for it, and holds a named cell for the photo just eliminated.
+    const domain::FlowState after =
+        flow.reduce(restored.state,
+                    eliminate(selection.orderedAssetIds.at(0), restored.state.revision))
+            .state;
+    const QList<flows::wall::WallSlot> reserialised = WallFlow::positions(after);
+    QCOMPARE(reserialised.size(), 3);
+    QCOMPARE(reserialised.at(0).id, selection.orderedAssetIds.at(0));
+    QVERIFY(reserialised.at(0).rejected);
+    QVERIFY(reserialised.at(1).isPlaceholder());
+    QVERIFY(!reserialised.at(1).id.isValid());
+    QCOMPARE(flow.summarise(after).remaining,
+             QList<domain::AssetId>{selection.orderedAssetIds.at(2)});
+}
+
+void TestWallFlow::refusesADraftWhosePlaceholderNamesNoCandidate() {
+    const WallFlow flow;
+    const domain::SelectionSnapshot selection = snapshotOf(2);
+
+    QJsonArray positions;
+    positions.append(selection.orderedAssetIds.at(0).toString());
+    // "rejected" with no candidate names no cell. An unreadable wall is
+    // reported rather than guessed at.
+    QJsonObject nameless;
+    nameless.insert(QStringLiteral("rejected"), true);
+    positions.append(nameless);
+
+    QJsonObject payload;
+    payload.insert(QStringLiteral("slots"), positions);
+    payload.insert(QStringLiteral("rejected"), QJsonArray{});
+    payload.insert(QStringLiteral("input"), domain::toJsonArray(selection.orderedAssetIds));
+    payload.insert(QStringLiteral("layoutMode"), QStringLiteral("fixed"));
+
+    domain::VersionedFlowState saved;
+    saved.flowId = QLatin1String(flows::wall::kFlowId);
+    saved.schemaVersion = flows::wall::kStateSchemaVersion;
+    saved.revision = 3;
+    saved.payload = payload;
+    QVERIFY(!flow.restore(saved).restored);
+
+    // A survivor is a plain identifier, so an object that claims not to be
+    // rejected is not a slot this build wrote either.
+    QJsonObject unrejected;
+    unrejected.insert(QStringLiteral("assetId"), selection.orderedAssetIds.at(1).toString());
+    unrejected.insert(QStringLiteral("rejected"), false);
+    positions.replace(1, unrejected);
+    payload.insert(QStringLiteral("slots"), positions);
+    saved.payload = payload;
+    QVERIFY(!flow.restore(saved).restored);
+
+    // Nor is anything else a cell: a slot is an identifier, a null or a
+    // placeholder object, and the parser refuses to interpret the rest.
+    positions.replace(1, QJsonValue(7));
+    payload.insert(QStringLiteral("slots"), positions);
+    saved.payload = payload;
+    QVERIFY(!flow.restore(saved).restored);
+}
+
 void TestWallFlow::switchingBackToReflowCompacts() {
     const WallFlow flow;
     const domain::SelectionSnapshot selection = snapshotOf(3);
@@ -149,6 +308,72 @@ void TestWallFlow::switchingBackToReflowCompacts() {
                 .state;
     QVERIFY(!WallFlow::hasPlaceholders(state));
     QCOMPARE(WallFlow::candidates(state).size(), 2);
+}
+
+void TestWallFlow::refusesADraftWhoseCellsContradictItsDecisions() {
+    const WallFlow flow;
+    const domain::SelectionSnapshot selection = snapshotOf(3);
+
+    const auto wallWith = [&selection](const QJsonArray& positions, const QJsonArray& rejected) {
+        QJsonObject payload;
+        payload.insert(QStringLiteral("slots"), positions);
+        payload.insert(QStringLiteral("rejected"), rejected);
+        payload.insert(QStringLiteral("input"), domain::toJsonArray(selection.orderedAssetIds));
+        payload.insert(QStringLiteral("layoutMode"), QStringLiteral("fixed"));
+
+        domain::VersionedFlowState saved;
+        saved.flowId = QLatin1String(flows::wall::kFlowId);
+        saved.schemaVersion = flows::wall::kStateSchemaVersion;
+        saved.revision = 4;
+        saved.payload = std::move(payload);
+        return saved;
+    };
+    const auto placeholderFor = [](const domain::AssetId& id) {
+        QJsonObject slot;
+        slot.insert(QStringLiteral("assetId"), id.toString());
+        slot.insert(QStringLiteral("rejected"), true);
+        return QJsonValue(slot);
+    };
+
+    const domain::AssetId first = selection.orderedAssetIds.at(0);
+    const domain::AssetId second = selection.orderedAssetIds.at(1);
+    const domain::AssetId third = selection.orderedAssetIds.at(2);
+
+    // The view paints the cells and the summary reports the decisions, so the
+    // two halves have to agree. A cell that says it was eliminated while the
+    // draft counts nothing as eliminated would paint as eliminated and then
+    // have Finish mark nothing.
+    QVERIFY(!flow.restore(wallWith(QJsonArray{first.toString(), placeholderFor(second),
+                                              third.toString()},
+                                   QJsonArray{}))
+                 .restored);
+
+    // The reverse disagreement is refused for the same reason: a survivor the
+    // draft already counts as eliminated.
+    QVERIFY(
+        !flow.restore(wallWith(QJsonArray{first.toString(), second.toString(), third.toString()},
+                               QJsonArray{second.toString()}))
+             .restored);
+
+    // One photo occupies one cell: the same candidate cannot both survive and
+    // be held as eliminated.
+    QVERIFY(!flow.restore(
+                     wallWith(QJsonArray{first.toString(), placeholderFor(first), third.toString()},
+                              QJsonArray{first.toString()}))
+                 .restored);
+
+    // A cell naming a candidate that was never in the input is not this wall's.
+    QVERIFY(!flow.restore(wallWith(QJsonArray{first.toString(), second.toString(),
+                                              QStringLiteral("asset-99")},
+                                   QJsonArray{}))
+                 .restored);
+
+    // The consistent form of the same wall restores.
+    const domain::RestoreResult restored = flow.restore(
+        wallWith(QJsonArray{first.toString(), placeholderFor(second), third.toString()},
+                 QJsonArray{second.toString()}));
+    QVERIFY(restored.restored);
+    QCOMPARE(WallFlow::positions(restored.state).at(1).id, second);
 }
 
 void TestWallFlow::finishesWithAnyNumberOfSurvivorsIncludingZero() {

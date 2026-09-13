@@ -7,9 +7,11 @@
 #include <QAction>
 #include <QCheckBox>
 #include <QGuiApplication>
+#include <QImage>
 #include <QJsonObject>
 #include <QKeyEvent>
 #include <QLabel>
+#include <QPixmap>
 #include <QPushButton>
 #include <QSet>
 #include <QStyleHints>
@@ -44,8 +46,12 @@ private slots:
     void repeatClicksInTheVacatedRegionDoNotRejectTheNextPhoto();
     void keyRepeatDoesNotRejectASequence();
     void fixedPositionsKeepSurvivorsInPlaceUntilCompact();
+    void anEliminatedTileStaysInItsCellMarkedEliminated();
+    void aPlaceholderWithNoCandidateStillHoldsItsCell();
+    void aTileCreatedBeforeItsPresentationPicksItUp();
     void undoReinstatesThePhotoAndItsPosition();
     void anEmptyWallStillOffersUndoAndFinish();
+    void anEmptiedFixedWallStillShowsWhatWasEliminated();
     void keyboardOnlyCullingWorks();
     void resizingBetweenPressAndReleaseDoesNotMisfire();
     void aGestureIsBoundToTheLayoutItWasPressedOn();
@@ -252,6 +258,157 @@ void TestWallView::fixedPositionsKeepSurvivorsInPlaceUntilCompact() {
         [&]() { return !flows::wall::WallFlow::hasPlaceholders(session.state()); }));
 }
 
+void TestWallView::anEliminatedTileStaysInItsCellMarkedEliminated() {
+    startWallOn(6);
+    application::SessionController& session = fixture_->root().session();
+
+    auto* fixed = shell_->findChild<QCheckBox*>(QStringLiteral("wallFixedPositions"));
+    auto* compact = shell_->findChild<QPushButton*>(QStringLiteral("wallCompact"));
+    QVERIFY(fixed != nullptr);
+    QVERIFY(compact != nullptr);
+
+    fixed->setChecked(true);
+    QVERIFY(GuiFixture::waitFor([&]() {
+        return flows::wall::WallFlow::layoutMode(session.state()) ==
+               flows::wall::LayoutMode::FixedPositions;
+    }));
+
+    // Both renderings have to be taken at the same surface size, for the reason
+    // the other fixed-position case states.
+    QVERIFY(guitests::settleWindowSize(shell_, kWallWindowSize));
+    const domain::AssetId victim = view_->surface()->order().at(2);
+    ui::ImageCanvas* tile = view_->surface()->tileFor(victim);
+    if (tile == nullptr) {
+        QFAIL("the wall has no tile for the photo it is about to eliminate");
+    }
+    QVERIFY(!tile->isRejected());
+    const QRect cell = tile->geometry();
+    const QImage surviving = tile->grab().toImage();
+    const QString survivingName = tile->accessibleName();
+
+    QTest::mouseClick(tile, Qt::LeftButton, Qt::NoModifier, tile->rect().center());
+    QVERIFY(GuiFixture::waitFor([&]() { return session.summary().remaining.size() == 5; }));
+    QCoreApplication::processEvents();
+
+    // The placeholder is a *rejected* placeholder: the photo stays in its cell,
+    // marked as eliminated, so the user can see what the cell is being held
+    // for. It is no longer a survivor.
+    QVERIFY2(view_->surface()->tileFor(victim) == tile, "the eliminated tile was replaced");
+    QVERIFY(tile->isRejected());
+    QVERIFY(tile->isVisible());
+    QVERIFY(!view_->surface()->order().contains(victim));
+
+    QVERIFY(guitests::settleWindowSize(shell_, kWallWindowSize));
+    QCOMPARE(tile->geometry(), cell);
+    QVERIFY2(tile->grab().toImage() != surviving, "an eliminated tile paints identically");
+    // State reaches assistive technology as text, not as colour alone.
+    QVERIFY2(tile->accessibleName() != survivingName,
+             "an eliminated tile has the accessible name of a survivor");
+
+    // Its tile is reachable, so both a click and a key can still land on it.
+    // One photo is one decision.
+    QTest::mouseClick(tile, Qt::LeftButton, Qt::NoModifier, tile->rect().center());
+    QTest::keyClick(tile, Qt::Key_Delete);
+    QCoreApplication::processEvents();
+    QCOMPARE(session.summary().draftRejected.size(), 1);
+
+    // Compacting takes the cell, and the tile with it.
+    QTest::mouseClick(compact, Qt::LeftButton);
+    QVERIFY(GuiFixture::waitFor([&]() { return view_->surface()->tileFor(victim) == nullptr; }));
+}
+
+void TestWallView::aPlaceholderWithNoCandidateStillHoldsItsCell() {
+    startWallOn(6);
+    QVERIFY(guitests::settleWindowSize(shell_, kWallWindowSize));
+
+    // A wall paused by a build that did not keep the placeholder's candidate
+    // restores with an anonymous cell. There is no photo to put in it, and it
+    // still has to hold its position, or the survivors move -- which is the one
+    // thing fixed-position mode promises. The surface is driven directly
+    // because no flow in this build can produce that state any more.
+    ui::AssetPresentationMap presentations;
+    QList<flows::wall::WallSlot> positions;
+    QHash<domain::AssetId, QRect> before;
+    for (const domain::AssetId& id : view_->surface()->order()) {
+        ui::ImageCanvas* placed = view_->surface()->tileFor(id);
+        if (placed == nullptr) {
+            QFAIL("a candidate on the wall has no tile");
+        }
+        presentations.insert(id, placed->presentation());
+        positions.append(flows::wall::WallSlot{id, false});
+        before.insert(id, placed->geometry());
+    }
+
+    const domain::AssetId anonymous = positions.at(3).id;
+    positions[3] = flows::wall::WallSlot{};
+    view_->surface()->setCandidates(positions, presentations,
+                                    view_->surface()->layoutRevision() + 1);
+    QCoreApplication::processEvents();
+
+    QVERIFY(view_->surface()->tileFor(anonymous) == nullptr);
+    QCOMPARE(view_->surface()->order().size(), 5);
+    for (const domain::AssetId& id : view_->surface()->order()) {
+        ui::ImageCanvas* survivor = view_->surface()->tileFor(id);
+        if (survivor == nullptr) {
+            QFAIL("a survivor lost its tile");
+        }
+        QCOMPARE(survivor->geometry(), before.value(id));
+    }
+}
+
+void TestWallView::aTileCreatedBeforeItsPresentationPicksItUp() {
+    startWallOn(5);
+    QVERIFY(guitests::settleWindowSize(shell_, kWallWindowSize));
+
+    ui::AssetPresentationMap presentations;
+    QList<flows::wall::WallSlot> positions;
+    for (const domain::AssetId& id : view_->surface()->order()) {
+        ui::ImageCanvas* placed = view_->surface()->tileFor(id);
+        if (placed == nullptr) {
+            QFAIL("a candidate on the wall has no tile");
+        }
+        presentations.insert(id, placed->presentation());
+        positions.append(flows::wall::WallSlot{id, false});
+    }
+
+    // State can reach the surface before the presentations for it do. The tile
+    // is created anyway, so the grid is right, and it has no photo to show yet.
+    const domain::AssetId late = fixture_->window()->model()->idForRow(5);
+    QVERIFY(late.isValid());
+    positions.append(flows::wall::WallSlot{late, false});
+    view_->surface()->setCandidates(positions, presentations,
+                                    view_->surface()->layoutRevision() + 1);
+    QCoreApplication::processEvents();
+
+    ui::ImageCanvas* tile = view_->surface()->tileFor(late);
+    if (tile == nullptr) {
+        QFAIL("the wall created no tile for the candidate it was handed");
+    }
+    QVERIFY(!tile->presentation().previewMemberId.isValid());
+    QVERIFY(!tile->isReady());
+
+    // The same state again leaves it as it is: there is still nothing to fill
+    // it in with, and a tile is never re-presented with what it already has.
+    view_->surface()->setCandidates(positions, presentations,
+                                    view_->surface()->layoutRevision() + 1);
+    QCoreApplication::processEvents();
+    QVERIFY2(view_->surface()->tileFor(late) == tile, "the waiting tile was replaced");
+    QVERIFY(!tile->presentation().previewMemberId.isValid());
+
+    // When they arrive, the tile picks its photo up rather than staying blank.
+    for (const domain::PhotoAsset& asset : fixture_->root().collection().assets()) {
+        if (asset.id == late) {
+            presentations.insert(late, ui::AssetPresentation::from(asset));
+        }
+    }
+    QVERIFY(presentations.value(late).previewMemberId.isValid());
+    view_->surface()->setCandidates(positions, presentations,
+                                    view_->surface()->layoutRevision() + 1);
+
+    QVERIFY(GuiFixture::waitFor([tile]() { return tile->isReady(); }));
+    QCOMPARE(tile->presentation().id, late);
+}
+
 void TestWallView::undoReinstatesThePhotoAndItsPosition() {
     startWallOn(6);
     application::SessionController& session = fixture_->root().session();
@@ -303,6 +460,60 @@ void TestWallView::anEmptyWallStillOffersUndoAndFinish() {
 
     undo->trigger();
     QVERIFY(GuiFixture::waitFor([&]() { return session.summary().remaining.size() == 1; }));
+}
+
+void TestWallView::anEmptiedFixedWallStillShowsWhatWasEliminated() {
+    startWallOn(6);
+    application::SessionController& session = fixture_->root().session();
+
+    auto* fixed = shell_->findChild<QCheckBox*>(QStringLiteral("wallFixedPositions"));
+    auto* compact = shell_->findChild<QPushButton*>(QStringLiteral("wallCompact"));
+    if (fixed == nullptr || compact == nullptr) {
+        QFAIL("the wall view has no layout controls");
+    }
+    fixed->setChecked(true);
+    QVERIFY(GuiFixture::waitFor([&]() {
+        return flows::wall::WallFlow::layoutMode(session.state()) ==
+               flows::wall::LayoutMode::FixedPositions;
+    }));
+
+    const QList<domain::AssetId> culled = view_->surface()->order();
+    while (!session.summary().remaining.isEmpty()) {
+        QString error;
+        QJsonObject payload;
+        payload.insert(QStringLiteral("assetId"), session.summary().remaining.first().toString());
+        QVERIFY2(session.dispatch(QStringLiteral("eliminate"), payload, &error), qPrintable(error));
+    }
+    QCoreApplication::processEvents();
+
+    // No survivors, but every cell is still held, and in fixed-position mode a
+    // held cell is a photo marked as eliminated. Hiding the wall here would
+    // take the spatial record away exactly where Undo needs it.
+    QVERIFY(view_->surface()->isVisible());
+    QVERIFY(view_->surface()->order().isEmpty());
+    for (const domain::AssetId& id : culled) {
+        ui::ImageCanvas* tile = view_->surface()->tileFor(id);
+        if (tile == nullptr) {
+            QFAIL("an eliminated photo lost the cell that was holding it");
+        }
+        QVERIFY(tile->isRejected());
+    }
+
+    auto* empty = shell_->findChild<QLabel*>(QStringLiteral("wallEmptyLabel"));
+    if (empty == nullptr) {
+        QFAIL("the wall view has no empty-wall label");
+    }
+    QVERIFY(empty->isVisible());
+    QVERIFY(compact->isEnabled());
+
+    // Compacting an emptied wall leaves nothing to show, and the label carries
+    // the state on its own.
+    QTest::mouseClick(compact, Qt::LeftButton);
+    QVERIFY(GuiFixture::waitFor(
+        [&]() { return !flows::wall::WallFlow::hasPlaceholders(session.state()); }));
+    QCoreApplication::processEvents();
+    QVERIFY(!view_->surface()->isVisible());
+    QVERIFY(empty->isVisible());
 }
 
 void TestWallView::keyboardOnlyCullingWorks() {

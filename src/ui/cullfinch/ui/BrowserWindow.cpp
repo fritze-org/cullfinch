@@ -2,6 +2,7 @@
 #include <cullfinch/ui/BrowserWindow.h>
 
 #include <cullfinch/domain/SelectionSnapshot.h>
+#include <cullfinch/ui/RecoveryDialog.h>
 #include <cullfinch/ui/ReviewDialog.h>
 
 #include <QAction>
@@ -298,6 +299,13 @@ void BrowserWindow::buildMenus() {
     reviewAction_ = operationsMenu->addAction(tr("Review &File Operations…"), this,
                                               &BrowserWindow::reviewFileOperations);
     reviewAction_->setObjectName(QStringLiteral("actionReviewOperations"));
+
+    // Always present, so the screen is where a person looks for it rather than
+    // appearing only in the state where they most need it to be familiar.
+    recoverAction_ = operationsMenu->addAction(tr("Recover &Unfinished Operations…"), this,
+                                               &BrowserWindow::showRecoveryDialog);
+    recoverAction_->setObjectName(QStringLiteral("actionRecoverOperations"));
+    recoverAction_->setEnabled(false);
 }
 
 bool BrowserWindow::openDirectory(const QString& path) {
@@ -323,6 +331,10 @@ bool BrowserWindow::openDirectory(const QString& path) {
     pathLabel_->setText(path);
     setWindowTitle(tr("Cullfinch — %1").arg(path));
     offerResume();
+    // Before anything else is decided about this collection: a photo that is
+    // missing because it is sitting in staging looks exactly like one that was
+    // deleted, and only the journal can tell the difference.
+    offerRecovery();
     return true;
 }
 
@@ -511,12 +523,16 @@ void BrowserWindow::reviewFileOperations() {
     if (QString error;
         !context_.operations.execute(dialog.plan(), context_.collection.assets(), &error)) {
         reportError(error);
+        // A run that stopped part way through is exactly what the recovery
+        // screen is for, so the browser has to notice it straight away.
+        refreshRecoveryState();
         context_.collection.refresh();
         return;
     }
 
     statusBar()->showMessage(tr("Moved %1 photos to Trash.").arg(dialog.plan().logicalPhotoCount()),
                              6000);
+    refreshRecoveryState();
     context_.collection.refresh();
 }
 
@@ -585,6 +601,55 @@ void BrowserWindow::offerResume() {
     }
     case ResumeChoice::Leave:
         break;
+    }
+}
+
+void BrowserWindow::refreshRecoveryState() {
+    recoveryCount_ = 0;
+    if (!context_.collection.rootPath().isEmpty()) {
+        recoveryCount_ = static_cast<int>(
+            context_.operations.needingRecovery(context_.collection.collectionId()).size());
+    }
+    // The menu entry carries the state: a recovery screen with nothing on it
+    // would be worse than no screen at all. It is never hidden, so a person
+    // learns where it is before the day they need it.
+    recoverAction_->setEnabled(recoveryCount_ > 0);
+    recoverAction_->setToolTip(
+        recoveryCount_ == 0
+            ? tr("No file operation for this directory stopped before it finished.")
+            : tr("%1 file operation(s) stopped before they finished.").arg(recoveryCount_));
+}
+
+void BrowserWindow::offerRecovery() {
+    refreshRecoveryState();
+    if (recoveryCount_ == 0) {
+        return;
+    }
+    statusBar()->showMessage(tr("%1 file operation(s) for this directory did not finish. See "
+                                "Operations, Recover Unfinished Operations…")
+                                 .arg(recoveryCount_),
+                             12000);
+    Q_EMIT recoveryPending(recoveryCount_);
+}
+
+void BrowserWindow::showRecoveryDialog() {
+    if (context_.collection.rootPath().isEmpty()) {
+        return;
+    }
+
+    // A read-only instance may read the records; the offers are refused there,
+    // as on every other write path. The dialog says so rather than the browser
+    // hiding the screen, because "where did my photo go" is the question a
+    // second window is most likely to be asking.
+    RecoveryDialog dialog(context_.operations, context_.collection.collectionId(),
+                          !context_.collection.isReadOnly(), this);
+    dialog.exec();
+    refreshRecoveryState();
+    if (dialog.anythingChanged()) {
+        // Restoring puts files back in the collection and retrying Trash takes
+        // them out of it; either way what is on disk no longer matches what
+        // the browser is showing.
+        context_.collection.refresh();
     }
 }
 

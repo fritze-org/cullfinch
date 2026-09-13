@@ -37,8 +37,23 @@ public:
 
     [[nodiscard]] QList<OperationRecord> unfinished(const domain::CollectionId& collectionId) const;
 
-    /// Reconcile a journal after a crash or an interrupted run.
+    /// The unfinished operations somebody still has to settle.
+    ///
+    /// What the browser surfaces when a collection is opened: an operation that
+    /// left nothing behind is not a recovery task, only an unfinished one.
+    [[nodiscard]] QList<OperationRecord>
+    needingRecovery(const domain::CollectionId& collectionId) const;
+
+    /// Reconcile a journal after a crash or an interrupted run, putting back
+    /// everything still in staging.
     bool recover(const domain::OperationId& operationId, QString* error);
+
+    /// Ask Trash again for the groups still complete in staging.
+    bool retryTrash(const domain::OperationId& operationId, QString* error);
+
+    /// Record that a person has confirmed the groups with an undetermined
+    /// outcome are in Trash. Moves nothing.
+    bool confirmTrashed(const domain::OperationId& operationId, QString* error);
 
 signals:
     void progressChanged(int completedGroups, int totalGroups);
@@ -56,6 +71,14 @@ private:
     /// stop at the first group that fails or leaves recoverable work.
     bool stageGroups(const domain::OperationPlan& plan, OperationRecord& record,
                      const JournalWriter& journal, QString* error);
+    /// Which of the executor's recovery steps one of the offers runs.
+    enum class RecoveryStep { Restore, RetryTrash, ConfirmTrashed };
+
+    /// Load, run one recovery step, journal the outcome and report whether the
+    /// operation is settled. The three offers differ only in the step, so they
+    /// share everything around it -- including the rule that the journal is
+    /// written before the caller is told anything.
+    bool applyRecovery(const domain::OperationId& operationId, RecoveryStep step, QString* error);
 
     IAssetRepository& repository_;
     IOperationExecutor& executor_;

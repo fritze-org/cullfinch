@@ -79,6 +79,10 @@ public:
     /// same path the menu does.
     bool startFlow(const QString& flowId);
 
+    /// Open the unfinished-operation screen without going through the menu.
+    /// The composition root's prompt and the GUI tests use this.
+    void showRecoveryDialog();
+
     /// Collection-local staging root for file operations. Defaults to a hidden
     /// directory beside the photos; tests point it somewhere disposable.
     void setStagingRoot(const QString& path);
@@ -111,6 +115,11 @@ signals:
     /// composition root's decision, which is what keeps automated runs from
     /// blocking on a dialog nobody can dismiss.
     void errorOccurred(const QString& message);
+    /// Opening this collection found file operations that never finished.
+    /// Reported rather than forced into view, for the same reason: the
+    /// browser's own surface is the status bar and the Operations menu, and
+    /// whether to interrupt somebody with it is the composition root's call.
+    void recoveryPending(int count);
 
 protected:
     void changeEvent(QEvent* event) override;
@@ -125,6 +134,12 @@ private:
     void unmarkSelection();
     void reviewFileOperations();
     void offerResume();
+    /// Re-read the unfinished operations and update what the browser shows
+    /// about them. Called after anything that can settle one.
+    void refreshRecoveryState();
+    /// The same, plus a report that they exist. Only opening a collection does
+    /// this: repeating it after every repair would be nagging.
+    void offerRecovery();
     void reportError(const QString& message);
 
     AppContext context_;
@@ -138,12 +153,14 @@ private:
     QMenu* compareMenu_ = nullptr;
     QAction* recursiveAction_ = nullptr;
     QAction* reviewAction_ = nullptr;
+    QAction* recoverAction_ = nullptr;
     QAction* unmarkAction_ = nullptr;
     QPointer<ComparisonShell> shell_;
     QString stagingRoot_;
     ResumePrompt resumePrompt_;
     QMetaObject::Connection sessionEndedConnection_;
     quint64 presentationGeneration_ = 0;
+    int recoveryCount_ = 0;
 };
 
 } // namespace cullfinch::ui

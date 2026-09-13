@@ -22,6 +22,10 @@ belongs with it.
   decisions into collection-level deletion marks, which are undoable.
 - **Deleting is a separate, reviewed step.** *Review file operations* lists every physical file,
   its size and any blocker before anything moves. A missing RAW blocks its whole group.
+- **An interrupted deletion is shown, not swallowed.** If a crash or a refusal from Trash leaves a
+  photo in the staging directory, opening the collection says so, and *Recover unfinished
+  operations* offers to restore it, to retry Trash, or — for a group nothing on disk can account
+  for — to record that you have found it in the Trash yourself. Nothing there deletes anything.
 
 ## Requirements
 

@@ -42,6 +42,11 @@ void ImageCanvas::setPresentation(const AssetPresentation& presentation, quint64
     inspecting_ = false;
     centre_ = QPointF(0.5, 0.5);
     zoom_ = 1.0;
+    // A different photo arrives unmarked. Its host re-applies whatever the flow
+    // says about it, and a stale mark would otherwise describe the photo that
+    // used to be here.
+    highlighted_ = false;
+    rejected_ = false;
 
     updateAccessibility();
     Q_EMIT readinessChanged(false);
@@ -157,11 +162,17 @@ void ImageCanvas::setNormalisedView(const QPointF& centre, qreal zoom) {
 }
 
 void ImageCanvas::setSelectionHighlighted(bool highlighted) {
+    if (highlighted_ == highlighted) {
+        return; // Hosts re-apply this on every state update.
+    }
     highlighted_ = highlighted;
     update();
 }
 
 void ImageCanvas::setRejected(bool rejected) {
+    if (rejected_ == rejected) {
+        return; // Hosts re-apply this on every state update.
+    }
     rejected_ = rejected;
     updateAccessibility();
     update();

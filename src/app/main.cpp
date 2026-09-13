@@ -245,6 +245,26 @@ int main(int argc, char* argv[]) {
                                               message);
                      });
 
+    // Files that are sitting in a staging directory look exactly like files
+    // somebody deleted, so this is worth interrupting for -- but the decision
+    // to interrupt is made here, not in the browser, so automated runs are
+    // never blocked by it.
+    QObject::connect(
+        window, &cullfinch::ui::BrowserWindow::recoveryPending, window, [window](int count) {
+            const int answer = QMessageBox::question(
+                window, QCoreApplication::translate("cullfinch", "Unfinished file operations"),
+                QCoreApplication::translate(
+                    "cullfinch",
+                    "%1 file operation(s) for this directory did not finish. Photos may be "
+                    "sitting in the staging directory beside them, or already in Trash.\n\n"
+                    "Look at them now? Nothing is deleted by looking.")
+                    .arg(count),
+                QMessageBox::Yes | QMessageBox::No, QMessageBox::Yes);
+            if (answer == QMessageBox::Yes) {
+                window->showRecoveryDialog();
+            }
+        });
+
     window->setResumePrompt([window](const cullfinch::application::StoredSession& session) {
         const int answer = QMessageBox::question(
             window, QCoreApplication::translate("cullfinch", "Unfinished comparison"),

@@ -62,6 +62,11 @@ public:
 
     application::OperationRecord recover(const application::OperationRecord& record) override;
 
+    application::OperationRecord retryTrash(const application::OperationRecord& record) override;
+
+    application::OperationRecord
+    confirmTrashed(const application::OperationRecord& record) override;
+
     /// Written into each staging directory before anything moves, so a restore
     /// can put every file back where it came from.
     [[nodiscard]] static QString manifestFileName();

@@ -29,12 +29,19 @@ enum class LayoutMode {
 [[nodiscard]] QString layoutModeToken(LayoutMode mode);
 [[nodiscard]] LayoutMode layoutModeFromToken(const QString& token, LayoutMode fallback);
 
-/// One position on the wall. An invalid id is a placeholder left behind in
-/// fixed-position mode.
+/// One position on the wall.
+///
+/// A placeholder is a position fixed-position mode kept after its candidate was
+/// eliminated. It keeps that candidate's identifier, because the specified
+/// behaviour is a *rejected* placeholder: the view leaves the eliminated photo
+/// in its cell, marked as eliminated, and an anonymous gap cannot say which
+/// photo a cell is being held for. Drafts written before that carry an invalid
+/// id, which is still a placeholder and simply has no photo to show.
 struct WallSlot {
     AssetId id;
+    bool rejected = false;
 
-    [[nodiscard]] bool isPlaceholder() const { return !id.isValid(); }
+    [[nodiscard]] bool isPlaceholder() const { return rejected || !id.isValid(); }
 };
 
 /// A wall of every selected candidate.
