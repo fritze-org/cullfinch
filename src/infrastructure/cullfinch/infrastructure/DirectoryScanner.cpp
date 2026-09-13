@@ -91,7 +91,14 @@ domain::DiscoveredFile describe(const QFileInfo& info, const QString& rootPath) 
 } // namespace
 
 DirectoryScanner::DirectoryScanner(QObject* parent)
-    : application::IScanService(parent), state_(std::make_shared<ScanState>()) {
+    : application::IScanService(parent),
+      // A worker task may be the one to drop the last reference to state_ (a
+      // scanner destroyed mid-scan while a task is still running). state_
+      // lives on this thread, so it must not be deleted on the pool thread
+      // that happens to release it; deleteLater() always runs the actual
+      // delete on the object's own thread, regardless of which thread calls
+      // it.
+      state_(new ScanState, [](ScanState* state) { state->deleteLater(); }) {
     debounce_.setSingleShot(true);
     // Watcher notifications arrive in bursts; one rescan per burst is enough.
     debounce_.setInterval(400);

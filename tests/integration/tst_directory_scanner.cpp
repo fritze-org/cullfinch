@@ -5,6 +5,7 @@
 #include <QFile>
 #include <QSignalSpy>
 #include <QTest>
+#include <QThreadPool>
 
 #include <tuple>
 
@@ -246,9 +247,9 @@ void TestDirectoryScanner::survivesDestructionWhileAScanIsInFlight() {
         // scanner is destroyed here, likely mid-scan.
     }
 
-    // Give a (harmlessly late) worker a chance to deliver before the test
-    // process exits.
-    QTest::qWait(100);
+    // Wait for the task to actually run to completion (rather than a fixed
+    // delay) before the test process exits.
+    QVERIFY(QThreadPool::globalInstance()->waitForDone(15000));
 }
 
 QTEST_MAIN(TestDirectoryScanner)
