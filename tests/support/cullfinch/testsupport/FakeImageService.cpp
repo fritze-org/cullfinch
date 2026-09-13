@@ -26,17 +26,17 @@ qint64 FakeImageService::memoryUsedBytes() const {
     return 0;
 }
 
-application::ImageResult FakeImageService::answerFor(int index) const {
+application::ImageResult FakeImageService::answerFor(qsizetype index) const {
     const application::ImageRequest& asked = requests_.at(index);
     application::ImageResult result;
-    result.requestId = static_cast<quint64>(index + 1);
+    result.requestId = static_cast<quint64>(index) + 1;
     result.memberId = asked.memberId;
     result.generation = asked.generation;
     result.kind = asked.kind;
     return result;
 }
 
-void FakeImageService::succeed(int index, const QSize& size) {
+void FakeImageService::succeed(qsizetype index, const QSize& size) {
     application::ImageResult result = answerFor(index);
     result.success = true;
     result.image = QImage(size, QImage::Format_RGB32);
@@ -45,7 +45,7 @@ void FakeImageService::succeed(int index, const QSize& size) {
     deliver(result);
 }
 
-void FakeImageService::fail(int index, const QString& error) {
+void FakeImageService::fail(qsizetype index, const QString& error) {
     application::ImageResult result = answerFor(index);
     result.success = false;
     result.error = error;

@@ -153,7 +153,7 @@ void TestImageCanvas::presentAndDeliver() {
 
 void TestImageCanvas::presentingAPhotoAsksForAScreenSizedPreview() {
     // Nothing is decoded for a canvas that has not been given a photo.
-    QCOMPARE(images_->requests().size(), 0);
+    QVERIFY(images_->requests().isEmpty());
 
     QSignalSpy readiness(canvas_->preview(), &ui::PreviewLoader::readinessChanged);
     canvas_->setPresentation(photoNamed(QStringLiteral("IMG_1.JPG")), 4);
@@ -180,7 +180,7 @@ void TestImageCanvas::presentingAPhotoAsksForAScreenSizedPreview() {
 
 void TestImageCanvas::aResizeAsksForThePixelsTheNewSizeNeeds() {
     presentAndDeliver();
-    const int before = images_->requests().size();
+    const qsizetype before = images_->requests().size();
 
     canvas_->setGeometry(canvas_->x(), canvas_->y(), canvas_->width() * 2, canvas_->height() * 2);
     QCoreApplication::processEvents();
@@ -238,7 +238,7 @@ void TestImageCanvas::aDecodeErrorIsReportedAndRetryingAsksAgain() {
     sendMouse(canvas_, QEvent::MouseButtonRelease, Qt::LeftButton, centre);
     QCOMPARE(eliminations, 0);
 
-    const int beforeRetry = images_->requests().size();
+    const qsizetype beforeRetry = images_->requests().size();
     sendKey(canvas_, Qt::Key_R);
     QCOMPARE(retried.size(), 1);
     QCOMPARE(images_->requests().size(), beforeRetry + 1);
@@ -249,7 +249,7 @@ void TestImageCanvas::aDecodeErrorIsReportedAndRetryingAsksAgain() {
     QVERIFY(canvas_->preview()->isReady());
 
     // With nothing failing, R is not the canvas's key to take.
-    const int afterRetry = images_->requests().size();
+    const qsizetype afterRetry = images_->requests().size();
     sendKey(canvas_, Qt::Key_R);
     QCOMPARE(images_->requests().size(), afterRetry);
     QCOMPARE(retried.size(), 1);
@@ -370,7 +370,7 @@ void TestImageCanvas::otherButtonsAndKeysAreLeftToTheWidget() {
 
 void TestImageCanvas::clearingThePresentationLeavesNothingToDecideOn() {
     presentAndDeliver();
-    const int before = images_->requests().size();
+    const qsizetype before = images_->requests().size();
 
     canvas_->clearPresentation();
 
