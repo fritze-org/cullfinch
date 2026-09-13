@@ -36,6 +36,8 @@ private slots:
     void aResultForAnotherPhotoIsIgnored();
     void aResultFromASupersededGenerationIsIgnored();
     void aDecodeFailureReportsAnErrorInsteadOfReadiness();
+    void aFailedRefinementLeavesTheReadyPreviewAlone();
+    void anAnswerToAReplacedRequestIsIgnored();
     void aSucceedingRetryClearsTheError();
     void retryingWithoutAnErrorDoesNothing();
     void fullResolutionIsSeparateFromReadiness();
@@ -144,6 +146,51 @@ void TestPreviewLoader::aDecodeFailureReportsAnErrorInsteadOfReadiness() {
     QVERIFY(!loader.isReady());
     QCOMPARE(readiness.size(), 1);
     QCOMPARE(readiness.takeFirst().at(0).toBool(), false);
+}
+
+void TestPreviewLoader::aFailedRefinementLeavesTheReadyPreviewAlone() {
+    testsupport::FakeImageService images;
+    ui::PreviewLoader loader(images);
+    loader.setSource(presentationFor(QStringLiteral("m1"), QStringLiteral("IMG_1.JPG")), 1);
+    loader.requestFitted(QSize(800, 600));
+    images.succeed(0);
+    loader.requestFullResolution();
+
+    QSignalSpy readiness(&loader, &ui::PreviewLoader::readinessChanged);
+    images.fail(1, QStringLiteral("out of memory"));
+
+    // Inspection cannot reach 100%, and that is all it means: the photo on
+    // screen is still the photo, and a decision about it is still a decision
+    // about pixels the user can see.
+    QVERIFY(loader.isReady());
+    QVERIFY(!loader.fitted().isNull());
+    QVERIFY(!loader.hasError());
+    QVERIFY(!loader.isFullResolutionReady());
+    QCOMPARE(readiness.size(), 0);
+}
+
+void TestPreviewLoader::anAnswerToAReplacedRequestIsIgnored() {
+    testsupport::FakeImageService images;
+    ui::PreviewLoader loader(images);
+    loader.setSource(presentationFor(QStringLiteral("m1"), QStringLiteral("IMG_1.JPG")), 1);
+    loader.requestFitted(QSize(400, 300));
+    loader.requestFitted(QSize(800, 600)); // The canvas was resized meanwhile.
+
+    QSignalSpy readiness(&loader, &ui::PreviewLoader::readinessChanged);
+    images.fail(0, QStringLiteral("not a JPEG"));
+
+    // The same photo and generation, but an answer to a request that has been
+    // replaced. Reporting it would describe a size this loader no longer wants.
+    QVERIFY(!loader.hasError());
+    QCOMPARE(readiness.size(), 0);
+
+    images.succeed(1);
+    QVERIFY(loader.isReady());
+    QCOMPARE(readiness.size(), 1);
+
+    // Nor does a late success for the replaced request take its place.
+    images.succeed(0, QSize(64, 48));
+    QCOMPARE(loader.nativeSize(), QSize(400, 300));
 }
 
 void TestPreviewLoader::aSucceedingRetryClearsTheError() {

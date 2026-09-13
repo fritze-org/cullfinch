@@ -85,8 +85,26 @@ void PreviewLoader::onImageReady(const application::ImageResult& result) {
         return; // A superseded request, or another loader's image.
     }
 
+    // Which of the two requests this answers. A photo re-requested at a new size
+    // leaves its earlier request outstanding, and that earlier answer describes
+    // a size this loader no longer wants -- matching the identity is not enough.
+    const bool fitted = result.requestId == fitRequestId_;
+    const bool fullResolution = result.requestId == fullRequestId_;
+    if (!fitted && !fullResolution) {
+        return;
+    }
+
     if (!result.success) {
         // A decode error is a reported failure, never a rejection decision.
+        //
+        // Only the fitted preview's failure is the photo failing. The
+        // refinement is what inspection zooms into, and a photo whose fitted
+        // preview is on screen stays decidable whether or not that arrives:
+        // taking readiness away here would disable a decision about pixels the
+        // user is looking at.
+        if (!fitted) {
+            return;
+        }
         errorText_ = result.error;
         ready_ = false;
         Q_EMIT readinessChanged(false);
@@ -95,12 +113,12 @@ void PreviewLoader::onImageReady(const application::ImageResult& result) {
     }
 
     nativeSize_ = result.nativeSize;
-    if (result.requestId == fitRequestId_) {
+    if (fitted) {
         fitted_ = result.image;
         errorText_.clear();
         ready_ = true;
         Q_EMIT readinessChanged(true);
-    } else if (result.requestId == fullRequestId_) {
+    } else {
         full_ = result.image;
         fullResolutionReady_ = true;
     }
