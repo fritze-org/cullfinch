@@ -151,6 +151,10 @@ private slots:
     void aJournalRefusedMidGroupLeavesTheFilesForRecovery();
     void anUnreadableManifestIsReported();
     void recoveryReportsAFileItCannotPutBack();
+
+    void retryTrashHandsTheRetainedGroupToTrash();
+    void retryTrashRefusesAGroupThatIsNoLongerIntactInStaging();
+    void confirmingATrashOutcomeMovesNothingAndSettlesTheRecord();
 };
 
 void TestStagingExecutor::movesTheWholeGroupAndWritesAManifest() {
@@ -996,6 +1000,102 @@ void TestStagingExecutor::recoveryReportsAFileItCannotPutBack() {
     QVERIFY2(recovered.error.contains(QStringLiteral("failed")), qPrintable(recovered.error));
     QVERIFY(QFileInfo::exists(group.stagedPath(QStringLiteral("A.JPG"))));
     QVERIFY(QFileInfo::exists(group.stagedPath(QStringLiteral("A.RAF"))));
+}
+
+void TestStagingExecutor::retryTrashHandsTheRetainedGroupToTrash() {
+    TempCollection collection;
+    collection.addJpeg(QStringLiteral("A.JPG"));
+    collection.addRaw(QStringLiteral("A.RAF"));
+    StagedGroup group(collection);
+    QCOMPARE(group.staged.state, domain::OperationState::NeedsRecovery);
+    QCOMPARE(group.trash.callCount(), 1);
+
+    // Trash refuses once more: the complete group is retained again, and the
+    // same two offers still stand. There is never a fall back to deleting it.
+    group.trash.failNextCalls(1);
+    const application::OperationRecord refusedAgain = group.executor.retryTrash(group.staged);
+    QCOMPARE(refusedAgain.state, domain::OperationState::NeedsRecovery);
+    QVERIFY2(refusedAgain.error.contains(QStringLiteral("retry Trash or restore it")),
+             qPrintable(refusedAgain.error));
+    QVERIFY(QFileInfo::exists(group.stagedPath(QStringLiteral("A.JPG"))));
+
+    // The whole group is still in staging, so the other half of the offer the
+    // policy makes -- retry, rather than restore -- applies.
+    const application::OperationRecord retried = group.executor.retryTrash(group.staged);
+    QVERIFY2(retried.error.isEmpty(), qPrintable(retried.error));
+    QCOMPARE(retried.state, domain::OperationState::Completed);
+    QCOMPARE(group.trash.callCount(), 3);
+    QCOMPARE(stepOf(retried, QStringLiteral("A.JPG")), QStringLiteral("trashed"));
+    QCOMPARE(stepOf(retried, QStringLiteral("A.RAF")), QStringLiteral("trashed"));
+    QVERIFY(!QFileInfo::exists(collection.filePath(QStringLiteral("A.JPG"))));
+}
+
+void TestStagingExecutor::retryTrashRefusesAGroupThatIsNoLongerIntactInStaging() {
+    TempCollection collection;
+    collection.addJpeg(QStringLiteral("A.JPG"));
+    collection.addRaw(QStringLiteral("A.RAF"));
+    StagedGroup group(collection);
+
+    // The RAW disappeared from staging after the failed Trash. Handing the
+    // directory over now would send an incomplete group to Trash, which is
+    // exactly the half-moved state the whole policy exists to prevent.
+    QVERIFY(QFile::remove(group.stagedPath(QStringLiteral("A.RAF"))));
+
+    const application::OperationRecord retried = group.executor.retryTrash(group.staged);
+    QCOMPARE(retried.state, domain::OperationState::NeedsRecovery);
+    QVERIFY2(retried.error.contains(QStringLiteral("A.RAF")), qPrintable(retried.error));
+    QCOMPARE(group.trash.callCount(), 1); // Trash was never asked a second time.
+    QVERIFY(QFileInfo::exists(group.stagedPath(QStringLiteral("A.JPG"))));
+}
+
+void TestStagingExecutor::confirmingATrashOutcomeMovesNothingAndSettlesTheRecord() {
+    TempCollection collection;
+    collection.addJpeg(QStringLiteral("A.JPG"));
+    collection.addRaw(QStringLiteral("A.RAF"));
+
+    const domain::PlanningResult planning = planFor(collection);
+    FakeTrashAdapter trash;
+    trash.setReportsPath(false); // The platform is allowed to say nothing.
+    infrastructure::StagingExecutor executor(trash);
+
+    QList<application::OperationRecord> snapshots;
+    const application::JournalWriter journal =
+        [&snapshots](const application::OperationRecord& record, QString*) {
+            snapshots.append(record);
+            return true;
+        };
+    std::ignore =
+        executor.executeGroup(recordFor(planning.plan), planning.plan.groups.first(), journal);
+
+    // The journal as it stood just before Trash was asked. Reconciling from it
+    // cannot say where the group went, so the outcome is recorded as uncertain.
+    QVERIFY(snapshots.size() >= 2);
+    const application::OperationRecord beforeTrash = snapshots.at(snapshots.size() - 2);
+    QCOMPARE(beforeTrash.state, domain::OperationState::Trashing);
+    QVERIFY(beforeTrash.trashPath.isEmpty());
+    const application::OperationRecord uncertain = executor.recover(beforeTrash);
+    QCOMPARE(uncertain.state, domain::OperationState::NeedsRecovery);
+    QCOMPARE(stepOf(uncertain, QStringLiteral("A.JPG")), QStringLiteral("uncertain"));
+
+    // A person has looked in the Trash. That answer settles the record and
+    // moves nothing: Trash is not asked again, and no file is touched.
+    const application::OperationRecord confirmed = executor.confirmTrashed(uncertain);
+    QVERIFY2(confirmed.error.isEmpty(), qPrintable(confirmed.error));
+    QCOMPARE(confirmed.state, domain::OperationState::Completed);
+    QCOMPARE(stepOf(confirmed, QStringLiteral("A.RAF")), QStringLiteral("trashed"));
+    QCOMPARE(trash.callCount(), 1);
+
+    // A record whose files are simply sitting in staging has nothing waiting to
+    // be confirmed, and saying so is refused rather than answered for anyone.
+    TempCollection retained;
+    retained.addJpeg(QStringLiteral("B.JPG"));
+    StagedGroup staged(retained);
+    const application::OperationRecord nothingToConfirm =
+        staged.executor.confirmTrashed(staged.staged);
+    QCOMPARE(nothingToConfirm.state, domain::OperationState::NeedsRecovery);
+    QVERIFY2(nothingToConfirm.error.contains(QStringLiteral("waiting")),
+             qPrintable(nothingToConfirm.error));
+    QVERIFY(QFileInfo::exists(staged.stagedPath(QStringLiteral("B.JPG"))));
 }
 
 QTEST_MAIN(TestStagingExecutor)
