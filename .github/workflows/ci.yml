@@ -69,10 +69,11 @@ jobs:
           cache-dependency-glob: uv.lock
 
       # No --no-build on any uv invocation in this job, the `uv run` steps below
-      # included: actionlint-py publishes no wheel, `uv run` re-checks the
-      # environment against the lock on every call, and uv has no per-package
-      # exemption from a global --no-build. The lock pins that sdist by hash,
-      # which is what makes building it acceptable. See issue #25.
+      # included: actionlint-py-kjanat's current release publishes no wheel,
+      # `uv run` re-checks the environment against the lock on every call, and
+      # uv has no per-package exemption from a global --no-build. The lock
+      # pins that sdist by hash, which is what makes building it acceptable.
+      # See issue #25.
       - name: Sync the locked tooling environment
         run: uv sync --locked --group tooling
 
@@ -535,9 +536,10 @@ jobs:
           enable-cache: true
           cache-dependency-glob: uv.lock
 
-      # No --no-build: actionlint-py publishes no wheel, so the sync has to build
-      # its source distribution. The lock pins that sdist by hash, which is what
-      # makes building it acceptable. See issue #25.
+      # No --no-build: actionlint-py-kjanat's current release publishes no
+      # wheel, so the sync has to build its source distribution. The lock
+      # pins that sdist by hash, which is what makes building it acceptable.
+      # See issue #25.
       - name: Sync the locked tooling environment
         run: uv sync --locked --group tooling
 
