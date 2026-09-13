@@ -49,6 +49,10 @@ there before and covers the results a cancellation would race.
   readiness means directly: a result for another photo or a superseded generation is ignored, a
   decode failure reports an error instead of readiness, and the full-resolution image is separate
   from the readiness a decision depends on.
+- The canvas became testable too, for the same reason: a service that answers on command can hold a
+  preview back or fail one, which a real decoder cannot be asked to do. `FakeImageService` in
+  `tests/support/` is that service, and `tests/gui/tst_image_canvas.cpp` uses it to pin down what
+  the canvas does before a preview arrives, after one fails, and while inspecting.
 - The call sites are one hop longer. That is the point: `preview()->isReady()` says which half of
   the canvas is being asked, where `isReady()` on a widget did not.
 - `ImageCanvas` keeps presentation, marks, gestures and painting, and reads its pixels from the

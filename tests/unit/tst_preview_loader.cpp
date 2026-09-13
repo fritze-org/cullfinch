@@ -1,4 +1,5 @@
 // SPDX-License-Identifier: GPL-3.0-or-later
+#include <cullfinch/testsupport/FakeImageService.h>
 #include <cullfinch/ui/PreviewLoader.h>
 
 #include <QImage>
@@ -8,63 +9,6 @@
 using namespace cullfinch;
 
 namespace {
-
-/// An image service that answers nothing on its own.
-///
-/// Decode is asynchronous in production, so the interesting cases are all about
-/// *when* a result arrives and which request it belongs to. Holding every
-/// request until the test delivers it is what makes those orderings reachable.
-class RecordingImageService : public application::IImageService {
-public:
-    quint64 request(const application::ImageRequest& request) override {
-        requests.append(request);
-        return static_cast<quint64>(requests.size()); // Ids start at 1; 0 means none.
-    }
-    void cancel(quint64 /*requestId*/) override {}
-    void cancelGeneration(quint64 /*generation*/) override {}
-    void setMemoryBudgetBytes(qint64 bytes) override { budget_ = bytes; }
-    [[nodiscard]] qint64 memoryBudgetBytes() const override { return budget_; }
-    [[nodiscard]] qint64 memoryUsedBytes() const override { return 0; }
-
-    /// Answers the request at `index` with a decoded image.
-    void succeed(int index, const QSize& native = QSize(400, 300)) {
-        application::ImageResult result = answerFor(index);
-        result.success = true;
-        result.image = QImage(native, QImage::Format_RGB32);
-        result.image.fill(Qt::gray);
-        result.nativeSize = native;
-        Q_EMIT imageReady(result);
-    }
-
-    /// Answers the request at `index` with a decode failure.
-    void fail(int index, const QString& error) {
-        application::ImageResult result = answerFor(index);
-        result.success = false;
-        result.error = error;
-        Q_EMIT imageReady(result);
-    }
-
-    /// Delivers a result the test built by hand, for the cases about results
-    /// that must be ignored.
-    void deliver(const application::ImageResult& result) { Q_EMIT imageReady(result); }
-
-    /// The envelope of the answer to the request at `index`: which request it
-    /// belongs to, and which photo and generation it was asked for.
-    [[nodiscard]] application::ImageResult answerFor(int index) const {
-        const application::ImageRequest& asked = requests.at(index);
-        application::ImageResult result;
-        result.requestId = static_cast<quint64>(index + 1);
-        result.memberId = asked.memberId;
-        result.generation = asked.generation;
-        result.kind = asked.kind;
-        return result;
-    }
-
-    QList<application::ImageRequest> requests;
-
-private:
-    qint64 budget_ = 0;
-};
 
 ui::AssetPresentation presentationFor(const QString& member, const QString& path) {
     ui::AssetPresentation presentation;
@@ -99,7 +43,7 @@ private slots:
 };
 
 void TestPreviewLoader::requestsCarryTheSourceAndTheAskedForSize() {
-    RecordingImageService images;
+    testsupport::FakeImageService images;
     ui::PreviewLoader loader(images);
 
     QVERIFY(!loader.hasSource());
@@ -110,21 +54,21 @@ void TestPreviewLoader::requestsCarryTheSourceAndTheAskedForSize() {
     loader.requestFitted(QSize(800, 600));
     loader.requestFullResolution();
 
-    QCOMPARE(images.requests.size(), 2);
-    QCOMPARE(images.requests.at(0).kind, application::ImageRequestClass::Comparison);
-    QCOMPARE(images.requests.at(0).targetSize, QSize(800, 600));
-    QCOMPARE(images.requests.at(0).path, QStringLiteral("/photos/IMG_1.JPG"));
-    QCOMPARE(images.requests.at(0).generation, quint64{7});
-    QCOMPARE(images.requests.at(1).kind, application::ImageRequestClass::FullResolution);
+    QCOMPARE(images.requests().size(), 2);
+    QCOMPARE(images.requests().at(0).kind, application::ImageRequestClass::Comparison);
+    QCOMPARE(images.requests().at(0).targetSize, QSize(800, 600));
+    QCOMPARE(images.requests().at(0).path, QStringLiteral("/photos/IMG_1.JPG"));
+    QCOMPARE(images.requests().at(0).generation, quint64{7});
+    QCOMPARE(images.requests().at(1).kind, application::ImageRequestClass::FullResolution);
     // Native resolution is asked for with an unset size, never with a guess:
     // the decoder scales only for a size that is valid and not empty.
-    QVERIFY(!images.requests.at(1).targetSize.isValid());
+    QVERIFY(!images.requests().at(1).targetSize.isValid());
     // The fitted preview outranks the refinement nobody may ever zoom into.
-    QVERIFY(images.requests.at(0).priority > images.requests.at(1).priority);
+    QVERIFY(images.requests().at(0).priority > images.requests().at(1).priority);
 }
 
 void TestPreviewLoader::readinessFollowsTheFittedPreview() {
-    RecordingImageService images;
+    testsupport::FakeImageService images;
     ui::PreviewLoader loader(images);
     QSignalSpy readiness(&loader, &ui::PreviewLoader::readinessChanged);
     QSignalSpy changed(&loader, &ui::PreviewLoader::changed);
@@ -148,7 +92,7 @@ void TestPreviewLoader::readinessFollowsTheFittedPreview() {
 }
 
 void TestPreviewLoader::aResultForAnotherPhotoIsIgnored() {
-    RecordingImageService images;
+    testsupport::FakeImageService images;
     ui::PreviewLoader loader(images);
     loader.setSource(presentationFor(QStringLiteral("m1"), QStringLiteral("IMG_1.JPG")), 1);
     loader.requestFitted(QSize(800, 600));
@@ -168,7 +112,7 @@ void TestPreviewLoader::aResultForAnotherPhotoIsIgnored() {
 }
 
 void TestPreviewLoader::aResultFromASupersededGenerationIsIgnored() {
-    RecordingImageService images;
+    testsupport::FakeImageService images;
     ui::PreviewLoader loader(images);
     const ui::AssetPresentation photo =
         presentationFor(QStringLiteral("m1"), QStringLiteral("IMG_1.JPG"));
@@ -185,7 +129,7 @@ void TestPreviewLoader::aResultFromASupersededGenerationIsIgnored() {
 }
 
 void TestPreviewLoader::aDecodeFailureReportsAnErrorInsteadOfReadiness() {
-    RecordingImageService images;
+    testsupport::FakeImageService images;
     ui::PreviewLoader loader(images);
     loader.setSource(presentationFor(QStringLiteral("m1"), QStringLiteral("IMG_1.JPG")), 1);
     loader.requestFitted(QSize(800, 600));
@@ -203,7 +147,7 @@ void TestPreviewLoader::aDecodeFailureReportsAnErrorInsteadOfReadiness() {
 }
 
 void TestPreviewLoader::aSucceedingRetryClearsTheError() {
-    RecordingImageService images;
+    testsupport::FakeImageService images;
     ui::PreviewLoader loader(images);
     loader.setSource(presentationFor(QStringLiteral("m1"), QStringLiteral("IMG_1.JPG")), 1);
     loader.requestFitted(QSize(800, 600));
@@ -218,7 +162,7 @@ void TestPreviewLoader::aSucceedingRetryClearsTheError() {
     // error on screen that the loader no longer reports.
     QVERIFY(!loader.hasError());
     QCOMPARE(changed.size(), 1);
-    QCOMPARE(images.requests.size(), 2);
+    QCOMPARE(images.requests().size(), 2);
 
     images.succeed(1);
     QVERIFY(loader.isReady());
@@ -226,7 +170,7 @@ void TestPreviewLoader::aSucceedingRetryClearsTheError() {
 }
 
 void TestPreviewLoader::retryingWithoutAnErrorDoesNothing() {
-    RecordingImageService images;
+    testsupport::FakeImageService images;
     ui::PreviewLoader loader(images);
     loader.setSource(presentationFor(QStringLiteral("m1"), QStringLiteral("IMG_1.JPG")), 1);
     loader.requestFitted(QSize(800, 600));
@@ -235,11 +179,11 @@ void TestPreviewLoader::retryingWithoutAnErrorDoesNothing() {
     // Nothing failed, so the key that offered the retry stays unhandled and a
     // working preview is not thrown away and decoded again.
     QVERIFY(!loader.retryFitted(QSize(800, 600)));
-    QCOMPARE(images.requests.size(), 1);
+    QCOMPARE(images.requests().size(), 1);
 }
 
 void TestPreviewLoader::fullResolutionIsSeparateFromReadiness() {
-    RecordingImageService images;
+    testsupport::FakeImageService images;
     ui::PreviewLoader loader(images);
     loader.setSource(presentationFor(QStringLiteral("m1"), QStringLiteral("IMG_1.JPG")), 1);
     loader.requestFitted(QSize(800, 600));
@@ -261,7 +205,7 @@ void TestPreviewLoader::fullResolutionIsSeparateFromReadiness() {
 }
 
 void TestPreviewLoader::aNewSourceDropsEverythingTheOldOneHad() {
-    RecordingImageService images;
+    testsupport::FakeImageService images;
     ui::PreviewLoader loader(images);
     loader.setSource(presentationFor(QStringLiteral("m1"), QStringLiteral("IMG_1.JPG")), 1);
     loader.requestFitted(QSize(800, 600));

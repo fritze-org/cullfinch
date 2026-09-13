@@ -77,7 +77,7 @@ cullfinch_add_test(
 cullfinch_add_test(
   tst_preview_loader
   SOURCES unit/tst_preview_loader.cpp
-  DEPS cullfinch::cullfinch_ui
+  DEPS cullfinch::cullfinch_ui cullfinch::cullfinch_testsupport
   LABELS unit PLATFORM offscreen)
 
 # Startup-time desktop integration is a policy decision plus a one-line effect, and both are checked
@@ -152,6 +152,16 @@ cullfinch_add_test(
   DEPS cullfinch::cullfinch_composition cullfinch::cullfinch_testsupport
   LABELS gui
   TIMEOUT 300)
+
+# The canvas on its own, against an image service that answers on command. The view suites drive it
+# through a real decoder, which cannot say when a preview arrives or fail one deliberately, and
+# those orderings are what decide whether a photo can be eliminated.
+cullfinch_add_test(
+  tst_image_canvas
+  SOURCES gui/tst_image_canvas.cpp
+  DEPS cullfinch::cullfinch_ui cullfinch::cullfinch_testsupport
+  LABELS gui
+  TIMEOUT 120)
 
 cullfinch_add_test(
   tst_versus_view

@@ -2,10 +2,14 @@
 # from the coverage denominator.
 cullfinch_add_library(
   cullfinch_testsupport
-  SOURCES cullfinch/testsupport/AssetBuilder.cpp cullfinch/testsupport/FakeRepository.cpp
-          cullfinch/testsupport/FakeTrashAdapter.cpp cullfinch/testsupport/TempCollection.cpp
+  SOURCES cullfinch/testsupport/AssetBuilder.cpp
+          cullfinch/testsupport/FakeImageService.cpp
+          cullfinch/testsupport/FakeRepository.cpp
+          cullfinch/testsupport/FakeTrashAdapter.cpp
+          cullfinch/testsupport/TempCollection.cpp
   HEADERS cullfinch/testsupport/AssetBuilder.h
           cullfinch/testsupport/CrashPoints.h
+          cullfinch/testsupport/FakeImageService.h
           cullfinch/testsupport/FakeRepository.h
           cullfinch/testsupport/FakeTrashAdapter.h
           cullfinch/testsupport/TempCollection.h
