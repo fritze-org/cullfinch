@@ -36,6 +36,8 @@ private slots:
     void runInTransactionRollsBackMarksWhenTheEnclosingActionFails();
     void aFailedMarkUpdateRollsBackTheWholeTransaction();
     void aFailedRevisionAdvanceRollsBackTheWholeTransaction();
+    void runInTransactionReportsAConnectionThatCannotBegin();
+    void aRefusedCommitDiscardsTheTransactionAndFreesTheConnection();
     void roundTripsASessionDraft();
     void listsOnlyResumableSessions();
     void roundTripsAnOperationJournal();
@@ -391,6 +393,77 @@ void TestSqliteRepository::aFailedRevisionAdvanceRollsBackTheWholeTransaction() 
         QCOMPARE(asset.disposition, domain::Disposition::Neutral);
     }
     QCOMPARE(repo.collectionRevision(*id, nullptr), revision);
+}
+
+void TestSqliteRepository::runInTransactionReportsAConnectionThatCannotBegin() {
+    // SQLite cannot nest BEGIN on one connection. Opening a transaction on
+    // the repository's own connection is therefore the one way to make its
+    // BEGIN genuinely fail, which is what the scope has to report rather
+    // than run the action as though it were covered.
+    const QString connectionName = QStringLiteral("sqlite-repo-cannot-begin");
+    infrastructure::SqliteRepository repo(
+        directory_.filePath(QStringLiteral("cannot-begin.sqlite")), connectionName);
+    QString error;
+    QVERIFY2(repo.open(&error), qPrintable(error));
+
+    QSqlDatabase raw = QSqlDatabase::database(connectionName);
+    QVERIFY2(raw.transaction(), qPrintable(raw.lastError().text()));
+
+    bool actionRan = false;
+    QVERIFY2(!repo.runInTransaction(
+                 [&actionRan]() {
+                     actionRan = true;
+                     return true;
+                 },
+                 &error),
+             "a connection that cannot begin a transaction must refuse the scope");
+    QVERIFY2(!actionRan, "the action must not run outside the transaction it asked for");
+    QVERIFY(error.contains(QStringLiteral("transaction could not be started")));
+
+    raw.rollback();
+}
+
+void TestSqliteRepository::aRefusedCommitDiscardsTheTransactionAndFreesTheConnection() {
+    const QString connectionName = QStringLiteral("sqlite-repo-refused-commit");
+    infrastructure::SqliteRepository repo(
+        directory_.filePath(QStringLiteral("refused-commit.sqlite")), connectionName);
+    QString error;
+    QVERIFY2(repo.open(&error), qPrintable(error));
+
+    // A deferred foreign key is reported by SQLite at COMMIT, not at the
+    // statement -- the one failure the scope cannot see coming while the
+    // action is still running.
+    {
+        QSqlQuery ddl(QSqlDatabase::database(connectionName));
+        QVERIFY2(ddl.exec(QStringLiteral("CREATE TABLE fk_parent (id INTEGER PRIMARY KEY)")),
+                 qPrintable(ddl.lastError().text()));
+        QVERIFY2(
+            ddl.exec(QStringLiteral("CREATE TABLE fk_child (id INTEGER PRIMARY KEY, parent INTEGER "
+                                    "REFERENCES fk_parent(id) DEFERRABLE INITIALLY DEFERRED)")),
+            qPrintable(ddl.lastError().text()));
+    }
+
+    QVERIFY2(!repo.runInTransaction(
+                 [&connectionName]() {
+                     QSqlQuery orphan(QSqlDatabase::database(connectionName));
+                     return orphan.exec(
+                         QStringLiteral("INSERT INTO fk_child (id, parent) VALUES (1, 999)"));
+                 },
+                 &error),
+             "a refused commit must be reported, not mistaken for a committed unit of work");
+    QVERIFY(error.contains(QStringLiteral("Committing the transaction failed")));
+
+    // The refused unit of work is gone, and the connection is usable again:
+    // left open, its writes would still be pending for whoever commits next.
+    QSqlDatabase after = QSqlDatabase::database(connectionName);
+    QVERIFY2(after.transaction(), "a refused commit must not leave the connection mid-transaction");
+    after.rollback();
+
+    QSqlQuery remaining(QSqlDatabase::database(connectionName));
+    QVERIFY2(remaining.exec(QStringLiteral("SELECT COUNT(*) FROM fk_child")),
+             qPrintable(remaining.lastError().text()));
+    QVERIFY(remaining.next());
+    QCOMPARE(remaining.value(0).toInt(), 0);
 }
 
 void TestSqliteRepository::roundTripsASessionDraft() {

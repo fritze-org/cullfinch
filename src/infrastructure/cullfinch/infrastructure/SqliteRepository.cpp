@@ -423,8 +423,14 @@ bool SqliteRepository::endTransactionScope(bool commit, QString* error) {
         return true;
     }
     if (!database_.commit()) {
-        report(error,
-               tr("Committing the transaction failed: %1").arg(database_.lastError().text()));
+        const QString message = database_.lastError().text();
+        // A refused COMMIT leaves SQLite inside the transaction with this
+        // unit's writes still pending -- a deferred constraint that only
+        // fires here is the usual cause. Discarding them is the whole point
+        // of the scope: left open they would brick the next BEGIN on this
+        // connection, and a later commit could still flush them.
+        database_.rollback();
+        report(error, tr("Committing the transaction failed: %1").arg(message));
         return false;
     }
     return true;
