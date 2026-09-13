@@ -89,6 +89,9 @@ private:
     /// Nesting depth of runInTransaction calls; only the outermost one takes
     /// the rollback snapshot and restores it on failure.
     int transactionDepth_ = 0;
+    /// Set when any scope in the current transaction failed, so the outermost
+    /// one restores its snapshot even if the action above it returned true.
+    bool rollbackOnly_ = false;
     int operationSavesBeforeFailure_ = 0;
     int operationSaveFailures_ = 0;
     int sessionSaveCount_ = 0;

@@ -32,18 +32,40 @@ bool FakeRepository::runInTransaction(const std::function<bool()>& action, QStri
     // caller composing several fake writes (see SessionController::finish)
     // sees the same all-or-nothing behaviour a real repository gives it.
     const bool outermost = transactionDepth_ == 0;
+    if (outermost) {
+        rollbackOnly_ = false;
+    }
+    const QHash<QString, domain::CollectionId> collectionsSnapshot = collectionsByRoot_;
     const QHash<domain::CollectionId, quint64> revisionsSnapshot = revisions_;
     const QHash<domain::CollectionId, domain::PhotoAssetList> assetsSnapshot = assets_;
     const QHash<domain::SessionId, application::StoredSession> sessionsSnapshot = sessions_;
+    const QHash<domain::OperationId, application::OperationRecord> operationsSnapshot = operations_;
 
     ++transactionDepth_;
     const bool ok = action();
     --transactionDepth_;
 
-    if (!ok && outermost) {
+    // A nested scope cannot restore on its own without discarding writes the
+    // scopes above it still expect, so a failure anywhere condemns the whole
+    // snapshot and the outermost call is the one that puts it back -- the
+    // same rule the real repository follows.
+    if (!ok) {
+        rollbackOnly_ = true;
+    }
+    if (!outermost) {
+        return ok;
+    }
+    if (rollbackOnly_) {
+        collectionsByRoot_ = collectionsSnapshot;
         revisions_ = revisionsSnapshot;
         assets_ = assetsSnapshot;
         sessions_ = sessionsSnapshot;
+        operations_ = operationsSnapshot;
+        rollbackOnly_ = false;
+        // The counters and the operation journal stay: they record what was
+        // attempted, which is exactly what a test inspecting a rolled-back
+        // run needs to see.
+        return false;
     }
     return ok;
 }

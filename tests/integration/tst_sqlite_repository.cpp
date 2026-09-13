@@ -38,6 +38,7 @@ private slots:
     void aFailedRevisionAdvanceRollsBackTheWholeTransaction();
     void runInTransactionReportsAConnectionThatCannotBegin();
     void aRefusedCommitDiscardsTheTransactionAndFreesTheConnection();
+    void aFailedNestedScopeCondemnsTheWholeTransaction();
     void roundTripsASessionDraft();
     void listsOnlyResumableSessions();
     void roundTripsAnOperationJournal();
@@ -464,6 +465,48 @@ void TestSqliteRepository::aRefusedCommitDiscardsTheTransactionAndFreesTheConnec
              qPrintable(remaining.lastError().text()));
     QVERIFY(remaining.next());
     QCOMPARE(remaining.value(0).toInt(), 0);
+}
+
+void TestSqliteRepository::aFailedNestedScopeCondemnsTheWholeTransaction() {
+    QString error;
+    const auto id = repository_->ensureCollection(QStringLiteral("/photos"), false, &error);
+    if (!id.has_value()) {
+        QFAIL(qPrintable(error));
+    }
+    const domain::PhotoAssetList assets = AssetBuilder::resolvedSeries(2);
+    quint64 revision = 0;
+    QVERIFY2(repository_->reconcileAssets(*id, assets, nullptr, &revision, &error),
+             qPrintable(error));
+
+    // A nested scope shares the one transaction, so its writes cannot be
+    // dropped on their own. An enclosing action that shrugs off the failure
+    // must not be able to commit them anyway.
+    quint64 ignored = 0;
+    QVERIFY2(!repository_->runInTransaction(
+                 [&]() {
+                     QString nestedError;
+                     repository_->applyDispositions(*id, revision, {assets.first().id}, {},
+                                                    &ignored, &nestedError);
+                     // Deliberately stale: the guard is the scope, not this.
+                     repository_->applyDispositions(*id, revision, {assets.at(1).id}, {}, &ignored,
+                                                    &nestedError);
+                     return true;
+                 },
+                 &error),
+             "a scope that swallowed a nested failure must not report a committed transaction");
+    QVERIFY(!error.isEmpty());
+
+    // Neither the mark the first nested scope wrote nor the revision it
+    // advanced survives.
+    for (const domain::PhotoAsset& asset : repository_->loadAssets(*id, nullptr)) {
+        QCOMPARE(asset.disposition, domain::Disposition::Neutral);
+    }
+    QCOMPARE(repository_->collectionRevision(*id, nullptr), revision);
+
+    // The connection is left usable, not stuck mid-transaction.
+    QVERIFY2(
+        repository_->applyDispositions(*id, revision, {assets.first().id}, {}, &ignored, &error),
+        qPrintable(error));
 }
 
 void TestSqliteRepository::roundTripsASessionDraft() {

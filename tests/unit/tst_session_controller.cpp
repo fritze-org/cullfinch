@@ -54,6 +54,7 @@ private slots:
     void marksCannotChangeWhileAComparisonIsActive();
     void applyRejectionsRefusesWithoutACollection();
     void persistWithNoTargetsIsANoOp();
+    void theFakeRepositoryRollsBackEveryRowStoreItOffers();
     void anArbitraryNewFlowRunsThroughTheSameController();
 
 private:
@@ -506,6 +507,41 @@ void TestSessionController::persistWithNoTargetsIsANoOp() {
     QString error;
     QVERIFY2(dispositions_->persist({}, &error), qPrintable(error));
     QVERIFY(error.isEmpty());
+}
+
+void TestSessionController::theFakeRepositoryRollsBackEveryRowStoreItOffers() {
+    // The finish() tests are only worth anything if the fake really does undo
+    // what a failed transaction wrote, across every store it hands back --
+    // and if a nested failure condemns the whole scope the way the real
+    // repository's does, rather than riding out on an enclosing `true`.
+    QString error;
+    const quint64 revisionBefore = repository_->collectionRevision(collection_, nullptr);
+
+    application::OperationRecord record;
+    record.plan.id = domain::OperationId(QStringLiteral("op-rolled-back"));
+    record.plan.collectionId = collection_;
+
+    QVERIFY2(!repository_->runInTransaction(
+                 [&]() {
+                     QString nestedError;
+                     repository_->ensureCollection(QStringLiteral("/elsewhere"), false,
+                                                   &nestedError);
+                     repository_->saveOperation(record, &nestedError);
+                     repository_->runInTransaction([]() { return false; }, &nestedError);
+                     return true;
+                 },
+                 &error),
+             "a swallowed nested failure must still roll the outer scope back");
+
+    QVERIFY2(!repository_->findCollection(QStringLiteral("/elsewhere"), &error).has_value(),
+             "a collection created inside the failed scope must not survive it");
+    QVERIFY2(!repository_->loadOperation(record.plan.id, &error).has_value(),
+             "an operation saved inside the failed scope must not survive it");
+    QCOMPARE(repository_->collectionRevision(collection_, nullptr), revisionBefore);
+
+    // The journal is deliberately outside the rollback: it records what was
+    // attempted, which is what a crash-recovery test needs to inspect.
+    QCOMPARE(repository_->operationJournal().size(), 1);
 }
 
 void TestSessionController::anArbitraryNewFlowRunsThroughTheSameController() {

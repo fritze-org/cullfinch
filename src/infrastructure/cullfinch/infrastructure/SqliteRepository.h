@@ -90,6 +90,10 @@ private:
     QSqlDatabase database_;
     bool open_ = false;
     int transactionDepth_ = 0;
+    /// Set when any scope in the current transaction failed. The outermost
+    /// one then rolls back rather than committing writes a failed scope left
+    /// behind.
+    bool rollbackOnly_ = false;
 };
 
 } // namespace cullfinch::infrastructure
