@@ -24,6 +24,7 @@ private slots:
     void producesOneAssetPerJpegRawPair();
     void discardsResultsFromASupersededGeneration();
     void reportsCaseDistinctStemsWithoutMerging();
+    void survivesDestructionWhileAScanIsInFlight();
 };
 
 void TestDirectoryScanner::enumeratesJpegAndRawFiles() {
@@ -198,6 +199,35 @@ void TestDirectoryScanner::reportsCaseDistinctStemsWithoutMerging() {
         QCOMPARE(asset.pairingState, domain::PairingState::Ambiguous);
         QVERIFY(!asset.isOperable());
     }
+}
+
+void TestDirectoryScanner::survivesDestructionWhileAScanIsInFlight() {
+    TempCollection collection;
+    // Enough files that enumeration is still running, on anything but a
+    // wildly slow machine, when the scanner below is destroyed a few lines
+    // down -- this is the race #27 describes: a scan in flight when its
+    // scanner disappears. A sanitizer build is what actually proves the
+    // worker never dereferences the scanner; this test just makes sure the
+    // scenario is exercised and that destruction does not hang waiting for
+    // the worker to finish.
+    for (int index = 0; index < 4000; ++index) {
+        collection.addFile(QStringLiteral("file-%1.dat").arg(index), QByteArrayLiteral("x"));
+    }
+
+    {
+        infrastructure::DirectoryScanner scanner;
+        application::ScanRequest request;
+        request.collectionId = domain::CollectionId(QStringLiteral("c1"));
+        request.rootPath = collection.path();
+        request.config = domain::AssociationConfig::defaults();
+        request.generation = 1;
+        scanner.requestScan(request);
+        // scanner is destroyed here, likely mid-scan.
+    }
+
+    // Give a (harmlessly late) worker a chance to deliver before the test
+    // process exits.
+    QTest::qWait(100);
 }
 
 QTEST_MAIN(TestDirectoryScanner)

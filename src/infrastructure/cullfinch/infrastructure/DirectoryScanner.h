@@ -4,17 +4,15 @@
 #include <cullfinch/application/CollectionController.h>
 #include <cullfinch/domain/AssociationPolicy.h>
 
-#include <QAtomicInteger>
 #include <QFileSystemWatcher>
-#include <QFuture>
-#include <QList>
-#include <QMutex>
 #include <QStringList>
 #include <QTimer>
 
 #include <memory>
 
 namespace cullfinch::infrastructure {
+
+class ScanState;
 
 /// Asynchronous directory discovery and JPG/RAW association.
 ///
@@ -43,22 +41,22 @@ public:
                                                                  bool recursive, QString* error);
 
 private:
-    void publishFinished(quint64 generation, const domain::AssociationResult& result);
-    void publishFailed(quint64 generation, const QString& message);
     void rewatch(const QString& rootPath, bool recursive);
 
-    domain::StemAssociationResolver resolver_;
     QFileSystemWatcher watcher_;
     QTimer debounce_;
     QString watchedRoot_;
     bool watchRecursive_ = false;
     bool watchEnabled_ = false;
-    /// Latest generation. Workers compare against it and drop stale results.
-    QAtomicInteger<quint64> currentGeneration_ = 0;
-    /// Outstanding worker tasks, so destruction can wait for them. Guarded
-    /// because workers finish on the pool while the owning thread appends.
-    QMutex inFlightGuard_;
-    QList<QFuture<void>> inFlight_;
+
+    /// Current generation and worker-delivery signals, held by shared_ptr
+    /// rather than as plain members. A worker task captures this pointer, not
+    /// `this`: it never dereferences the scanner, so a scanner destroyed
+    /// mid-scan just drops its own reference while the worker's copy keeps
+    /// the state alive until the task finishes. Delivery back to the GUI
+    /// thread is a queued signal from that shared object, so Qt only needs
+    /// the state to be alive to decide whether the connection still stands.
+    std::shared_ptr<ScanState> state_;
 };
 
 } // namespace cullfinch::infrastructure

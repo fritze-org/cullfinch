@@ -3,23 +3,47 @@
 
 #include <cullfinch/infrastructure/Paths.h>
 
+#include <QAtomicInteger>
 #include <QCoreApplication>
 #include <QDir>
 #include <QDirIterator>
 #include <QFile>
 #include <QFileInfo>
-#include <QMetaObject>
-#include <QMutexLocker>
+#include <QObject>
 #include <QThreadPool>
 #include <QtConcurrent/QtConcurrentRun>
 
-#include <utility>
+#include <tuple>
 
 #if defined(Q_OS_UNIX)
 #include <sys/stat.h>
 #endif
 
 namespace cullfinch::infrastructure {
+
+/// Generation counter and delivery signals shared between a scanner and the
+/// worker task(s) it has in flight.
+///
+/// Owned jointly by the scanner and by every task it has started, via
+/// std::shared_ptr: a task captures a copy of this object instead of `this`,
+/// so it never touches the scanner and a scanner destroyed mid-scan cannot
+/// leave a task holding a dangling pointer. Delivery is a queued signal
+/// rather than a direct call for the same reason -- emitting only requires
+/// this (independently-alive) object to still exist, and Qt tears the
+/// connection to the scanner down under its own lock if the scanner is
+/// destroyed first, so a task never has to know whether the scanner is still
+/// there.
+class ScanState : public QObject {
+    Q_OBJECT
+
+public:
+    QAtomicInteger<quint64> generation{0};
+
+Q_SIGNALS:
+    void finished(quint64 generation, const domain::AssociationResult& result);
+    void failed(quint64 generation, const QString& message);
+};
+
 namespace {
 
 /// Native identity, where the platform offers one. Used to notice replaced
@@ -61,7 +85,8 @@ domain::DiscoveredFile describe(const QFileInfo& info, const QString& rootPath) 
 
 } // namespace
 
-DirectoryScanner::DirectoryScanner(QObject* parent) : application::IScanService(parent) {
+DirectoryScanner::DirectoryScanner(QObject* parent)
+    : application::IScanService(parent), state_(std::make_shared<ScanState>()) {
     debounce_.setSingleShot(true);
     // Watcher notifications arrive in bursts; one rescan per burst is enough.
     debounce_.setInterval(400);
@@ -75,25 +100,35 @@ DirectoryScanner::DirectoryScanner(QObject* parent) : application::IScanService(
     };
     connect(&watcher_, &QFileSystemWatcher::directoryChanged, this, onChange);
     connect(&watcher_, &QFileSystemWatcher::fileChanged, this, onChange);
+
+    // Both ends are alive here, but that is not what later makes this safe:
+    // emitting from state_ on a worker thread only ever locks state_'s own
+    // connection list, and ~DirectoryScanner tears this connection down
+    // under that same lock, so a worker emitting after the scanner is gone
+    // simply finds no connection left rather than a dangling receiver.
+    connect(
+        state_.get(), &ScanState::finished, this,
+        [this](quint64 generation, const domain::AssociationResult& result) {
+            if (state_->generation.loadRelaxed() != generation) {
+                return; // Superseded before delivery.
+            }
+            Q_EMIT scanFinished(generation, result);
+        },
+        Qt::QueuedConnection);
+    connect(
+        state_.get(), &ScanState::failed, this,
+        [this](quint64 generation, const QString& message) {
+            if (state_->generation.loadRelaxed() != generation) {
+                return;
+            }
+            Q_EMIT scanFailed(generation, message);
+        },
+        Qt::QueuedConnection);
 }
 
-DirectoryScanner::~DirectoryScanner() {
-    cancelAll();
-
-    // Bumping the generation cancels a *result*, not the task that produces it:
-    // a worker still dereferences this object to discover that its result is
-    // unwanted. So no task may outlive the scanner. Only destruction waits;
-    // cancelAll() stays non-blocking, because the GUI thread calls it whenever
-    // the user switches collections.
-    QList<QFuture<void>> pending;
-    {
-        const QMutexLocker locked(&inFlightGuard_);
-        pending = std::move(inFlight_);
-    }
-    for (QFuture<void>& task : pending) {
-        task.waitForFinished();
-    }
-}
+// state_ is a shared_ptr: any task still running when the scanner goes away
+// keeps it alive through its own copy, so there is nothing to wait for here.
+DirectoryScanner::~DirectoryScanner() = default;
 
 QList<domain::DiscoveredFile> DirectoryScanner::enumerate(const QString& rootPath, bool recursive,
                                                           QString* error) {
@@ -133,69 +168,45 @@ QList<domain::DiscoveredFile> DirectoryScanner::enumerate(const QString& rootPat
 }
 
 void DirectoryScanner::requestScan(const application::ScanRequest& request) {
-    currentGeneration_.storeRelaxed(request.generation);
+    state_->generation.storeRelaxed(request.generation);
     rewatch(request.rootPath, request.recursive);
 
-    const domain::StemAssociationResolver* resolver = &resolver_;
     const quint64 generation = request.generation;
     const QString rootPath = request.rootPath;
     const bool recursive = request.recursive;
     const domain::AssociationConfig config = request.config;
     const domain::CollectionId collectionId = request.collectionId;
+    const std::shared_ptr<ScanState> state = state_;
 
     // Decode-free work, so QThreadPool is enough; the scanner never holds a
-    // widget pointer.
-    QFuture<void> task =
-        QtConcurrent::run(QThreadPool::globalInstance(), [this, resolver, generation, rootPath,
-                                                          recursive, config, collectionId]() {
+    // widget pointer. The task below captures state, never `this` or the
+    // scanner's resolver_: it must be safe to run for as long as it likes
+    // after requestScan() returns, including past the scanner's destruction.
+    std::ignore =
+        QtConcurrent::run(QThreadPool::globalInstance(), [state, generation, rootPath, recursive,
+                                                          config, collectionId]() {
             QString error;
             const QList<domain::DiscoveredFile> files = enumerate(rootPath, recursive, &error);
+            if (state->generation.loadRelaxed() != generation) {
+                return; // Superseded while enumerating; nothing to deliver.
+            }
             if (!error.isEmpty()) {
-                publishFailed(generation, error);
+                Q_EMIT state->failed(generation, error);
                 return;
             }
 
+            // Stateless, so built fresh here rather than borrowed from the
+            // scanner, which this task must never touch.
+            const domain::StemAssociationResolver resolver;
             // Classification happens only once enumeration of the association scope
             // has finished for this generation.
             const domain::AssociationResult result =
-                resolver->resolve(collectionId, files, config, /*scopeComplete=*/true);
-            publishFinished(generation, result);
+                resolver.resolve(collectionId, files, config, /*scopeComplete=*/true);
+            if (state->generation.loadRelaxed() != generation) {
+                return; // Superseded while resolving; nothing to deliver.
+            }
+            Q_EMIT state->finished(generation, result);
         });
-
-    // Kept so the destructor can join it. Superseded entries are dropped here
-    // rather than by a timer: a scan that has already delivered is nothing to
-    // wait for, and a long session must not accumulate them.
-    const QMutexLocker locked(&inFlightGuard_);
-    inFlight_.removeIf([](const QFuture<void>& pending) { return pending.isFinished(); });
-    inFlight_.append(task);
-}
-
-void DirectoryScanner::publishFinished(quint64 generation,
-                                       const domain::AssociationResult& result) {
-    if (currentGeneration_.loadRelaxed() != generation) {
-        return; // Superseded before delivery.
-    }
-    QMetaObject::invokeMethod(
-        this,
-        [this, generation, result]() {
-            if (currentGeneration_.loadRelaxed() != generation) {
-                return;
-            }
-            Q_EMIT scanFinished(generation, result);
-        },
-        Qt::QueuedConnection);
-}
-
-void DirectoryScanner::publishFailed(quint64 generation, const QString& message) {
-    QMetaObject::invokeMethod(
-        this,
-        [this, generation, message]() {
-            if (currentGeneration_.loadRelaxed() != generation) {
-                return;
-            }
-            Q_EMIT scanFailed(generation, message);
-        },
-        Qt::QueuedConnection);
 }
 
 void DirectoryScanner::rewatch(const QString& rootPath, bool recursive) {
@@ -240,8 +251,10 @@ void DirectoryScanner::setWatchEnabled(bool enabled) {
 void DirectoryScanner::cancelAll() {
     // Bumping the generation is the cancellation mechanism: in-flight work
     // finishes but its result is dropped on delivery.
-    currentGeneration_.fetchAndAddRelaxed(1);
+    state_->generation.fetchAndAddRelaxed(1);
     debounce_.stop();
 }
 
 } // namespace cullfinch::infrastructure
+
+#include "DirectoryScanner.moc"
