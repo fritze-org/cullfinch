@@ -89,8 +89,7 @@ void PreviewLoader::onImageReady(const application::ImageResult& result) {
     // leaves its earlier request outstanding, and that earlier answer describes
     // a size this loader no longer wants -- matching the identity is not enough.
     const bool fitted = result.requestId == fitRequestId_;
-    const bool fullResolution = result.requestId == fullRequestId_;
-    if (!fitted && !fullResolution) {
+    if (!fitted && result.requestId != fullRequestId_) {
         return;
     }
 
