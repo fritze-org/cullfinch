@@ -76,10 +76,8 @@ void DispositionController::setMarkingEnabled(bool enabled) {
     Q_EMIT markingEnabledChanged(enabled);
 }
 
-bool DispositionController::persist(const QHash<AssetId, Disposition>& targets, QString* error) {
-    if (targets.isEmpty()) {
-        return true;
-    }
+bool DispositionController::writeDispositions(const QHash<AssetId, Disposition>& targets,
+                                              quint64* newRevision, QString* error) {
     if (!collectionId_.isValid()) {
         if (error != nullptr) {
             *error = tr("No collection is open.");
@@ -89,10 +87,7 @@ bool DispositionController::persist(const QHash<AssetId, Disposition>& targets, 
 
     QList<AssetId> reject;
     QList<AssetId> neutral;
-    QList<AssetId> affected;
-    affected.reserve(targets.size());
     for (auto it = targets.cbegin(); it != targets.cend(); ++it) {
-        affected.append(it.key());
         if (it.value() == Disposition::Reject) {
             reject.append(it.key());
         } else {
@@ -100,9 +95,8 @@ bool DispositionController::persist(const QHash<AssetId, Disposition>& targets, 
         }
     }
 
-    quint64 newRevision = revision_;
-    if (QString storageError; !repository_.applyDispositions(
-            collectionId_, revision_, reject, neutral, &newRevision, &storageError)) {
+    if (QString storageError; !repository_.applyDispositions(collectionId_, revision_, reject,
+                                                             neutral, newRevision, &storageError)) {
         if (error != nullptr) {
             *error = std::move(storageError);
         }
@@ -122,9 +116,21 @@ bool DispositionController::persist(const QHash<AssetId, Disposition>& targets, 
         }
         return false;
     }
+    return true;
+}
+
+bool DispositionController::persist(const QHash<AssetId, Disposition>& targets, QString* error) {
+    if (targets.isEmpty()) {
+        return true;
+    }
+
+    quint64 newRevision = revision_;
+    if (!writeDispositions(targets, &newRevision, error)) {
+        return false;
+    }
 
     revision_ = newRevision;
-    Q_EMIT dispositionsChanged(affected, revision_);
+    Q_EMIT dispositionsChanged(targets.keys(), revision_);
     return true;
 }
 
@@ -140,40 +146,59 @@ void DispositionController::applyFromHistory(const QHash<AssetId, Disposition>& 
     }
 }
 
-bool DispositionController::applyRejections(const QList<AssetId>& ids, const QString& commandText,
-                                            QString* error) {
+std::optional<DispositionController::PendingRejections>
+DispositionController::beginRejections(const QList<AssetId>& ids, QString* error) {
     if (ids.isEmpty()) {
-        return true;
+        return PendingRejections{};
     }
     if (readOnly_) {
         if (error != nullptr) {
             *error = tr("This collection is open read-only because another Cullfinch window has "
                         "it open; deletion marks cannot change here.");
         }
-        return false;
+        return std::nullopt;
     }
     if (blocked_) {
         if (error != nullptr) {
             *error = tr("Deletion marks are unavailable until the collection is reloaded.");
         }
-        return false;
+        return std::nullopt;
     }
 
-    QHash<AssetId, Disposition> forward;
-    QHash<AssetId, Disposition> inverse;
+    PendingRejections pending;
     for (const AssetId& id : ids) {
-        forward.insert(id, Disposition::Reject);
+        pending.forward.insert(id, Disposition::Reject);
         // Finishing a session never erases marks made by another session, so
         // the inverse of "mark rejected" is "make neutral" only for assets this
         // step actually changed. Assets already rejected are not included.
-        inverse.insert(id, Disposition::Neutral);
+        pending.inverse.insert(id, Disposition::Neutral);
     }
 
-    if (!persist(forward, error)) {
+    if (!writeDispositions(pending.forward, nullptr, error)) {
+        return std::nullopt;
+    }
+    return pending;
+}
+
+void DispositionController::commitRejections(const PendingRejections& pending,
+                                             const QString& commandText) {
+    if (pending.forward.isEmpty()) {
+        return;
+    }
+    // The write already happened; only the revision this controller reports
+    // and the undo step were waiting on the caller's transaction to commit.
+    revision_ = repository_.collectionRevision(collectionId_, nullptr);
+    Q_EMIT dispositionsChanged(pending.forward.keys(), revision_);
+    undoStack_.push(new MarkCommand(this, pending.forward, pending.inverse, commandText));
+}
+
+bool DispositionController::applyRejections(const QList<AssetId>& ids, const QString& commandText,
+                                            QString* error) {
+    const std::optional<PendingRejections> pending = beginRejections(ids, error);
+    if (!pending.has_value()) {
         return false;
     }
-
-    undoStack_.push(new MarkCommand(this, forward, inverse, commandText));
+    commitRejections(*pending, commandText);
     return true;
 }
 

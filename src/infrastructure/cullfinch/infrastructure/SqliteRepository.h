@@ -30,6 +30,8 @@ public:
     bool open(QString* error) override;
     void close() override;
 
+    bool runInTransaction(const std::function<bool()>& action, QString* error) override;
+
     [[nodiscard]] std::optional<domain::CollectionId> findCollection(const QString& rootPath,
                                                                      QString* error) const override;
     std::optional<domain::CollectionId> ensureCollection(const QString& rootPath, bool recursive,
@@ -68,10 +70,30 @@ public:
 private:
     bool migrate(QString* error);
 
+    /// Opens the connection's transaction unless one from an enclosing
+    /// `runInTransaction` call is already open, in which case this joins it.
+    bool beginTransactionScope(QString* error);
+    /// Leaves the transaction scope opened by the matching `beginTransactionScope`
+    /// call. Only the outermost, unmatched call actually commits or rolls back;
+    /// an inner one just reports `commit` up to whichever call is outermost.
+    bool endTransactionScope(bool commit, QString* error);
+
+    /// The body of `applyDispositions`, run inside the transaction scope
+    /// `runInTransaction` opens -- split out so that scope's lambda stays
+    /// short and its captures explicit.
+    bool applyDispositionsLocked(const domain::CollectionId& id, quint64 expectedRevision,
+                                 const QList<domain::AssetId>& reject,
+                                 const QList<domain::AssetId>& neutral, QString* error) const;
+
     QString databaseFile_;
     QString connectionName_;
     QSqlDatabase database_;
     bool open_ = false;
+    int transactionDepth_ = 0;
+    /// Set when any scope in the current transaction failed. The outermost
+    /// one then rolls back rather than committing writes a failed scope left
+    /// behind.
+    bool rollbackOnly_ = false;
 };
 
 } // namespace cullfinch::infrastructure

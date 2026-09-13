@@ -5,6 +5,8 @@
 #include <QDir>
 #include <QFile>
 #include <QSqlDatabase>
+#include <QSqlError>
+#include <QSqlQuery>
 #include <QTemporaryDir>
 #include <QTest>
 
@@ -31,6 +33,12 @@ private slots:
     void invalidatesMarksWhenMembershipChanges();
     void marksAnAssetStaleWhenAMemberDisappears();
     void refusesAMarkChangeAgainstAStaleRevision();
+    void runInTransactionRollsBackMarksWhenTheEnclosingActionFails();
+    void aFailedMarkUpdateRollsBackTheWholeTransaction();
+    void aFailedRevisionAdvanceRollsBackTheWholeTransaction();
+    void runInTransactionReportsAConnectionThatCannotBegin();
+    void aRefusedCommitDiscardsTheTransactionAndFreesTheConnection();
+    void aFailedNestedScopeCondemnsTheWholeTransaction();
     void roundTripsASessionDraft();
     void listsOnlyResumableSessions();
     void roundTripsAnOperationJournal();
@@ -280,6 +288,225 @@ void TestSqliteRepository::refusesAMarkChangeAgainstAStaleRevision() {
     for (const domain::PhotoAsset& asset : repository_->loadAssets(*id, nullptr)) {
         QCOMPARE(asset.disposition, domain::Disposition::Neutral);
     }
+}
+
+void TestSqliteRepository::runInTransactionRollsBackMarksWhenTheEnclosingActionFails() {
+    QString error;
+    const auto id = repository_->ensureCollection(QStringLiteral("/photos"), false, &error);
+    if (!id.has_value()) {
+        QFAIL(qPrintable(error));
+    }
+    const domain::PhotoAssetList assets = AssetBuilder::resolvedSeries(2);
+
+    quint64 revision = 0;
+    QVERIFY2(repository_->reconcileAssets(*id, assets, nullptr, &revision, &error),
+             qPrintable(error));
+
+    // applyDispositions must nest inside an enclosing runInTransaction scope
+    // rather than starting a second, conflicting one -- this is what lets
+    // SessionController::finish() apply marks and save the session record as
+    // one atomic unit.
+    quint64 writtenRevision = revision;
+    QVERIFY2(!repository_->runInTransaction(
+                 [&]() {
+                     if (!repository_->applyDispositions(*id, revision, {assets.first().id}, {},
+                                                         &writtenRevision, &error)) {
+                         return false;
+                     }
+                     // Something else sharing this transaction fails; the mark
+                     // write above must not survive on its own.
+                     return false;
+                 },
+                 &error),
+             "the enclosing action's failure must roll back every write in the scope");
+
+    for (const domain::PhotoAsset& asset : repository_->loadAssets(*id, nullptr)) {
+        QCOMPARE(asset.disposition, domain::Disposition::Neutral);
+    }
+    QCOMPARE(repository_->collectionRevision(*id, nullptr), revision);
+}
+
+void TestSqliteRepository::aFailedMarkUpdateRollsBackTheWholeTransaction() {
+    // A repository of its own, opened under a connection name this test can
+    // also reach: corrupting the schema through that same connection is a
+    // real SQL failure at the point applyDispositions writes the marks,
+    // rather than something injected around the repository's back.
+    const QString connectionName = QStringLiteral("sqlite-repo-corrupt-marks");
+    infrastructure::SqliteRepository repo(
+        directory_.filePath(QStringLiteral("corrupt-marks.sqlite")), connectionName);
+    QString error;
+    QVERIFY2(repo.open(&error), qPrintable(error));
+
+    const auto id = repo.ensureCollection(QStringLiteral("/photos"), false, &error);
+    if (!id.has_value()) {
+        QFAIL(qPrintable(error));
+    }
+    const domain::PhotoAssetList assets = AssetBuilder::resolvedSeries(2);
+    quint64 revision = 0;
+    QVERIFY2(repo.reconcileAssets(*id, assets, nullptr, &revision, &error), qPrintable(error));
+
+    {
+        QSqlQuery drop(QSqlDatabase::database(connectionName));
+        QVERIFY2(drop.exec(QStringLiteral("DROP TABLE assets")),
+                 qPrintable(drop.lastError().text()));
+    }
+
+    quint64 ignored = 0;
+    QVERIFY2(!repo.applyDispositions(*id, revision, {assets.first().id}, {}, &ignored, &error),
+             "a real SQL failure while writing marks must be reported, not ignored");
+    QVERIFY(error.contains(QStringLiteral("Storing deletion marks failed")));
+    // The whole transaction rolled back with the failed write: the
+    // collection's revision never advanced.
+    QCOMPARE(repo.collectionRevision(*id, nullptr), revision);
+}
+
+void TestSqliteRepository::aFailedRevisionAdvanceRollsBackTheWholeTransaction() {
+    const QString connectionName = QStringLiteral("sqlite-repo-corrupt-revision");
+    infrastructure::SqliteRepository repo(
+        directory_.filePath(QStringLiteral("corrupt-revision.sqlite")), connectionName);
+    QString error;
+    QVERIFY2(repo.open(&error), qPrintable(error));
+
+    const auto id = repo.ensureCollection(QStringLiteral("/photos"), false, &error);
+    if (!id.has_value()) {
+        QFAIL(qPrintable(error));
+    }
+    const domain::PhotoAssetList assets = AssetBuilder::resolvedSeries(2);
+    quint64 revision = 0;
+    QVERIFY2(repo.reconcileAssets(*id, assets, nullptr, &revision, &error), qPrintable(error));
+
+    // The disposition UPDATE succeeds; only the later revision bump fails --
+    // and the whole transaction, marks included, must still roll back.
+    {
+        QSqlQuery trigger(QSqlDatabase::database(connectionName));
+        QVERIFY2(trigger.exec(QStringLiteral(
+                     "CREATE TRIGGER fail_revision BEFORE UPDATE OF revision ON collections "
+                     "BEGIN SELECT RAISE(ABORT, 'boom'); END;")),
+                 qPrintable(trigger.lastError().text()));
+    }
+
+    quint64 ignored = 0;
+    QVERIFY2(!repo.applyDispositions(*id, revision, {assets.first().id}, {}, &ignored, &error),
+             "a failure advancing the revision must roll back the mark write too");
+    QVERIFY(error.contains(QStringLiteral("Advancing the collection revision failed")));
+
+    for (const domain::PhotoAsset& asset : repo.loadAssets(*id, nullptr)) {
+        QCOMPARE(asset.disposition, domain::Disposition::Neutral);
+    }
+    QCOMPARE(repo.collectionRevision(*id, nullptr), revision);
+}
+
+void TestSqliteRepository::runInTransactionReportsAConnectionThatCannotBegin() {
+    // SQLite cannot nest BEGIN on one connection. Opening a transaction on
+    // the repository's own connection is therefore the one way to make its
+    // BEGIN genuinely fail, which is what the scope has to report rather
+    // than run the action as though it were covered.
+    const QString connectionName = QStringLiteral("sqlite-repo-cannot-begin");
+    infrastructure::SqliteRepository repo(
+        directory_.filePath(QStringLiteral("cannot-begin.sqlite")), connectionName);
+    QString error;
+    QVERIFY2(repo.open(&error), qPrintable(error));
+
+    QSqlDatabase raw = QSqlDatabase::database(connectionName);
+    QVERIFY2(raw.transaction(), qPrintable(raw.lastError().text()));
+
+    bool actionRan = false;
+    QVERIFY2(!repo.runInTransaction(
+                 [&actionRan]() {
+                     actionRan = true;
+                     return true;
+                 },
+                 &error),
+             "a connection that cannot begin a transaction must refuse the scope");
+    QVERIFY2(!actionRan, "the action must not run outside the transaction it asked for");
+    QVERIFY(error.contains(QStringLiteral("transaction could not be started")));
+
+    raw.rollback();
+}
+
+void TestSqliteRepository::aRefusedCommitDiscardsTheTransactionAndFreesTheConnection() {
+    const QString connectionName = QStringLiteral("sqlite-repo-refused-commit");
+    infrastructure::SqliteRepository repo(
+        directory_.filePath(QStringLiteral("refused-commit.sqlite")), connectionName);
+    QString error;
+    QVERIFY2(repo.open(&error), qPrintable(error));
+
+    // A deferred foreign key is reported by SQLite at COMMIT, not at the
+    // statement -- the one failure the scope cannot see coming while the
+    // action is still running.
+    {
+        QSqlQuery ddl(QSqlDatabase::database(connectionName));
+        QVERIFY2(ddl.exec(QStringLiteral("CREATE TABLE fk_parent (id INTEGER PRIMARY KEY)")),
+                 qPrintable(ddl.lastError().text()));
+        QVERIFY2(
+            ddl.exec(QStringLiteral("CREATE TABLE fk_child (id INTEGER PRIMARY KEY, parent INTEGER "
+                                    "REFERENCES fk_parent(id) DEFERRABLE INITIALLY DEFERRED)")),
+            qPrintable(ddl.lastError().text()));
+    }
+
+    QVERIFY2(!repo.runInTransaction(
+                 [&connectionName]() {
+                     QSqlQuery orphan(QSqlDatabase::database(connectionName));
+                     return orphan.exec(
+                         QStringLiteral("INSERT INTO fk_child (id, parent) VALUES (1, 999)"));
+                 },
+                 &error),
+             "a refused commit must be reported, not mistaken for a committed unit of work");
+    QVERIFY(error.contains(QStringLiteral("Committing the transaction failed")));
+
+    // The refused unit of work is gone, and the connection is usable again:
+    // left open, its writes would still be pending for whoever commits next.
+    QSqlDatabase after = QSqlDatabase::database(connectionName);
+    QVERIFY2(after.transaction(), "a refused commit must not leave the connection mid-transaction");
+    after.rollback();
+
+    QSqlQuery remaining(QSqlDatabase::database(connectionName));
+    QVERIFY2(remaining.exec(QStringLiteral("SELECT COUNT(*) FROM fk_child")),
+             qPrintable(remaining.lastError().text()));
+    QVERIFY(remaining.next());
+    QCOMPARE(remaining.value(0).toInt(), 0);
+}
+
+void TestSqliteRepository::aFailedNestedScopeCondemnsTheWholeTransaction() {
+    QString error;
+    const auto id = repository_->ensureCollection(QStringLiteral("/photos"), false, &error);
+    if (!id.has_value()) {
+        QFAIL(qPrintable(error));
+    }
+    const domain::PhotoAssetList assets = AssetBuilder::resolvedSeries(2);
+    quint64 revision = 0;
+    QVERIFY2(repository_->reconcileAssets(*id, assets, nullptr, &revision, &error),
+             qPrintable(error));
+
+    // A nested scope shares the one transaction, so its writes cannot be
+    // dropped on their own. An enclosing action that shrugs off the failure
+    // must not be able to commit them anyway.
+    quint64 ignored = 0;
+    QVERIFY2(!repository_->runInTransaction(
+                 [&]() {
+                     QString nestedError;
+                     repository_->applyDispositions(*id, revision, {assets.first().id}, {},
+                                                    &ignored, &nestedError);
+                     // Deliberately stale: the guard is the scope, not this.
+                     repository_->applyDispositions(*id, revision, {assets.at(1).id}, {}, &ignored,
+                                                    &nestedError);
+                     return true;
+                 },
+                 &error),
+             "a scope that swallowed a nested failure must not report a committed transaction");
+    QVERIFY(!error.isEmpty());
+
+    // Neither the mark the first nested scope wrote nor the revision it
+    // advanced survives.
+    for (const domain::PhotoAsset& asset : repository_->loadAssets(*id, nullptr)) {
+        QCOMPARE(asset.disposition, domain::Disposition::Neutral);
+    }
+    QCOMPARE(repository_->collectionRevision(*id, nullptr), revision);
+
+    // The connection is left usable, not stuck mid-transaction.
+    QVERIFY2(
+        repository_->applyDispositions(*id, revision, {assets.first().id}, {}, &ignored, &error),
+        qPrintable(error));
 }
 
 void TestSqliteRepository::roundTripsASessionDraft() {

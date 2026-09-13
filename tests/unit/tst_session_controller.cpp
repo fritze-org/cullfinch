@@ -42,14 +42,19 @@ private slots:
     void rejectsAFlowThatTouchesUnselectedPhotos();
     void finishMergesDraftRejectionsIntoCollectionMarks();
     void finishEarlyMarksOnlyTheDecisionsMade();
+    void finishWithNoDecisionsSkipsTheMarkWrite();
     void discardLeavesEarlierMarksAlone();
     void pauseSavesTheDraftAndResumeRestoresIt();
     void resumeRefusesWhenAGroupChangedUnderneath();
     void aFailedDraftWriteKeepsTheInMemoryDraft();
     void aReadOnlyCollectionRefusesToSaveTheDraft();
     void aFailedMarkWriteLeavesMarksUnchanged();
+    void aFailedSessionWriteDuringFinishLeavesMarksUnchanged();
     void aFailedUndoWriteDropsTheHistoryWithoutTouchingMarks();
     void marksCannotChangeWhileAComparisonIsActive();
+    void applyRejectionsRefusesWithoutACollection();
+    void persistWithNoTargetsIsANoOp();
+    void theFakeRepositoryRollsBackEveryRowStoreItOffers();
     void anArbitraryNewFlowRunsThroughTheSameController();
 
 private:
@@ -267,6 +272,25 @@ void TestSessionController::finishEarlyMarksOnlyTheDecisionsMade() {
     QCOMPARE(neutral, 7);
 }
 
+void TestSessionController::finishWithNoDecisionsSkipsTheMarkWrite() {
+    QString error;
+    session_->start(QLatin1String(ConformanceFlow::kId), snapshotFor(assets_, collection_),
+                    domain::FlowOptions{}, &error);
+    QCOMPARE(session_->summary().draftRejected.size(), 0);
+
+    QSignalSpy ended(session_.get(), &application::SessionController::sessionEnded);
+    QVERIFY2(session_->finish(&error), qPrintable(error));
+    QCOMPARE(ended.size(), 1);
+    QCOMPARE(ended.first().at(1).toBool(), true);
+
+    // Nothing was rejected, so nothing about the collection marks or the
+    // disposition undo history changes.
+    for (const domain::PhotoAsset& asset : repository_->loadAssets(collection_, nullptr)) {
+        QCOMPARE(asset.disposition, domain::Disposition::Neutral);
+    }
+    QCOMPARE(dispositions_->undoStack()->count(), 0);
+}
+
 void TestSessionController::discardLeavesEarlierMarksAlone() {
     QString error;
 
@@ -392,6 +416,36 @@ void TestSessionController::aFailedMarkWriteLeavesMarksUnchanged() {
     QCOMPARE(dispositions_->undoStack()->count(), 0);
 }
 
+void TestSessionController::aFailedSessionWriteDuringFinishLeavesMarksUnchanged() {
+    QString error;
+    session_->start(QLatin1String(ConformanceFlow::kId), snapshotFor(assets_, collection_),
+                    domain::FlowOptions{}, &error);
+    session_->dispatch(QStringLiteral("drop"), QJsonObject{}, &error);
+
+    // finish() writes the Active draft once before it starts its atomic
+    // section; only the write of the Finished record inside that section
+    // must fail.
+    repository_->failNextSessionSaves(1, 1);
+
+    QVERIFY2(!session_->finish(&error),
+             "finishing must fail when the session record cannot be saved");
+    QVERIFY(!error.isEmpty());
+
+    // The mark write that ran ahead of the failed session write must not
+    // have survived on its own: a crash here must never leave marks applied
+    // to a session that still looks resumable.
+    for (const domain::PhotoAsset& asset : repository_->loadAssets(collection_, nullptr)) {
+        QCOMPARE(asset.disposition, domain::Disposition::Neutral);
+    }
+    QCOMPARE(dispositions_->undoStack()->count(), 0);
+    QVERIFY(!dispositions_->isBlocked());
+
+    // The session itself is untouched by the failed transaction and stays
+    // resumable.
+    QVERIFY(session_->isActive());
+    QCOMPARE(session_->summary().draftRejected.size(), 1);
+}
+
 void TestSessionController::aFailedUndoWriteDropsTheHistoryWithoutTouchingMarks() {
     QString error;
     const domain::AssetId target = assets_.first().id;
@@ -434,6 +488,60 @@ void TestSessionController::marksCannotChangeWhileAComparisonIsActive() {
 
     session_->discard(&error);
     QVERIFY(dispositions_->isMarkingEnabled());
+}
+
+void TestSessionController::applyRejectionsRefusesWithoutACollection() {
+    // A controller that never had setCollection() called (nothing has been
+    // opened yet) must refuse a write rather than reach for an invalid id.
+    application::DispositionController fresh(*repository_);
+    QString error;
+    QVERIFY2(!fresh.applyRejections({assets_.first().id}, QStringLiteral("test"), &error),
+             "a write without an open collection must be refused");
+    QVERIFY(error.contains(QStringLiteral("No collection is open")));
+}
+
+void TestSessionController::persistWithNoTargetsIsANoOp() {
+    // persist() is public so the undo command type stays a plain
+    // implementation detail; called with nothing to change, it must not
+    // touch storage or the revision at all.
+    QString error;
+    QVERIFY2(dispositions_->persist({}, &error), qPrintable(error));
+    QVERIFY(error.isEmpty());
+}
+
+void TestSessionController::theFakeRepositoryRollsBackEveryRowStoreItOffers() {
+    // The finish() tests are only worth anything if the fake really does undo
+    // what a failed transaction wrote, across every store it hands back --
+    // and if a nested failure condemns the whole scope the way the real
+    // repository's does, rather than riding out on an enclosing `true`.
+    QString error;
+    const quint64 revisionBefore = repository_->collectionRevision(collection_, nullptr);
+
+    application::OperationRecord record;
+    record.plan.id = domain::OperationId(QStringLiteral("op-rolled-back"));
+    record.plan.collectionId = collection_;
+
+    QVERIFY2(!repository_->runInTransaction(
+                 [&]() {
+                     QString nestedError;
+                     repository_->ensureCollection(QStringLiteral("/elsewhere"), false,
+                                                   &nestedError);
+                     repository_->saveOperation(record, &nestedError);
+                     repository_->runInTransaction([]() { return false; }, &nestedError);
+                     return true;
+                 },
+                 &error),
+             "a swallowed nested failure must still roll the outer scope back");
+
+    QVERIFY2(!repository_->findCollection(QStringLiteral("/elsewhere"), &error).has_value(),
+             "a collection created inside the failed scope must not survive it");
+    QVERIFY2(!repository_->loadOperation(record.plan.id, &error).has_value(),
+             "an operation saved inside the failed scope must not survive it");
+    QCOMPARE(repository_->collectionRevision(collection_, nullptr), revisionBefore);
+
+    // The journal is deliberately outside the rollback: it records what was
+    // attempted, which is what a crash-recovery test needs to inspect.
+    QCOMPARE(repository_->operationJournal().size(), 1);
 }
 
 void TestSessionController::anArbitraryNewFlowRunsThroughTheSameController() {

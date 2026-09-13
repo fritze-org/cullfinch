@@ -24,6 +24,52 @@ void FakeRepository::close() {
     // the instance, so a test can inspect them after closing.
 }
 
+bool FakeRepository::runInTransaction(const std::function<bool()>& action, QString* error) {
+    Q_UNUSED(error)
+    // No real transaction exists here, only a snapshot of the rows a nested
+    // write can touch. Only the outermost call takes it and, on failure,
+    // restores it -- exactly what a real rollback would leave behind -- so a
+    // caller composing several fake writes (see SessionController::finish)
+    // sees the same all-or-nothing behaviour a real repository gives it.
+    const bool outermost = transactionDepth_ == 0;
+    if (outermost) {
+        rollbackOnly_ = false;
+    }
+    const QHash<QString, domain::CollectionId> collectionsSnapshot = collectionsByRoot_;
+    const QHash<domain::CollectionId, quint64> revisionsSnapshot = revisions_;
+    const QHash<domain::CollectionId, domain::PhotoAssetList> assetsSnapshot = assets_;
+    const QHash<domain::SessionId, application::StoredSession> sessionsSnapshot = sessions_;
+    const QHash<domain::OperationId, application::OperationRecord> operationsSnapshot = operations_;
+
+    ++transactionDepth_;
+    const bool ok = action();
+    --transactionDepth_;
+
+    // A nested scope cannot restore on its own without discarding writes the
+    // scopes above it still expect, so a failure anywhere condemns the whole
+    // snapshot and the outermost call is the one that puts it back -- the
+    // same rule the real repository follows.
+    if (!ok) {
+        rollbackOnly_ = true;
+    }
+    if (!outermost) {
+        return ok;
+    }
+    if (rollbackOnly_) {
+        collectionsByRoot_ = collectionsSnapshot;
+        revisions_ = revisionsSnapshot;
+        assets_ = assetsSnapshot;
+        sessions_ = sessionsSnapshot;
+        operations_ = operationsSnapshot;
+        rollbackOnly_ = false;
+        // The counters and the operation journal stay: they record what was
+        // attempted, which is exactly what a test inspecting a rolled-back
+        // run needs to see.
+        return false;
+    }
+    return ok;
+}
+
 std::optional<domain::CollectionId>
 FakeRepository::ensureCollection(const QString& rootPath, bool recursive, QString* error) {
     Q_UNUSED(recursive)
@@ -126,9 +172,13 @@ bool FakeRepository::applyDispositions(const domain::CollectionId& id, quint64 e
 bool FakeRepository::saveSession(const application::StoredSession& session, QString* error) {
     ++sessionSaveCount_;
     if (sessionSaveFailures_ > 0) {
-        --sessionSaveFailures_;
-        report(error, QStringLiteral("fake draft write failure"));
-        return false;
+        if (sessionSaveSuccessesBeforeFailure_ > 0) {
+            --sessionSaveSuccessesBeforeFailure_;
+        } else {
+            --sessionSaveFailures_;
+            report(error, QStringLiteral("fake draft write failure"));
+            return false;
+        }
     }
     sessions_.insert(session.id, session);
     return true;

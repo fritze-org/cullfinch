@@ -115,6 +115,15 @@ public:
     virtual bool open(QString* error) = 0;
     virtual void close() = 0;
 
+    /// Runs `action` as one transaction: implementations commit its writes
+    /// only if it returns true, and roll all of them back otherwise. A call
+    /// nested inside another `runInTransaction` call on the same repository
+    /// joins the enclosing scope rather than starting a second one, so two
+    /// otherwise-unrelated writes -- applying deletion marks and saving a
+    /// session record, say -- can be composed by their callers into a single
+    /// atomic unit without either write knowing about the other's scope.
+    virtual bool runInTransaction(const std::function<bool()>& action, QString* error) = 0;
+
     /// Create or find the collection for a root directory.
     virtual std::optional<domain::CollectionId>
     ensureCollection(const QString& rootPath, bool recursive, QString* error) = 0;

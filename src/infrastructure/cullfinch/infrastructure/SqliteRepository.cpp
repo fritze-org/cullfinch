@@ -401,7 +401,76 @@ bool SqliteRepository::open(QString* error) {
     return true;
 }
 
+bool SqliteRepository::beginTransactionScope(QString* error) {
+    if (transactionDepth_ == 0) {
+        if (!database_.transaction()) {
+            report(error,
+                   tr("A transaction could not be started: %1").arg(database_.lastError().text()));
+            return false;
+        }
+        rollbackOnly_ = false;
+    }
+    ++transactionDepth_;
+    return true;
+}
+
+bool SqliteRepository::endTransactionScope(bool commit, QString* error) {
+    if (!commit) {
+        // One failed scope condemns the whole transaction. A nested scope
+        // shares the connection's single transaction with everyone above it,
+        // so its writes cannot be dropped on their own: the only way to keep
+        // the promise that a scope returning false leaves nothing behind is
+        // for the outermost one to roll back, whatever it was going to do.
+        rollbackOnly_ = true;
+    }
+    --transactionDepth_;
+    if (transactionDepth_ > 0) {
+        // An enclosing runInTransaction call decides whether the connection's
+        // transaction is committed or rolled back; the condemnation carries.
+        return true;
+    }
+    if (rollbackOnly_) {
+        database_.rollback();
+        rollbackOnly_ = false;
+        if (!commit) {
+            // This scope's own action failed, and its caller already knows.
+            return true;
+        }
+        report(error, tr("The transaction was rolled back because a write nested inside it "
+                         "failed."));
+        return false;
+    }
+    if (!database_.commit()) {
+        const QString message = database_.lastError().text();
+        // A refused COMMIT leaves SQLite inside the transaction with this
+        // unit's writes still pending -- a deferred constraint that only
+        // fires here is the usual cause. Discarding them is the whole point
+        // of the scope: left open they would brick the next BEGIN on this
+        // connection, and a later commit could still flush them.
+        database_.rollback();
+        report(error, tr("Committing the transaction failed: %1").arg(message));
+        return false;
+    }
+    return true;
+}
+
+bool SqliteRepository::runInTransaction(const std::function<bool()>& action, QString* error) {
+    if (!beginTransactionScope(error)) {
+        return false;
+    }
+    const bool ok = action();
+    if (!endTransactionScope(ok, error)) {
+        return false;
+    }
+    return ok;
+}
+
 void SqliteRepository::close() {
+    // The scope bookkeeping describes a connection that is about to go away.
+    // Carried into a reopen it would leave the depth permanently above zero,
+    // and no later scope would ever open a transaction of its own.
+    transactionDepth_ = 0;
+    rollbackOnly_ = false;
     if (database_.isOpen()) {
         database_.close();
     }
@@ -834,19 +903,13 @@ bool SqliteRepository::reconcileAssets(const CollectionId& id, const PhotoAssetL
     return true;
 }
 
-bool SqliteRepository::applyDispositions(const CollectionId& id, quint64 expectedRevision,
-                                         const QList<AssetId>& reject,
-                                         const QList<AssetId>& neutral, quint64* newRevision,
-                                         QString* error) {
-    if (!database_.transaction()) {
-        report(error, tr("Deletion marks could not be changed: no transaction available."));
-        return false;
-    }
-
+bool SqliteRepository::applyDispositionsLocked(const CollectionId& id, quint64 expectedRevision,
+                                               const QList<AssetId>& reject,
+                                               const QList<AssetId>& neutral,
+                                               QString* error) const {
     if (const quint64 actual = collectionRevision(id, nullptr); actual != expectedRevision) {
-        database_.rollback();
-        report(error, tr("The collection changed while you were working (revision %1, expected "
-                         "%2). Refresh and try again.")
+        report(error, tr("The collection changed while you were working (revision %1, "
+                         "expected %2). Refresh and try again.")
                           .arg(actual)
                           .arg(expectedRevision));
         return false;
@@ -855,12 +918,9 @@ bool SqliteRepository::applyDispositions(const CollectionId& id, quint64 expecte
     QSqlQuery update(database_);
     update.prepare(QStringLiteral("UPDATE assets SET disposition = :disposition WHERE id = :id AND "
                                   "collection_id = :collection"));
-
     if (!applyDisposition(update, id, reject, QStringLiteral("reject")) ||
         !applyDisposition(update, id, neutral, QStringLiteral("neutral"))) {
-        const QString message = update.lastError().text();
-        database_.rollback();
-        report(error, tr("Storing deletion marks failed: %1").arg(message));
+        report(error, tr("Storing deletion marks failed: %1").arg(update.lastError().text()));
         return false;
     }
 
@@ -869,17 +929,29 @@ bool SqliteRepository::applyDispositions(const CollectionId& id, quint64 expecte
         QStringLiteral("UPDATE collections SET revision = revision + 1 WHERE id = :id"));
     revision.bindValue(QStringLiteral(":id"), text(id.toString()));
     if (!revision.exec()) {
-        const QString message = revision.lastError().text();
-        database_.rollback();
-        report(error, tr("Advancing the collection revision failed: %1").arg(message));
+        report(error,
+               tr("Advancing the collection revision failed: %1").arg(revision.lastError().text()));
         return false;
     }
+    return true;
+}
 
-    if (!database_.commit()) {
-        report(error, tr("Storing deletion marks failed: %1").arg(database_.lastError().text()));
+bool SqliteRepository::applyDispositions(const CollectionId& id, quint64 expectedRevision,
+                                         const QList<AssetId>& reject,
+                                         const QList<AssetId>& neutral, quint64* newRevision,
+                                         QString* error) {
+    // Routed through runInTransaction rather than a private BEGIN/COMMIT so a
+    // caller can fold this write into a larger transaction (see
+    // SessionController::finish, which must not let the collection's marks
+    // become durable unless the session record that describes them does too).
+    if (const bool committed = runInTransaction(
+            [this, &id, expectedRevision, &reject, &neutral, error]() {
+                return applyDispositionsLocked(id, expectedRevision, reject, neutral, error);
+            },
+            error);
+        !committed) {
         return false;
     }
-
     if (newRevision != nullptr) {
         *newRevision = collectionRevision(id, error);
     }
