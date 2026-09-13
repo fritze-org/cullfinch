@@ -24,6 +24,7 @@ private slots:
     void producesOneAssetPerJpegRawPair();
     void discardsResultsFromASupersededGeneration();
     void reportsCaseDistinctStemsWithoutMerging();
+    void reportsAScanFailureThroughSignal();
     void survivesDestructionWhileAScanIsInFlight();
 };
 
@@ -199,6 +200,26 @@ void TestDirectoryScanner::reportsCaseDistinctStemsWithoutMerging() {
         QCOMPARE(asset.pairingState, domain::PairingState::Ambiguous);
         QVERIFY(!asset.isOperable());
     }
+}
+
+void TestDirectoryScanner::reportsAScanFailureThroughSignal() {
+    infrastructure::DirectoryScanner scanner;
+    QSignalSpy failed(&scanner, &application::IScanService::scanFailed);
+
+    application::ScanRequest request;
+    request.collectionId = domain::CollectionId(QStringLiteral("c1"));
+    request.rootPath = QStringLiteral("/definitely/not/a/directory");
+    request.config = domain::AssociationConfig::defaults();
+    request.generation = 1;
+    scanner.requestScan(request);
+
+    // enumerate() reports an unreadable root synchronously (see
+    // reportsAnUnreadableRootAsAnError above); this exercises the same
+    // failure travelling the asynchronous requestScan() path all the way to
+    // scanFailed.
+    QVERIFY(failed.wait(15000));
+    QCOMPARE(failed.first().at(0).toULongLong(), 1ULL);
+    QVERIFY(!failed.first().at(1).toString().isEmpty());
 }
 
 void TestDirectoryScanner::survivesDestructionWhileAScanIsInFlight() {
