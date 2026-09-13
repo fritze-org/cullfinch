@@ -37,10 +37,15 @@ class ScanState : public QObject {
     Q_OBJECT
 
 public:
+    /// Latest generation. Workers compare against it and drop stale results.
     QAtomicInteger<quint64> generation{0};
 
 Q_SIGNALS:
+    /// A task's result, for the scanner to check against the current
+    /// generation and re-emit as scanFinished if it still applies.
     void finished(quint64 generation, const domain::AssociationResult& result);
+    /// A task's error, for the scanner to check against the current
+    /// generation and re-emit as scanFailed if it still applies.
     void failed(quint64 generation, const QString& message);
 };
 
