@@ -2,9 +2,11 @@
 #include <cullfinch/infrastructure/DirectoryScanner.h>
 #include <cullfinch/testsupport/TempCollection.h>
 
+#include <QCoreApplication>
 #include <QFile>
 #include <QSignalSpy>
 #include <QTest>
+#include <QThreadPool>
 
 #include <tuple>
 
@@ -24,6 +26,9 @@ private slots:
     void producesOneAssetPerJpegRawPair();
     void discardsResultsFromASupersededGeneration();
     void reportsCaseDistinctStemsWithoutMerging();
+    void reportsAScanFailureThroughSignal();
+    void dropsResultsQueuedBeforeCancellation();
+    void survivesDestructionWhileAScanIsInFlight();
 };
 
 void TestDirectoryScanner::enumeratesJpegAndRawFiles() {
@@ -198,6 +203,91 @@ void TestDirectoryScanner::reportsCaseDistinctStemsWithoutMerging() {
         QCOMPARE(asset.pairingState, domain::PairingState::Ambiguous);
         QVERIFY(!asset.isOperable());
     }
+}
+
+void TestDirectoryScanner::reportsAScanFailureThroughSignal() {
+    infrastructure::DirectoryScanner scanner;
+    QSignalSpy failed(&scanner, &application::IScanService::scanFailed);
+
+    application::ScanRequest request;
+    request.collectionId = domain::CollectionId(QStringLiteral("c1"));
+    request.rootPath = QStringLiteral("/definitely/not/a/directory");
+    request.config = domain::AssociationConfig::defaults();
+    request.generation = 1;
+    scanner.requestScan(request);
+
+    // enumerate() reports an unreadable root synchronously (see
+    // reportsAnUnreadableRootAsAnError above); this exercises the same
+    // failure travelling the asynchronous requestScan() path all the way to
+    // scanFailed.
+    QVERIFY(failed.wait(15000));
+    QCOMPARE(failed.first().at(0).toULongLong(), 1ULL);
+    QVERIFY(!failed.first().at(1).toString().isEmpty());
+}
+
+void TestDirectoryScanner::dropsResultsQueuedBeforeCancellation() {
+    TempCollection collection;
+    collection.addJpeg(QStringLiteral("A.JPG"));
+
+    infrastructure::DirectoryScanner scanner;
+    QSignalSpy finished(&scanner, &application::IScanService::scanFinished);
+    QSignalSpy failed(&scanner, &application::IScanService::scanFailed);
+
+    application::ScanRequest ok;
+    ok.collectionId = domain::CollectionId(QStringLiteral("c1"));
+    ok.rootPath = collection.path();
+    ok.config = domain::AssociationConfig::defaults();
+    ok.generation = 1;
+    scanner.requestScan(ok);
+    // The worker has now emitted "finished" -- queued for delivery, but
+    // nothing has pumped the event loop yet to actually deliver it.
+    QVERIFY(QThreadPool::globalInstance()->waitForDone(15000));
+    scanner.cancelAll();
+
+    application::ScanRequest bad = ok;
+    bad.rootPath = QStringLiteral("/definitely/not/a/directory");
+    bad.generation = 3;
+    scanner.requestScan(bad);
+    // Same for "failed".
+    QVERIFY(QThreadPool::globalInstance()->waitForDone(15000));
+    scanner.cancelAll();
+
+    // Only now deliver both queued results. The generation check that must
+    // catch these is the one at delivery time, not the worker's own check
+    // (which passed, since neither task was superseded when it ran).
+    QCoreApplication::processEvents();
+
+    QCOMPARE(finished.count(), 0);
+    QCOMPARE(failed.count(), 0);
+}
+
+void TestDirectoryScanner::survivesDestructionWhileAScanIsInFlight() {
+    TempCollection collection;
+    // Enough files that enumeration is still running, on anything but a
+    // wildly slow machine, when the scanner below is destroyed a few lines
+    // down -- this is the race #27 describes: a scan in flight when its
+    // scanner disappears. A sanitizer build is what actually proves the
+    // worker never dereferences the scanner; this test just makes sure the
+    // scenario is exercised and that destruction does not hang waiting for
+    // the worker to finish.
+    for (int index = 0; index < 4000; ++index) {
+        collection.addFile(QStringLiteral("file-%1.dat").arg(index), QByteArrayLiteral("x"));
+    }
+
+    {
+        infrastructure::DirectoryScanner scanner;
+        application::ScanRequest request;
+        request.collectionId = domain::CollectionId(QStringLiteral("c1"));
+        request.rootPath = collection.path();
+        request.config = domain::AssociationConfig::defaults();
+        request.generation = 1;
+        scanner.requestScan(request);
+        // scanner is destroyed here, likely mid-scan.
+    }
+
+    // Wait for the task to actually run to completion (rather than a fixed
+    // delay) before the test process exits.
+    QVERIFY(QThreadPool::globalInstance()->waitForDone(15000));
 }
 
 QTEST_MAIN(TestDirectoryScanner)
