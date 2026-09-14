@@ -14,7 +14,7 @@ tooling = [
   "pre-commit==4.6.2",
   "gcovr==8.6",
   "shellcheck-py==0.11.0.1",
-  "actionlint-py==1.7.12.24",
+  "actionlint-py-kjanat==1.13.0.35",
   "cmakelang==0.6.13",
   "ruff==0.16.6",
 ]

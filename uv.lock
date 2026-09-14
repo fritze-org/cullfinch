@@ -3,10 +3,10 @@ revision = 3
 requires-python = "==3.13.*"
 
 [[package]]
-name = "actionlint-py"
-version = "1.7.12.24"
+name = "actionlint-py-kjanat"
+version = "1.13.0.35"
 source = { registry = "https://pypi.org/simple" }
-sdist = { url = "https://files.pythonhosted.org/packages/6f/0b/3f29683dfbe94208fb5c3806806a6ef419972892e25c3c4f95198f68c978/actionlint_py-1.7.12.24.tar.gz", hash = "sha256:7571b0724fde79b2572b98b2b53792c470249d4db29951b57fc49b9cd3eaf11e", size = 12071, upload-time = "2026-03-31T06:21:35.015Z" }
+sdist = { url = "https://files.pythonhosted.org/packages/52/a3/6e19b0afe3bfb666bc9fa6fddbef68b21bd53456423b4a07cab3dba0c63c/actionlint_py_kjanat-1.13.0.35.tar.gz", hash = "sha256:c64e959ed5a87164bba1a8901c66ec1d5cb9594105b9b8ba67b13ead6b09907a", size = 13542, upload-time = "2026-08-31T16:47:57.979Z" }
 
 [[package]]
 name = "cfgv"
@@ -57,7 +57,7 @@ source = { virtual = "." }
 
 [package.dev-dependencies]
 tooling = [
-    { name = "actionlint-py" },
+    { name = "actionlint-py-kjanat" },
     { name = "cmakelang" },
     { name = "gcovr" },
     { name = "pre-commit" },
@@ -69,7 +69,7 @@ tooling = [
 
 [package.metadata.requires-dev]
 tooling = [
-    { name = "actionlint-py", specifier = "==1.7.12.24" },
+    { name = "actionlint-py-kjanat", specifier = "==1.13.0.35" },
     { name = "cmakelang", specifier = "==0.6.13" },
     { name = "gcovr", specifier = "==8.6" },
     { name = "pre-commit", specifier = "==4.6.2" },
