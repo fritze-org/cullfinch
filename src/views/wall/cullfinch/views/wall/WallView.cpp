@@ -99,7 +99,7 @@ void WallSurface::addTile(const domain::AssetId& id) {
                     Q_EMIT eliminateRequested(id, against);
                 }
             });
-    connect(tile, &ui::ImageCanvas::readinessChanged, this, [this, id](bool ready) {
+    connect(tile->preview(), &ui::PreviewLoader::readinessChanged, this, [this, id](bool ready) {
         if (ready) {
             recordAspect(id);
         }

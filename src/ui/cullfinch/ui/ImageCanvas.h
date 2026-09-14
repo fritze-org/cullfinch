@@ -3,10 +3,11 @@
 
 #include <cullfinch/application/ImageService.h>
 #include <cullfinch/ui/AssetPresentation.h>
+#include <cullfinch/ui/PreviewLoader.h>
 
-#include <QImage>
 #include <QPointF>
 #include <QRectF>
+#include <QSize>
 #include <QWidget>
 
 namespace cullfinch::ui {
@@ -16,6 +17,10 @@ namespace cullfinch::ui {
 /// The primary click means "eliminate this photo" in every flow, so a plain
 /// click is never also a zoom command. Inspection is a separate mode entered
 /// with Space; while inspecting, click-and-drag pans and does not eliminate.
+///
+/// The pixels come from a `PreviewLoader` this canvas owns. Hosts that need to
+/// know whether a photo has arrived, or what went wrong, ask that loader --
+/// see `docs/decisions/0010-preview-loader.md`.
 class ImageCanvas : public QWidget {
     Q_OBJECT
 
@@ -32,15 +37,10 @@ public:
     void clearPresentation();
     [[nodiscard]] const AssetPresentation& presentation() const { return presentation_; }
 
-    /// True once a preview at the requested size has arrived. Decision input
-    /// stays disabled until every required preview is ready.
-    [[nodiscard]] bool isReady() const { return ready_; }
-    [[nodiscard]] bool hasError() const { return !errorText_.isEmpty(); }
-    [[nodiscard]] QString errorText() const { return errorText_; }
-
-    /// True once pixels at 100% are available, which is what judging sharpness
-    /// needs. Visible in the overlay.
-    [[nodiscard]] bool isFullResolutionReady() const { return fullResolutionReady_; }
+    /// The decode side of this canvas: readiness, errors and the decoded
+    /// pixels. Hosts connect to `readinessChanged` here, because decision
+    /// input stays disabled until every required preview is ready.
+    [[nodiscard]] PreviewLoader* preview() const { return preview_; }
 
     [[nodiscard]] bool isInspecting() const { return inspecting_; }
     void setInspecting(bool inspecting);
@@ -78,8 +78,6 @@ signals:
     void eliminateRequested(cullfinch::ui::ImageCanvas::ActivationSource source);
     void inspectToggled(bool inspecting);
     void viewChanged(const QPointF& centre, qreal zoom);
-    void readinessChanged(bool ready);
-    void retryRequested();
 
 protected:
     void paintEvent(QPaintEvent* event) override;
@@ -93,22 +91,15 @@ protected:
     void changeEvent(QEvent* event) override;
 
 private:
-    void requestImage(application::ImageRequestClass kind);
-    void onImageReady(const application::ImageResult& result);
+    /// Screen-sized, accounting for the device pixel ratio so a fitted image is
+    /// never upscaled from too few pixels. This is the one thing the loader
+    /// cannot work out for itself, which is why it is asked for in pixels.
+    [[nodiscard]] QSize fittedTargetPixels() const;
+    void requestFittedPreview();
     void updateAccessibility();
 
-    application::IImageService& images_;
+    PreviewLoader* preview_ = nullptr;
     AssetPresentation presentation_;
-    quint64 generation_ = 0;
-    quint64 fitRequestId_ = 0;
-    quint64 fullRequestId_ = 0;
-
-    QImage fitted_;
-    QImage full_;
-    QSize nativeSize_;
-    bool ready_ = false;
-    bool fullResolutionReady_ = false;
-    QString errorText_;
     QString caption_;
 
     bool inspecting_ = false;

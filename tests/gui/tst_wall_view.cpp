@@ -110,7 +110,7 @@ void TestWallView::startWallOn(int count) {
         int ready = 0;
         for (const domain::AssetId& id : view_->surface()->order()) {
             ui::ImageCanvas* tile = view_->surface()->tileFor(id);
-            if (tile != nullptr && tile->isReady()) {
+            if (tile != nullptr && tile->preview()->isReady()) {
                 ++ready;
             }
         }
@@ -385,7 +385,7 @@ void TestWallView::aTileCreatedBeforeItsPresentationPicksItUp() {
         QFAIL("the wall created no tile for the candidate it was handed");
     }
     QVERIFY(!tile->presentation().previewMemberId.isValid());
-    QVERIFY(!tile->isReady());
+    QVERIFY(!tile->preview()->isReady());
 
     // The same state again leaves it as it is: there is still nothing to fill
     // it in with, and a tile is never re-presented with what it already has.
@@ -405,7 +405,7 @@ void TestWallView::aTileCreatedBeforeItsPresentationPicksItUp() {
     view_->surface()->setCandidates(positions, presentations,
                                     view_->surface()->layoutRevision() + 1);
 
-    QVERIFY(GuiFixture::waitFor([tile]() { return tile->isReady(); }));
+    QVERIFY(GuiFixture::waitFor([tile]() { return tile->preview()->isReady(); }));
     QCOMPARE(tile->presentation().id, late);
 }
 

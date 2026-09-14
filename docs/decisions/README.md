@@ -15,3 +15,4 @@ departs from it, and why.
 | [0007](0007-wayland-primary-linux-backend.md) | Native Wayland is the primary Linux backend |
 | [0008](0008-cpp23-language-standard.md) | The language standard is C++23, not the specified C++20 |
 | [0009](0009-visual-regression-references.md) | Visual regression references are committed, and keyed by rendering environment |
+| [0010](0010-preview-loader.md) | Decode bookkeeping lives in a `PreviewLoader`, not in `ImageCanvas` |
