@@ -111,6 +111,13 @@ offscreen fails instead of passing under a backend nobody asked for. The Wayland
 for a real client connection rather than for a socket to appear, and unsets `DISPLAY` so
 XWayland cannot rescue a broken native path.
 
+`CULLFINCH_COMPOSITOR` picks the compositor that owns the Wayland session: `weston` (the
+default, and the deterministic reference for the required checks), `kwin` or `mutter`. The
+extended compositor jobs are that variable and nothing else — the session, its bus and its
+readiness check stay identical, so a difference in the result is a difference in the
+compositor. `CULLFINCH_OUTPUT_WIDTH` and `CULLFINCH_OUTPUT_HEIGHT` set the headless output
+size the scaling tests measure against.
+
 The visual suite is the exception: it pins `offscreen` itself, because a compositor decides how a
 surface is finally composed and a pixel comparison only means something against the backend its
 reference was recorded on. Its references live in

@@ -7,8 +7,21 @@
 #
 #   tests/support/with-wayland.sh ctest --preset dev-fast --label-regex gui
 #
+# CULLFINCH_COMPOSITOR selects which compositor owns the session:
+#
+#   weston   the deterministic reference compositor for the required checks
+#   kwin     KDE Plasma, where decorations and real focus routing are exercised
+#   mutter   GNOME, likewise
+#
+# Weston stays the default: a required pull-request check must not depend on a
+# full desktop stack. What differs between the three is session setup, not the
+# tests, so the extended compositor jobs come through here rather than growing
+# a second, weaker copy of this file inside a workflow.
+#
 # Readiness is a real client connection, never the mere existence of a socket:
-# a socket appears before the compositor is able to serve anyone.
+# a socket appears before the compositor is able to serve anyone. Mutter proves
+# the point — it publishes its socket and *then* aborts when it has no session
+# bus, so a socket check alone reports a dead compositor as four failing tests.
 set -euo pipefail
 
 if [[ $# -eq 0 ]]; then
@@ -16,9 +29,19 @@ if [[ $# -eq 0 ]]; then
     exit 2
 fi
 
-: "${CULLFINCH_WESTON_WIDTH:=1920}"
-: "${CULLFINCH_WESTON_HEIGHT:=1080}"
+: "${CULLFINCH_COMPOSITOR:=weston}"
+: "${CULLFINCH_OUTPUT_WIDTH:=1920}"
+: "${CULLFINCH_OUTPUT_HEIGHT:=1080}"
 : "${CULLFINCH_WAYLAND_TIMEOUT:=60}"
+
+case "${CULLFINCH_COMPOSITOR}" in
+    weston | kwin | mutter) ;;
+    *)
+        echo "unknown CULLFINCH_COMPOSITOR '${CULLFINCH_COMPOSITOR}':" \
+            "expected weston, kwin or mutter" >&2
+        exit 2
+        ;;
+esac
 
 session_root="$(mktemp -d "${TMPDIR:-/tmp}/cullfinch-wayland-XXXXXX")"
 chmod 0700 "${session_root}"
@@ -27,9 +50,9 @@ runtime_dir="${session_root}/runtime"
 mkdir -p "${runtime_dir}" "${session_root}/data" "${session_root}/cache" "${session_root}/artifacts"
 chmod 0700 "${runtime_dir}"
 
-socket_name="cullfinch-wl-$$"
-weston_log="${session_root}/artifacts/weston.log"
-weston_pid=""
+socket_name="cullfinch-${CULLFINCH_COMPOSITOR}-$$"
+compositor_log="${session_root}/artifacts/${CULLFINCH_COMPOSITOR}.log"
+compositor_pid=""
 dbus_pid=""
 
 artifact_dir="${CULLFINCH_ARTIFACT_DIR:-}"
@@ -40,12 +63,12 @@ cleanup() {
     if [[ -n "${artifact_dir}" ]]; then
         mkdir -p "${artifact_dir}"
         cp -a "${session_root}/artifacts/." "${artifact_dir}/" 2>/dev/null || true
-    elif [[ ${status} -ne 0 && -s "${weston_log}" ]]; then
-        echo "--- weston log ---" >&2
-        tail -n 40 "${weston_log}" >&2 || true
+    elif [[ ${status} -ne 0 && -s "${compositor_log}" ]]; then
+        echo "--- ${CULLFINCH_COMPOSITOR} log ---" >&2
+        tail -n 40 "${compositor_log}" >&2 || true
     fi
 
-    for pid in "${weston_pid}" "${dbus_pid}"; do
+    for pid in "${compositor_pid}" "${dbus_pid}"; do
         if [[ -n "${pid}" ]] && kill -0 "${pid}" 2>/dev/null; then
             kill "${pid}" 2>/dev/null || true
             wait "${pid}" 2>/dev/null || true
@@ -60,7 +83,21 @@ trap cleanup EXIT INT TERM
 export XDG_RUNTIME_DIR="${runtime_dir}"
 
 # A private bus, so portal and desktop integration have somewhere to talk that
-# is not the developer's session bus.
+# is not the developer's session bus. The desktop compositors do not merely
+# prefer one: Mutter asserts on a missing session bus and aborts outright, so
+# for them a bus that could not be started is a hard failure rather than a
+# session with desktop integration switched off.
+bus_required=0
+if [[ "${CULLFINCH_COMPOSITOR}" != "weston" ]]; then
+    bus_required=1
+fi
+
+# Drop a bus inherited from the caller before trying to start one. Otherwise a
+# private bus that could not be started leaves the developer's own address in
+# place: the requirement below is satisfied by it, and KWin or Mutter attach to
+# the very session this script promises not to touch.
+unset DBUS_SESSION_BUS_ADDRESS
+
 if command -v dbus-daemon >/dev/null 2>&1; then
     dbus_address_file="${session_root}/dbus-address"
     dbus-daemon --session --nofork --print-address=3 --print-pid=4 \
@@ -76,18 +113,50 @@ if command -v dbus-daemon >/dev/null 2>&1; then
     fi
 fi
 
-# The headless backend with a software renderer, so the baseline job needs no
-# GPU, at an explicit output size the scaling tests can rely on.
-weston \
-    --backend=headless \
-    --renderer=pixman \
-    --width="${CULLFINCH_WESTON_WIDTH}" \
-    --height="${CULLFINCH_WESTON_HEIGHT}" \
-    --socket="${socket_name}" \
-    --idle-time=0 \
-    --no-config \
-    >"${weston_log}" 2>&1 &
-weston_pid=$!
+if [[ ${bus_required} -eq 1 && -z "${DBUS_SESSION_BUS_ADDRESS:-}" ]]; then
+    echo "${CULLFINCH_COMPOSITOR} requires a session bus, and no private" \
+        "dbus-daemon could be started" >&2
+    exit 1
+fi
+
+# Every compositor here is asked for a headless backend at an explicit output
+# size, because the scaling tests define 100% inspection in buffer pixels and
+# cannot infer the output they were given.
+case "${CULLFINCH_COMPOSITOR}" in
+    weston)
+        # A software renderer, so the baseline job needs no GPU.
+        weston \
+            --backend=headless \
+            --renderer=pixman \
+            --width="${CULLFINCH_OUTPUT_WIDTH}" \
+            --height="${CULLFINCH_OUTPUT_HEIGHT}" \
+            --socket="${socket_name}" \
+            --idle-time=0 \
+            --no-config \
+            >"${compositor_log}" 2>&1 &
+        ;;
+    kwin)
+        # --virtual is KWin's headless backend. There is no --headless option;
+        # asking for one prints "Unknown option 'headless'" and exits.
+        kwin_wayland \
+            --virtual \
+            --width "${CULLFINCH_OUTPUT_WIDTH}" \
+            --height "${CULLFINCH_OUTPUT_HEIGHT}" \
+            --socket "${socket_name}" \
+            >"${compositor_log}" 2>&1 &
+        ;;
+    mutter)
+        # Headless Mutter has no output at all unless one is asked for, and
+        # Xwayland is switched off for the same reason DISPLAY is unset below.
+        mutter \
+            --headless \
+            --no-x11 \
+            --virtual-monitor "${CULLFINCH_OUTPUT_WIDTH}x${CULLFINCH_OUTPUT_HEIGHT}" \
+            --wayland-display "${socket_name}" \
+            >"${compositor_log}" 2>&1 &
+        ;;
+esac
+compositor_pid=$!
 
 export WAYLAND_DISPLAY="${socket_name}"
 # X11 must be genuinely unavailable: a job that quietly succeeds through
@@ -99,9 +168,9 @@ unset DISPLAY
 connected=0
 deadline=$((SECONDS + CULLFINCH_WAYLAND_TIMEOUT))
 while ((SECONDS < deadline)); do
-    if ! kill -0 "${weston_pid}" 2>/dev/null; then
-        echo "weston exited before accepting a client" >&2
-        tail -n 40 "${weston_log}" >&2 || true
+    if ! kill -0 "${compositor_pid}" 2>/dev/null; then
+        echo "${CULLFINCH_COMPOSITOR} exited before accepting a client" >&2
+        tail -n 40 "${compositor_log}" >&2 || true
         exit 1
     fi
     if command -v wayland-info >/dev/null 2>&1; then
@@ -130,13 +199,14 @@ done
 
 if [[ ${connected} -ne 1 ]]; then
     echo "no Wayland client could connect to '${socket_name}' within ${CULLFINCH_WAYLAND_TIMEOUT}s" >&2
-    tail -n 40 "${weston_log}" >&2 || true
+    tail -n 40 "${compositor_log}" >&2 || true
     exit 1
 fi
 
 # Select the native backend explicitly and make the tests assert they got it,
 # so an XCB, offscreen or minimal fallback fails the suite rather than passing
 # quietly under a different backend.
+export CULLFINCH_COMPOSITOR
 export QT_QPA_PLATFORM=wayland
 export CULLFINCH_EXPECTED_PLATFORM=wayland
 export CULLFINCH_TEST_MODE=1
