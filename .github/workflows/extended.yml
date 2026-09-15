@@ -121,6 +121,13 @@ jobs:
 
       - uses: lukka/get-cmake@fffaaafeea488556c2c12dad60690008bc1caacb # v4.4.2
 
+      # The build below is 40 minutes. A compositor that cannot start at all
+      # is worth knowing about before spending them, and this answers in one.
+      - name: The compositor must be able to hold a session
+        env:
+          CULLFINCH_COMPOSITOR: ${{ matrix.compositor }}
+        run: tests/support/with-wayland.sh true
+
       - name: Configure and build
         run: |
           cmake --preset ci-linux-gcc
@@ -129,39 +136,27 @@ jobs:
       # Weston is the deterministic reference compositor for the required PR
       # job. These runs cover behaviour that only a full desktop compositor
       # exhibits: decorations, real focus routing and fractional scaling.
+      #
+      # The session helper is the same one the required jobs use, so what the
+      # compositor changes is the compositor, not the rest of the environment.
       - name: Run the GUI suite under ${{ matrix.compositor }}
         env:
           CULLFINCH_COMPOSITOR: ${{ matrix.compositor }}
+          CULLFINCH_ARTIFACT_DIR: ${{ github.workspace }}/session-artifacts
         run: |
-          runtime="${RUNNER_TEMP}/cullfinch-${{ matrix.compositor }}"
-          mkdir -p "${runtime}"
-          chmod 700 "${runtime}"
-          export XDG_RUNTIME_DIR="${runtime}"
-          if [ "${{ matrix.compositor }}" = "kwin" ]; then
-            kwin_wayland --headless --width 1920 --height 1080 --socket cullfinch-kwin &
-          else
-            mutter --headless --wayland --wayland-display cullfinch-mutter &
-          fi
-          compositor_pid=$!
-          for _ in $(seq 1 150); do
-            if [ -S "${runtime}/cullfinch-${{ matrix.compositor }}" ]; then break; fi
-            sleep 0.2
-          done
-          test -S "${runtime}/cullfinch-${{ matrix.compositor }}" || {
-            echo "${{ matrix.compositor }} never came up" >&2
-            exit 1
-          }
-          WAYLAND_DISPLAY="cullfinch-${{ matrix.compositor }}" \
-            QT_QPA_PLATFORM=wayland CULLFINCH_EXPECTED_PLATFORM=wayland \
+          tests/support/with-wayland.sh \
             ctest --preset ci-linux-gcc --label-regex gui --output-on-failure
-          kill "${compositor_pid}" 2>/dev/null || true
 
       - name: Upload failure artifacts
         if: always()
         uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
         with:
           name: compositor-${{ matrix.compositor }}-results
-          path: build/ci-linux-gcc/Testing/**
+          # The compositor log is the evidence when the session itself is what
+          # failed; a CTest directory only exists once the suite has started.
+          path: |
+            build/ci-linux-gcc/Testing/**
+            session-artifacts/**
           if-no-files-found: ignore
 
   fractional-scaling:
@@ -188,7 +183,7 @@ jobs:
         run: |
           for scale in 1 1.25 1.5 2; do
             echo "::group::scale ${scale}"
-            CULLFINCH_WESTON_WIDTH=2560 CULLFINCH_WESTON_HEIGHT=1440 \
+            CULLFINCH_OUTPUT_WIDTH=2560 CULLFINCH_OUTPUT_HEIGHT=1440 \
               QT_WAYLAND_FORCE_DPI=$(python3 -c "print(int(96 * ${scale}))") \
               tests/support/with-wayland.sh ctest --preset ci-linux-gcc \
                 --label-regex gui --output-on-failure

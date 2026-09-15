@@ -19,7 +19,9 @@ is no application-specific Wayland protocol code and no compositor dependency.
 - `tests/support/with-wayland.sh` owns a complete isolated session — its own
   runtime directory at mode 0700, its own D-Bus, and a headless Weston with the
   pixman software renderer — and `tests/support/with-x11.sh` does the same for
-  the compatibility suite.
+  the compatibility suite. `CULLFINCH_COMPOSITOR` swaps Weston for KWin or
+  Mutter and changes nothing else, so the extended compositor jobs vary the one
+  thing they are about.
 - The complete core GUI suite and the installed-package smoke test run under
   native Wayland on every pull request. X11 is a separate, secondary job.
 - The coverage job runs through the same Wayland helper, so the canonical
