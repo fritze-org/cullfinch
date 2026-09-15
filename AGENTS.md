@@ -38,9 +38,11 @@ tests/support/with-x11.sh     ctest --preset dev-fast --label-regex gui   # comp
 CULLFINCH_COMPOSITOR=kwin tests/support/with-wayland.sh ctest --preset dev-fast --label-regex gui
 ```
 
-`CULLFINCH_COMPOSITOR` is `weston` (default), `kwin` or `mutter`. The extended compositor jobs set
-only that; never hand-roll a compositor launch in a workflow, because a session assembled inline
-loses the private bus, the liveness check and the log capture that make a failure readable.
+`CULLFINCH_COMPOSITOR` selects the Wayland helper's compositor — `weston` (default), `kwin` or
+`mutter`; `with-x11.sh` has no equivalent and always runs Xvfb under XCB. The extended compositor
+jobs set only that variable; never hand-roll a compositor launch in a workflow, because a session
+assembled inline loses the private bus, the liveness check and the log capture that make a failure
+readable.
 
 ## Architecture
 

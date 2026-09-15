@@ -92,6 +92,12 @@ if [[ "${CULLFINCH_COMPOSITOR}" != "weston" ]]; then
     bus_required=1
 fi
 
+# Drop a bus inherited from the caller before trying to start one. Otherwise a
+# private bus that could not be started leaves the developer's own address in
+# place: the requirement below is satisfied by it, and KWin or Mutter attach to
+# the very session this script promises not to touch.
+unset DBUS_SESSION_BUS_ADDRESS
+
 if command -v dbus-daemon >/dev/null 2>&1; then
     dbus_address_file="${session_root}/dbus-address"
     dbus-daemon --session --nofork --print-address=3 --print-pid=4 \
