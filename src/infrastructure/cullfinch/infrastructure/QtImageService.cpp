@@ -132,10 +132,15 @@ quint64 QtImageService::request(const application::ImageRequest& request) {
             result.image = image;
             result.nativeSize = image.size();
             result.success = true;
-            // Delivered asynchronously even on a cache hit, so callers always
-            // see the same ordering.
-            QMetaObject::invokeMethod(
-                this, [this, result]() { Q_EMIT imageReady(result); }, Qt::QueuedConnection);
+            // Through deliver(), exactly as a decoded result is. A cache hit
+            // is still asynchronous, so callers see one ordering, and it is
+            // now subject to the same cancellation check: an abandoned
+            // generation must not reach the view merely because its image
+            // happened to still be cached. Emitting here directly also
+            // sidestepped holdResultsForTesting(), so the second paint a real
+            // window manager performs delivered a thumbnail the first paint
+            // had cached and a test was still holding.
+            deliver(result);
             return requestId;
         }
     }
