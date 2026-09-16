@@ -71,6 +71,10 @@ private:
     /// stop at the first group that fails or leaves recoverable work.
     bool stageGroups(const domain::OperationPlan& plan, OperationRecord& record,
                      const JournalWriter& journal, QString* error);
+    /// The journal writer handed to the executor. Every rename is bracketed by
+    /// one of its calls: the intent before the move, the outcome after it, so a
+    /// crash between the two leaves a record naming the intended destination.
+    [[nodiscard]] JournalWriter journalWriter();
     /// Which of the executor's recovery steps one of the offers runs.
     enum class RecoveryStep { Restore, RetryTrash, ConfirmTrashed };
 

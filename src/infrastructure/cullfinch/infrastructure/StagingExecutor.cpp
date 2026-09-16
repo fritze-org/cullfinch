@@ -243,8 +243,7 @@ QStringList putBackMoved(OperationRecord& record, const QList<PlannedMember>& mo
     QStringList problems;
     for (const PlannedMember& member : moved) {
         const QString staged = QDir(directory).absoluteFilePath(member.fileName);
-        QString restoreError;
-        if (!renameOnly(staged, member.sourcePath, &restoreError)) {
+        if (QString restoreError; !renameOnly(staged, member.sourcePath, &restoreError)) {
             problems.append(restoreError);
             continue;
         }
@@ -254,6 +253,26 @@ QStringList putBackMoved(OperationRecord& record, const QList<PlannedMember>& mo
         }
     }
     return problems;
+}
+
+/// Stop a group after a failed rename.
+///
+/// Puts back everything that already moved, records the error against the member
+/// that failed, and returns the state the group ends in: Failed when the source
+/// tree is intact again, NeedsRecovery when something could not go back.
+OperationRecord abortStaging(OperationRecord record, const PlannedMember& failed,
+                             const QString& moveError, const QList<PlannedMember>& movedMembers,
+                             const QString& directory) {
+    const QStringList restoreProblems = putBackMoved(record, movedMembers, directory);
+    if (OperationMemberRecord* entry = entryFor(record, failed.memberId); entry != nullptr) {
+        entry->error = moveError;
+    }
+    if (restoreProblems.isEmpty()) {
+        return withState(record, OperationState::Failed, moveError);
+    }
+    return withState(record, OperationState::NeedsRecovery,
+                     tr("%1 Some files could not be put back: %2")
+                         .arg(moveError, restoreProblems.join(QLatin1String(" "))));
 }
 
 /// The first member that failed to arrive in staging with its reviewed identity.
@@ -618,18 +637,7 @@ OperationRecord StagingExecutor::executeGroup(const OperationRecord& input,
         const QString destination = QDir(directory).absoluteFilePath(member.fileName);
         if (QString moveError; !renameOnly(member.sourcePath, destination, &moveError)) {
             // Stop the group and attempt journalled restoration of what moved.
-            const QStringList restoreProblems = putBackMoved(record, movedMembers, directory);
-            if (OperationMemberRecord* entry = entryFor(record, member.memberId);
-                entry != nullptr) {
-                entry->error = moveError;
-            }
-
-            if (restoreProblems.isEmpty()) {
-                return withState(record, OperationState::Failed, moveError);
-            }
-            return withState(record, OperationState::NeedsRecovery,
-                             tr("%1 Some files could not be put back: %2")
-                                 .arg(moveError, restoreProblems.join(QLatin1String(" "))));
+            return abortStaging(record, member, moveError, movedMembers, directory);
         }
 
         if (OperationMemberRecord* entry = entryFor(record, member.memberId); entry != nullptr) {

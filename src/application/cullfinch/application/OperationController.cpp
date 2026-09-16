@@ -80,6 +80,17 @@ bool OperationController::verifyAgainstDisk(const domain::OperationPlan& plan,
     return false;
 }
 
+application::JournalWriter OperationController::journalWriter() {
+    return [this](OperationRecord snapshot, QString* journalError) {
+        snapshot.updatedUtc = QDateTime::currentDateTimeUtc();
+        if (!persist(snapshot, journalError)) {
+            return false;
+        }
+        Q_EMIT recordChanged(snapshot);
+        return true;
+    };
+}
+
 bool OperationController::stageGroups(const domain::OperationPlan& plan, OperationRecord& record,
                                       const JournalWriter& journal, QString* error) {
     int completed = 0;
@@ -138,20 +149,7 @@ bool OperationController::execute(const domain::OperationPlan& plan,
     }
     Q_EMIT recordChanged(record);
 
-    // Every rename is bracketed by a journal write: the intent before the
-    // move, the outcome after it. A crash between the two leaves a record
-    // that names the intended destination, which is what recovery inspects.
-    const application::JournalWriter journal = [this](OperationRecord snapshot,
-                                                      QString* journalError) {
-        snapshot.updatedUtc = QDateTime::currentDateTimeUtc();
-        if (!persist(snapshot, journalError)) {
-            return false;
-        }
-        Q_EMIT recordChanged(snapshot);
-        return true;
-    };
-
-    if (!stageGroups(plan, record, journal, error)) {
+    if (!stageGroups(plan, record, journalWriter(), error)) {
         return false;
     }
 

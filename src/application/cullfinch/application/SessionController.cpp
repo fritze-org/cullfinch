@@ -178,8 +178,8 @@ bool SessionController::resume(const StoredSession& stored,
     // and the stop stay in one place.
     QString changed;
     for (const AssetId& id : stored.snapshot.orderedAssetIds) {
-        const auto current = currentRevisions.constFind(id);
-        if (current == currentRevisions.constEnd()) {
+        if (const auto current = currentRevisions.constFind(id);
+            current == currentRevisions.constEnd()) {
             changed = tr("a photo is no longer present");
         } else if (*current != stored.snapshot.membershipRevisions.value(id)) {
             changed = tr("a photo's file group changed");
