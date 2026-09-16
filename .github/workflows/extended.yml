@@ -147,8 +147,14 @@ jobs:
           tests/support/with-wayland.sh \
             ctest --preset ci-linux-gcc --label-regex gui --output-on-failure
 
+      # Evidence for a failure, so it runs only when there is one: a passing run
+      # leaves nothing here but CTest bookkeeping, and uploading that anyway
+      # gave the artifact service a chance to fail a job the suite had already
+      # passed. `continue-on-error` keeps the verdict with the suite for the
+      # same reason: a diagnostic that cannot be stored is not a test result.
       - name: Upload failure artifacts
-        if: always()
+        if: failure()
+        continue-on-error: true
         uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
         with:
           name: compositor-${{ matrix.compositor }}-results

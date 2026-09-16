@@ -97,8 +97,13 @@ jobs:
         if: ${{ failure() && steps.hooks.outcome == 'failure' }}
         run: git diff > pre-commit.diff || true
 
+      # The upload itself is `continue-on-error`, here and everywhere below:
+      # these artifacts are evidence about a run, never a product of it, and an
+      # artifact service that will not store them has said nothing about the
+      # code under test.
       - name: Upload the formatting diff
         if: ${{ failure() && steps.hooks.outcome == 'failure' }}
+        continue-on-error: true
         uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
         with:
           name: pre-commit-diff-${{ matrix.os }}
@@ -334,6 +339,7 @@ jobs:
 
       - name: Upload test results and failure artifacts
         if: always()
+        continue-on-error: true
         uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
         with:
           name: results-${{ matrix.preset }}-${{ matrix.runner }}
@@ -493,6 +499,7 @@ jobs:
 
       - name: Upload the enabled-check inventory
         if: always()
+        continue-on-error: true
         uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
         with:
           name: clang-tidy-checks-${{ matrix.runner }}
@@ -614,6 +621,7 @@ jobs:
 
       - name: Upload the coverage artifacts
         if: always()
+        continue-on-error: true
         uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
         with:
           name: coverage-linux-gcc
