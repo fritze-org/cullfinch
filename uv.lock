@@ -4,9 +4,15 @@ requires-python = "==3.13.*"
 
 [[package]]
 name = "actionlint-py-kjanat"
-version = "1.13.0.35"
+version = "1.13.0.41"
 source = { registry = "https://pypi.org/simple" }
-sdist = { url = "https://files.pythonhosted.org/packages/52/a3/6e19b0afe3bfb666bc9fa6fddbef68b21bd53456423b4a07cab3dba0c63c/actionlint_py_kjanat-1.13.0.35.tar.gz", hash = "sha256:c64e959ed5a87164bba1a8901c66ec1d5cb9594105b9b8ba67b13ead6b09907a", size = 13542, upload-time = "2026-08-31T16:47:57.979Z" }
+sdist = { url = "https://files.pythonhosted.org/packages/7c/b5/c8b42388bb3efae2a9af9a9a4a9b7461d9f7788b67e23b4dd39f59ce196e/actionlint_py_kjanat-1.13.0.41.tar.gz", hash = "sha256:5d5fd9a9274fb8a13284b004c9a2ead026b15bd704892209907f3e2361800576", size = 13637, upload-time = "2026-09-17T20:19:59.152Z" }
+wheels = [
+    { url = "https://files.pythonhosted.org/packages/58/ce/3fe53babd5bacf60bcb270f118a244c7aa1d9ff44e291f67c45314b96114/actionlint_py_kjanat-1.13.0.41-py2.py3-none-macosx_10_13_universal2.whl", hash = "sha256:1955fd61259f9a6131466f3af7a422c69c59ed8d007a1e0ba0cf2de749f66ab6", size = 2376088, upload-time = "2026-09-17T20:19:52.857Z" },
+    { url = "https://files.pythonhosted.org/packages/9b/db/69c11855371a7c0a1555761baf40af9f82e1e9dedfc0ed1834b00bf26042/actionlint_py_kjanat-1.13.0.41-py2.py3-none-manylinux2014_aarch64.manylinux_2_17_aarch64.whl", hash = "sha256:b0d1e9889c8b856a22a85cabd2ce9759d5a5e55e4b12616a5ddc46f13dd792fa", size = 2312682, upload-time = "2026-09-17T20:19:54.562Z" },
+    { url = "https://files.pythonhosted.org/packages/d6/fc/3ce126923585dc3283f5f0f097ebe8714b5b390eaa4e8ec99cb91ea95970/actionlint_py_kjanat-1.13.0.41-py2.py3-none-manylinux2014_x86_64.manylinux_2_17_x86_64.whl", hash = "sha256:bc1dddf1e363148a9110316389060597f7c8c89cfdc06f495f8181ecaf5585ff", size = 2613273, upload-time = "2026-09-17T20:19:56.281Z" },
+    { url = "https://files.pythonhosted.org/packages/c3/98/68f1934971484d386390695ae54f3ecbb4b1eb1c31d40ff9f17788d7b6b5/actionlint_py_kjanat-1.13.0.41-py2.py3-none-win_amd64.whl", hash = "sha256:bb82cf1095eecb05d69d8f9e69c87617ea43479635be71011e45fef96f0b3a79", size = 2728516, upload-time = "2026-09-17T20:19:57.823Z" },
+]
 
 [[package]]
 name = "cfgv"
@@ -69,7 +75,7 @@ tooling = [
 
 [package.metadata.requires-dev]
 tooling = [
-    { name = "actionlint-py-kjanat", specifier = "==1.13.0.35" },
+    { name = "actionlint-py-kjanat", specifier = "==1.13.0.41" },
     { name = "cmakelang", specifier = "==0.6.13" },
     { name = "gcovr", specifier = "==8.6" },
     { name = "pre-commit", specifier = "==4.6.2" },

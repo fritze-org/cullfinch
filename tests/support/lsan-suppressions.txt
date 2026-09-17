@@ -1,0 +1,48 @@
+# LeakSanitizer suppressions for the Linux Clang sanitizers job.
+#
+# Leak detection is currently switched OFF in that job (detect_leaks=0 in
+# ASAN_OPTIONS), so nothing here is in force yet. The file exists because
+# turning detection on without it is pointless: Qt, Mesa, fontconfig and the
+# Wayland client stack all keep process-lifetime allocations that LSan reports
+# at exit and that cullfinch can neither free nor own.
+#
+# The entries below are the allocations that are *by design* never freed, taken
+# from the upstream projects' own descriptions of them. They are deliberately
+# narrow -- a suppression that names a whole library would hide a real cullfinch
+# leak routed through it.
+#
+# To turn leak detection on: set detect_leaks=1 in the job's ASAN_OPTIONS, run
+# it, and extend this list only for reports that are genuinely a dependency's
+# process-lifetime state. Anything reaching cullfinch:: frames is a bug to fix,
+# never to suppress. See issue #13.
+
+# Qt's own global state: QCoreApplication's static data, the plugin loader's
+# cache of loaded libraries, and the type registry are all freed at exit only
+# on paper -- the library is not unloaded, so LSan sees them as still reachable
+# leaks in every process that ever created a QApplication.
+leak:libQt6Core.so
+leak:libQt6Gui.so
+
+# Plugins are dlopen'd and never dlclose'd, so their initialisation allocations
+# outlive any scope LSan can attribute them to.
+leak:QFactoryLoader
+leak:QLibraryPrivate
+
+# The Mesa/DRI stack allocates per-process driver state on first use and frees
+# it only through an atexit handler that a sanitized abort never reaches.
+leak:libGLX_mesa.so
+leak:libgallium
+leak:swrast_dri.so
+
+# fontconfig caches its configuration for the life of the process by design;
+# FcFini is documented as optional and Qt does not call it.
+leak:FcConfig
+leak:FcInit
+
+# The Wayland client library keeps its proxy and interface tables until the
+# display is destroyed, which a crashing test never gets to do.
+leak:libwayland-client.so
+
+# GLib/D-Bus type registration is one-time, process-lifetime state.
+leak:g_type_register_static
+leak:dbus_bus_get

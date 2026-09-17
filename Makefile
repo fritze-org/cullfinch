@@ -13,7 +13,7 @@ help: ## Show the available targets
 		| awk 'BEGIN {FS = ":.*?## "}; {printf "  \033[36m%-16s\033[0m %s\n", $$1, $$2}'
 
 hooks: ## Install the pinned tooling environment and Git hooks
-	uv sync --locked --group tooling
+	uv sync --locked --no-build --group tooling
 	$(UV) pre-commit install --install-hooks
 
 lint: ## Run the complete pre-commit suite against all tracked files

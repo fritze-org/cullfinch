@@ -23,6 +23,7 @@ doubles build time; use `dev-fast` unless you are specifically checking analysis
 | One test executable | `./build/dev-fast/tests/tst_versus_flow` |
 | One test case | `./build/dev-fast/tests/tst_wall_view fixedPositionsKeepSurvivorsInPlaceUntilCompact` |
 | One suite | `ctest --preset dev-fast --label-regex unit` (`unit`, `integration`, `gui`, `visual`, `package`) |
+| Native Trash | `CULLFINCH_NATIVE_TRASH_TESTS=1 ctest --preset dev-fast --label-regex 'native-trash$'` — the only suite that touches a real Trash; skips without the variable |
 | Visual regression | `ctest --preset dev-fast --label-regex visual` (`make visual-record` re-records) |
 | All hooks | `make lint` — must pass before committing; CI runs the same config on all files |
 | Static analysis | `make tidy` (fresh analysis build; an up-to-date tree analyses nothing) |

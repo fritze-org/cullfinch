@@ -203,6 +203,30 @@ if [[ ${connected} -ne 1 ]]; then
     exit 1
 fi
 
+# The sanitizer runtime options are inherited from the caller on purpose, and
+# must stay that way: the sanitized CI job sets them once, and a session helper
+# that rebuilt the environment from scratch would quietly disarm every test it
+# launches. What is not inherited is the directory a log_path points into --
+# the runtime writes "<log_path>.<pid>" but creates no directories, so a report
+# from a test started here would be dropped on the floor. Create it, and say
+# which options are in force so the artifacts explain themselves.
+for sanitizer_options in "${ASAN_OPTIONS:-}" "${UBSAN_OPTIONS:-}" "${LSAN_OPTIONS:-}"; do
+    [[ -n "${sanitizer_options}" ]] || continue
+    log_path="${sanitizer_options##*log_path=}"
+    [[ "${log_path}" != "${sanitizer_options}" ]] || continue
+    log_path="${log_path%%:*}"
+    if [[ -n "${log_path}" ]]; then
+        mkdir -p "$(dirname "${log_path}")"
+    fi
+done
+if [[ -n "${ASAN_OPTIONS:-}${UBSAN_OPTIONS:-}" ]]; then
+    {
+        echo "ASAN_OPTIONS=${ASAN_OPTIONS:-}"
+        echo "UBSAN_OPTIONS=${UBSAN_OPTIONS:-}"
+        echo "LSAN_OPTIONS=${LSAN_OPTIONS:-}"
+    } >"${session_root}/artifacts/sanitizer-options.txt"
+fi
+
 # Select the native backend explicitly and make the tests assert they got it,
 # so an XCB, offscreen or minimal fallback fails the suite rather than passing
 # quietly under a different backend.

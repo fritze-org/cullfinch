@@ -222,3 +222,16 @@ jobs:
         env:
           QT_QPA_PLATFORM: offscreen
         run: ctest --preset dev-fast --label-regex 'native-trash-adjacent' --output-on-failure
+
+      # The suite that actually calls the platform's Trash. It is opt-in
+      # everywhere, and this job is where the opt-in is given: a runner is
+      # disposable, so its Trash is the one place the real adapter can be
+      # exercised without anyone's own files being nearby. The suite creates
+      # its fixtures under HOME -- the freedesktop Trash is per-mount, and a
+      # fixture on the runner's tmpfs would test a failure path instead of the
+      # one people use -- and removes only the paths Trash reported back to it.
+      - name: Run the native Trash suite
+        env:
+          QT_QPA_PLATFORM: offscreen
+          CULLFINCH_NATIVE_TRASH_TESTS: '1'
+        run: ctest --preset dev-fast --label-regex 'native-trash$' --output-on-failure
