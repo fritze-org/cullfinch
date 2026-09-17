@@ -68,14 +68,16 @@ jobs:
           enable-cache: true
           cache-dependency-glob: uv.lock
 
-      # No --no-build on any uv invocation in this job, the `uv run` steps below
-      # included: actionlint-py-kjanat's current release publishes no wheel,
-      # `uv run` re-checks the environment against the lock on every call, and
-      # uv has no per-package exemption from a global --no-build. The lock
-      # pins that sdist by hash, which is what makes building it acceptable.
-      # See issue #25.
+      # --no-build on every uv invocation in this job, the `uv run` steps below
+      # included: `uv run` re-checks the environment against the lock on every
+      # call, so the flag has to be on all of them or none -- uv has no
+      # per-package exemption to fall back on. Every tooling dependency now
+      # publishes a wheel for this runner, so nothing needs building, and the
+      # flag is what keeps that true: a dependency that later ships only an
+      # sdist fails the job instead of quietly executing its setup code.
+      # Closes issue #25.
       - name: Sync the locked tooling environment
-        run: uv sync --locked --group tooling
+        run: uv sync --locked --no-build --group tooling
 
       - name: Cache pre-commit hook environments
         uses: actions/cache@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
@@ -84,12 +86,12 @@ jobs:
           key: pre-commit-${{ matrix.os }}-${{ hashFiles('.pre-commit-config.yaml') }}
 
       - name: Validate the hook configuration
-        run: uv run --frozen --group tooling -- pre-commit validate-config
+        run: uv run --frozen --no-build --group tooling -- pre-commit validate-config
 
       # The same configuration developers commit with, against every tracked file.
       - name: Run all hooks on all files
         id: hooks
-        run: uv run --frozen --group tooling -- pre-commit run --all-files --show-diff-on-failure
+        run: uv run --frozen --no-build --group tooling -- pre-commit run --all-files --show-diff-on-failure
 
       # A formatting change is a failure with a downloadable diff. CI never
       # commits the fix itself.
@@ -536,12 +538,12 @@ jobs:
           enable-cache: true
           cache-dependency-glob: uv.lock
 
-      # No --no-build: actionlint-py-kjanat's current release publishes no
-      # wheel, so the sync has to build its source distribution. The lock
-      # pins that sdist by hash, which is what makes building it acceptable.
-      # See issue #25.
+      # --no-build: every tooling dependency publishes a wheel for this
+      # runner, so the sync never has to execute an sdist's setup code. The
+      # flag turns that from a property of today's lock into a requirement.
+      # Closes issue #25.
       - name: Sync the locked tooling environment
-        run: uv sync --locked --group tooling
+        run: uv sync --locked --no-build --group tooling
 
       - uses: lukka/get-cmake@fffaaafeea488556c2c12dad60690008bc1caacb # v4.4.2
 
