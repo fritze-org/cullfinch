@@ -57,6 +57,11 @@ dbus_pid=""
 
 artifact_dir="${CULLFINCH_ARTIFACT_DIR:-}"
 
+# Ending the session's processes is subtler than killing two pids; the shared
+# helper beside this file explains why and provides end_session().
+# shellcheck source=tests/support/session-processes.sh
+source "$(dirname "${BASH_SOURCE[0]}")/session-processes.sh"
+
 cleanup() {
     local status=$?
     # Preserve evidence before tearing the session down.
@@ -68,12 +73,11 @@ cleanup() {
         tail -n 40 "${compositor_log}" >&2 || true
     fi
 
-    for pid in "${compositor_pid}" "${dbus_pid}"; do
-        if [[ -n "${pid}" ]] && kill -0 "${pid}" 2>/dev/null; then
-            kill "${pid}" 2>/dev/null || true
-            wait "${pid}" 2>/dev/null || true
-        fi
-    done
+    # The compositor first: it is the one the tests were talking to, and
+    # bringing it down before the bus keeps its shutdown from tripping over a
+    # bus that has already gone.
+    end_session "${compositor_pid}"
+    end_session "${dbus_pid}"
 
     rm -rf "${session_root}"
     return ${status}
@@ -100,9 +104,15 @@ unset DBUS_SESSION_BUS_ADDRESS
 
 if command -v dbus-daemon >/dev/null 2>&1; then
     dbus_address_file="${session_root}/dbus-address"
+    # `set -m` puts this job in a process group of its own, so the services it
+    # activates land there too and end_session() can end all of them together.
+    # Job control is switched straight back off: the test command runs in the
+    # foreground and has no business being handed a terminal.
+    set -m
     dbus-daemon --session --nofork --print-address=3 --print-pid=4 \
         3>"${dbus_address_file}" 4>"${session_root}/dbus-pid" &
     dbus_pid=$!
+    set +m
     for _ in $(seq 1 50); do
         [[ -s "${dbus_address_file}" ]] && break
         sleep 0.1
@@ -122,6 +132,10 @@ fi
 # Every compositor here is asked for a headless backend at an explicit output
 # size, because the scaling tests define 100% inspection in buffer pixels and
 # cannot infer the output they were given.
+#
+# In its own process group, for the reason end_session() gives: a compositor
+# forks helpers, and killing the one pid known here would strand them.
+set -m
 case "${CULLFINCH_COMPOSITOR}" in
     weston)
         # A software renderer, so the baseline job needs no GPU.
@@ -157,6 +171,7 @@ case "${CULLFINCH_COMPOSITOR}" in
         ;;
 esac
 compositor_pid=$!
+set +m
 
 export WAYLAND_DISPLAY="${socket_name}"
 # X11 must be genuinely unavailable: a job that quietly succeeds through
@@ -201,6 +216,30 @@ if [[ ${connected} -ne 1 ]]; then
     echo "no Wayland client could connect to '${socket_name}' within ${CULLFINCH_WAYLAND_TIMEOUT}s" >&2
     tail -n 40 "${compositor_log}" >&2 || true
     exit 1
+fi
+
+# The sanitizer runtime options are inherited from the caller on purpose, and
+# must stay that way: the sanitized CI job sets them once, and a session helper
+# that rebuilt the environment from scratch would quietly disarm every test it
+# launches. What is not inherited is the directory a log_path points into --
+# the runtime writes "<log_path>.<pid>" but creates no directories, so a report
+# from a test started here would be dropped on the floor. Create it, and say
+# which options are in force so the artifacts explain themselves.
+for sanitizer_options in "${ASAN_OPTIONS:-}" "${UBSAN_OPTIONS:-}" "${LSAN_OPTIONS:-}"; do
+    [[ -n "${sanitizer_options}" ]] || continue
+    log_path="${sanitizer_options##*log_path=}"
+    [[ "${log_path}" != "${sanitizer_options}" ]] || continue
+    log_path="${log_path%%:*}"
+    if [[ -n "${log_path}" ]]; then
+        mkdir -p "$(dirname "${log_path}")"
+    fi
+done
+if [[ -n "${ASAN_OPTIONS:-}${UBSAN_OPTIONS:-}" ]]; then
+    {
+        echo "ASAN_OPTIONS=${ASAN_OPTIONS:-}"
+        echo "UBSAN_OPTIONS=${UBSAN_OPTIONS:-}"
+        echo "LSAN_OPTIONS=${LSAN_OPTIONS:-}"
+    } >"${session_root}/artifacts/sanitizer-options.txt"
 fi
 
 # Select the native backend explicitly and make the tests assert they got it,

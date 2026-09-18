@@ -92,10 +92,27 @@ hand-edit a `rev:` back to a bare tag.
 | GUI | `gui` | The production widgets and composition, driven through Qt Test with injected adapters |
 | Visual | `visual` | The production views rendered offscreen and compared against checked-in reference images |
 | Package | `package` | The installed application in a clean environment, proving the deployed plugins load |
+| Native Trash | `native-trash` | The real `QFile::moveToTrash` wrapper against the platform's own Trash. Opt-in; see below |
 
 ```sh
 ctest --preset dev --label-regex unit
 ```
+
+Every suite but the last uses a fake Trash adapter, so nothing they do can reach your Trash. The
+`native-trash` suite is the one that calls the real thing, and it stays out of every preset and
+every required job. It runs only when you ask for it:
+
+```sh
+CULLFINCH_NATIVE_TRASH_TESTS=1 ctest --preset dev-fast --label-regex 'native-trash$'
+```
+
+Without that variable it skips. With it, it creates a disposable fixture under `$HOME`
+(`CULLFINCH_NATIVE_TRASH_ROOT` overrides the location), trashes it, and removes exactly the path
+Trash reported back — it never lists, inspects or empties anything else. On a platform that
+reports no path it can remove nothing, says so, and asserts the branch recovery has to take
+instead: leave the group for a person rather than guess. The `Native Trash integration` job in
+[`extended.yml`](.github/workflows/extended.yml) is where the opt-in is given on CI, because a
+runner's Trash has nobody's files in it.
 
 GUI tests use whatever `QT_QPA_PLATFORM` you give them — `offscreen` by default on a headless
 machine, `cocoa` on macOS. Two helpers own a complete isolated session, including their own
@@ -136,21 +153,34 @@ ruleset definitions, so what protects `main` is reviewed like everything else:
 
 | Ruleset | Applies to | What it enforces |
 |---|---|---|
-| [`main.json`](.github/rulesets/main.json) | the default branch | No deletion, no force-push; changes arrive through a pull request with every review thread resolved; the `Required checks` aggregation job and the SonarCloud quality gate must pass on a head that is up to date with `main`. Repository admins may bypass only through a pull request, never by pushing directly. |
+| [`main.json`](.github/rulesets/main.json) | the default branch | No deletion, no force-push; changes arrive through a pull request; every CI job is named individually as a required check, alongside the SonarCloud quality gate and CodeRabbit. Nobody bypasses it, admins included. |
 | [`release-tags.json`](.github/rulesets/release-tags.json) | `v*` tags | A release tag can neither be moved nor deleted once it exists. |
 
+Both rulesets are applied to the repository. **These files are a snapshot of what is configured,
+not a source the settings are generated from** -- nothing applies them automatically, so a change
+made in the web UI has to be exported back to here, and a change made here has to be imported. A
+divergence is a documentation bug, not a protection that quietly stopped working.
+
 `Required checks` is the one job that depends on every required CI job (pre-commit on both
-platforms, every build-and-test entry, clang-tidy and coverage), so it is the single Actions
-context a ruleset needs to name; `codecov/patch` stays informational, as `codecov.yml` records.
+platforms, every build-and-test entry, clang-tidy and coverage). It is named as a required check
+and so is each job behind it: naming the aggregation alone would be enough, and listing them
+individually is the belt to its braces -- a job accidentally dropped from the aggregation's
+`needs` still blocks the merge. `codecov/patch` stays informational, as `codecov.yml` records.
 Each required check is bound to the GitHub App that reports it (`integration_id` 15368 for
-Actions, 12526 for SonarCloud), so a status with the same name from any other source does not
-satisfy it.
+Actions, 12526 for SonarCloud, 347564 for CodeRabbit), so a status with the same name from any
+other source does not satisfy it.
 The main ruleset requires no approving review because the project currently has one maintainer;
 raise `required_approving_review_count` to 1 once a second maintainer can review.
 
 To apply or update them: *Settings → Rules → Rulesets → New ruleset → Import a ruleset*, and
 choose the file. Importing needs repository admin rights, which is why this is a checked-in
-definition rather than something CI can do.
+definition rather than something CI can do. To export the live state back into these files:
+
+```bash
+gh api repos/fritze-org/cullfinch/rulesets/<id> \
+  --jq '{name, target, enforcement, conditions, rules, bypass_actors}' \
+  | python3 -m json.tool > .github/rulesets/<file>.json
+```
 
 ## Layout
 

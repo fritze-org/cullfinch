@@ -202,6 +202,49 @@ jobs:
             echo "CXX=${clangxx}"
           } >> "$GITHUB_ENV"
 
+      # A sanitized build with no runtime options reports to stderr and leaves
+      # the job's verdict to whatever the defaults happen to be. These make the
+      # outcome explicit instead:
+      #
+      #   halt_on_error/abort_on_error  a report stops the process. The build
+      #     already passes -fno-sanitize-recover=undefined, so UBSan aborts at
+      #     compile-time policy; this states the same thing for the paths that
+      #     are decided at runtime, and for ASan.
+      #   print_stacktrace/symbolize    a report names frames rather than
+      #     addresses. ASAN_SYMBOLIZER_PATH pins the symbolizer to the pinned
+      #     LLVM, so it never depends on whatever llvm-symbolizer is on PATH.
+      #   log_path                      every report lands in a file under the
+      #     workspace. This is what makes a finding survive: the "Fail on any
+      #     sanitizer report" step below turns a non-empty log into a failed
+      #     job even when every test exited zero, and the logs are uploaded
+      #     with the other failure artifacts.
+      #
+      # detect_leaks stays off. Qt, Mesa, fontconfig and the Wayland client
+      # stack all hold process-lifetime allocations that LSan reports at exit,
+      # so switching it on without a tuned suppression list would fail every
+      # run on other people's memory. tests/support/lsan-suppressions.txt holds
+      # the starting list and LSAN_OPTIONS already points at it, so turning
+      # detection on is a one-word change once a run has shown what it costs.
+      # See issue #13.
+      - name: Configure the sanitizer runtime (Linux sanitizers job)
+        if: matrix.preset == 'ci-linux-asan'
+        run: |
+          log_dir="${{ github.workspace }}/sanitizer-logs"
+          # The runtime writes "<log_path>.<pid>" but creates no directories:
+          # a missing one silently costs the report.
+          mkdir -p "${log_dir}"
+          symbolizer="$(command -v "llvm-symbolizer-${CULLFINCH_LLVM_MAJOR}" || true)"
+          if [ -z "${symbolizer}" ]; then
+            echo "apt.llvm.org did not provide llvm-symbolizer-${CULLFINCH_LLVM_MAJOR}" >&2
+            exit 1
+          fi
+          {
+            echo "ASAN_OPTIONS=halt_on_error=1:abort_on_error=1:print_stacktrace=1:symbolize=1:detect_leaks=0:log_path=${log_dir}/asan"
+            echo "UBSAN_OPTIONS=halt_on_error=1:print_stacktrace=1:print_summary=1:symbolize=1:log_path=${log_dir}/ubsan"
+            echo "LSAN_OPTIONS=suppressions=${{ github.workspace }}/tests/support/lsan-suppressions.txt:print_suppressions=0"
+            echo "ASAN_SYMBOLIZER_PATH=${symbolizer}"
+          } >> "$GITHUB_ENV"
+
       - uses: lukka/get-cmake@fffaaafeea488556c2c12dad60690008bc1caacb # v4.4.2
 
       # Cache keys cover the OS, architecture, compiler identity, the manifest
@@ -334,6 +377,30 @@ jobs:
           } > "plugins-${{ matrix.preset }}.txt"
           cat "plugins-${{ matrix.preset }}.txt"
 
+      # Without this the job's verdict is the test exit code alone, and the
+      # sanitizers only ever agree with it by accident: UBSan findings on a
+      # recoverable path, and any report from a child process ctest does not
+      # propagate, leave a green run with a report sitting in a file nobody
+      # reads. Every report is printed here -- log_path means they are not in
+      # the job log otherwise -- and a single non-empty log fails the job.
+      - name: Fail on any sanitizer report
+        if: always() && matrix.preset == 'ci-linux-asan'
+        run: |
+          shopt -s nullglob
+          reported=0
+          for log in "${{ github.workspace }}"/sanitizer-logs/*; do
+            [ -s "${log}" ] || continue
+            reported=1
+            echo "::group::sanitizer report: ${log##*/}"
+            cat "${log}"
+            echo "::endgroup::"
+          done
+          if [ "${reported}" -ne 0 ]; then
+            echo "::error::ASan or UBSan reported findings; the full logs are in the results artifact"
+            exit 1
+          fi
+          echo "no sanitizer reports"
+
       - name: Upload test results and failure artifacts
         if: always()
         uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
@@ -346,6 +413,7 @@ jobs:
             build/${{ matrix.preset }}/Testing/**
             build/${{ matrix.preset }}/clang-tidy-enabled-checks.txt
             session-artifacts/**
+            sanitizer-logs/**
           if-no-files-found: ignore
           retention-days: 14
 
