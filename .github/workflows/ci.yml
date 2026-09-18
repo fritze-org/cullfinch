@@ -68,19 +68,14 @@ jobs:
           enable-cache: true
           cache-dependency-glob: uv.lock
 
-      # --no-build means no source distribution's setup code ever runs here:
-      # every package in the tooling group is installed from a wheel whose
-      # hash the lock pins, or not at all. It goes on `uv run` as well as on
-      # `uv sync`, and not out of symmetry -- `uv run` re-checks the
-      # environment against the lock on every call, so it meets the same
-      # distributions the sync did and would build one just as readily.
-      #
-      # This was blocked until actionlint-py-kjanat 1.13.0.41: it was the one
-      # dependency publishing no wheel at any version, and uv has no
-      # per-package exemption from a global --no-build, so a single sdist in
-      # the group disarmed the flag for all of it. Keep it that way -- a
-      # tooling dependency without wheels for Linux and macOS breaks this job
-      # loudly, which is the point.
+      # --no-build on every uv invocation in this job, the `uv run` steps below
+      # included: `uv run` re-checks the environment against the lock on every
+      # call, so the flag has to be on all of them or none -- uv has no
+      # per-package exemption to fall back on. Every tooling dependency now
+      # publishes a wheel for this runner, so nothing needs building, and the
+      # flag is what keeps that true: a dependency that later ships only an
+      # sdist fails the job instead of quietly executing its setup code.
+      # Closes issue #25.
       - name: Sync the locked tooling environment
         run: uv sync --locked --no-build --group tooling
 
@@ -96,8 +91,7 @@ jobs:
       # The same configuration developers commit with, against every tracked file.
       - name: Run all hooks on all files
         id: hooks
-        run: uv run --frozen --no-build --group tooling -- pre-commit run --all-files
-          --show-diff-on-failure
+        run: uv run --frozen --no-build --group tooling -- pre-commit run --all-files --show-diff-on-failure
 
       # A formatting change is a failure with a downloadable diff. CI never
       # commits the fix itself.
@@ -612,8 +606,10 @@ jobs:
           enable-cache: true
           cache-dependency-glob: uv.lock
 
-      # Wheels only, with no sdist setup code executed: see the pre-commit
-      # job for why this flag was unavailable until recently.
+      # --no-build: every tooling dependency publishes a wheel for this
+      # runner, so the sync never has to execute an sdist's setup code. The
+      # flag turns that from a property of today's lock into a requirement.
+      # Closes issue #25.
       - name: Sync the locked tooling environment
         run: uv sync --locked --no-build --group tooling
 

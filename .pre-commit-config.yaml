@@ -8,8 +8,8 @@
 # Onboarding (--no-build is what CI uses: wheels only, so no source
 # distribution's setup code runs while installing the tooling):
 #   uv sync --locked --no-build --group tooling
-#   uv run --frozen --group tooling pre-commit install --install-hooks
-#   uv run --frozen --group tooling pre-commit run --all-files
+#   uv run --frozen --no-build --group tooling pre-commit install --install-hooks
+#   uv run --frozen --no-build --group tooling pre-commit run --all-files
 minimum_pre_commit_version: '4.0.0'
 default_install_hook_types: [pre-commit, commit-msg]
 fail_fast: false
@@ -58,14 +58,14 @@ repos:
     hooks:
       - id: cmake-format
         name: cmake-format
-        entry: uv run --frozen --group tooling -- cmake-format --config-files .cmake-format.yaml
+        entry: uv run --frozen --no-build --group tooling -- cmake-format --config-files .cmake-format.yaml
           --in-place
         language: system
         files: (CMakeLists\.txt|\.cmake)$
 
       - id: cmake-lint
         name: cmake-lint
-        entry: uv run --frozen --group tooling -- cmake-lint --config-files .cmake-format.yaml
+        entry: uv run --frozen --no-build --group tooling -- cmake-lint --config-files .cmake-format.yaml
         language: system
         files: (CMakeLists\.txt|\.cmake)$
 
@@ -88,7 +88,7 @@ repos:
         # tooling environment supplies the exact pinned shellcheck-py binary,
         # so embedded `run:` scripts are always analysed. Verified from an
         # ordinary `git commit` without an activated virtual environment.
-        entry: uv run --frozen --group tooling -- actionlint
+        entry: uv run --frozen --no-build --group tooling -- actionlint
         language: system
 
   # ------------------------------------------------------------- Shell scripts
@@ -171,7 +171,7 @@ repos:
 
       - id: pre-commit-validate-config
         name: pre-commit validate-config
-        entry: uv run --frozen --group tooling -- pre-commit validate-config
+        entry: uv run --frozen --no-build --group tooling -- pre-commit validate-config
         language: system
         pass_filenames: false
         stages: [manual]
