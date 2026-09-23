@@ -26,6 +26,10 @@ QString tr(const char* text) {
 /// short enough that the sharper image follows as soon as the drag stops.
 constexpr int kRefinementDelayMs = 150;
 
+/// The minimum ImageCanvas sets for itself, restored when a wall goes back to
+/// fitting its tiles.
+constexpr QSize kFittedTileMinimum(64, 64);
+
 /// True while any of these wall positions refers to this candidate, whether it
 /// survives there or is held as an eliminated placeholder.
 bool holdsCandidate(const QList<flows::wall::WallSlot>& positions, const domain::AssetId& id) {
@@ -288,6 +292,10 @@ void WallSurface::relayout() {
     for (const flows::wall::LayoutCell& cell : layout.cells) {
         ui::ImageCanvas* tile = tiles_.value(cell.id, nullptr);
         if (tile != nullptr) {
+            // A fixed-width cell narrowed to fit a narrow window can be shorter
+            // than the canvas's own minimum, and Qt would then grow the tile
+            // over the row below. The fitted wall keeps the canvas's minimum.
+            tile->setMinimumSize(tileWidth_ > 0 ? QSize(1, 1) : kFittedTileMinimum);
             tile->setGeometry(cell.cellRect.toRect());
         }
     }

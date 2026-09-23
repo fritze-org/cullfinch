@@ -165,7 +165,13 @@ int main(int argc, char* argv[]) {
     // environment and must not leave anything in it.
     QSettings settings;
     const int suggested = photos.photos.size() > kFitAtMost ? kDefaultTileWidth : 0;
-    const int tileWidth = smoke ? 0 : settings.value(tileWidthKey(), suggested).toInt();
+    int tileWidth = 0;
+    if (!smoke) {
+        // A remembered Fit comes from some earlier, smaller folder. It must not
+        // fit a folder too large to fit, which would decode every photo at once.
+        const int saved = settings.value(tileWidthKey(), suggested).toInt();
+        tileWidth = saved > 0 ? saved : suggested;
+    }
 
     cullfinch::viewer::WallViewerWindow window(images, directory, photos, tileWidth);
     if (!smoke) {
