@@ -97,21 +97,24 @@ namespace {
 ///
 /// A Wayland session that silently ends up on XCB through XWayland looks
 /// identical to a working native run until something subtle misbehaves, so the
-/// fallback is diagnosed rather than hidden. It is reported, never overridden:
-/// an explicit `-platform` choice by the user is theirs to make.
-void reportPlatformBackend() {
+/// fallback is diagnosed rather than hidden. It is reported, never overridden,
+/// and a backend the user named -- with `-platform` or QT_QPA_PLATFORM -- is
+/// theirs to make and not reported at all; see platformFallbackDeservesWarning().
+void reportPlatformBackend(const QString& commandLinePlatform) {
     const QString backend = QGuiApplication::platformName();
     qInfo().noquote() << QStringLiteral("cullfinch %1, Qt %2, platform plugin '%3'")
                              .arg(QStringLiteral(CULLFINCH_VERSION),
                                   QString::fromLatin1(qVersion()), backend);
 
-    const bool waylandSession = qEnvironmentVariableIsSet("WAYLAND_DISPLAY");
-    if (waylandSession && backend != QLatin1String("wayland")) {
+    if (cullfinch::app::platformFallbackDeservesWarning(
+            backend, qEnvironmentVariableIsSet("WAYLAND_DISPLAY"), commandLinePlatform,
+            qEnvironmentVariable("QT_QPA_PLATFORM"))) {
         qWarning().noquote()
             << QStringLiteral(
                    "cullfinch: this is a Wayland session but Qt selected the '%1' backend. "
                    "Rendering and scaling go through XWayland. Pass -platform wayland to "
-                   "require the native path, or -platform xcb to silence this.")
+                   "require the native path, or choose XCB explicitly (-platform xcb or "
+                   "QT_QPA_PLATFORM=xcb) to silence this.")
                    .arg(backend);
     }
 }
@@ -181,6 +184,11 @@ int main(int argc, char* argv[]) {
         return 0;
     }
 
+    // Read before QApplication, which removes -platform from argv as it
+    // consumes it; afterwards nothing can tell the user asked.
+    const QString commandLinePlatform =
+        cullfinch::app::platformRequestedOnCommandLine({argv, static_cast<std::size_t>(argc)});
+
     cullfinch::app::preferPortalDialogs();
     QApplication application(argc, argv);
     setApplicationIdentity();
@@ -200,7 +208,7 @@ int main(int argc, char* argv[]) {
     QCommandLineParser& parser = commandLine.parser;
     parser.process(application);
 
-    reportPlatformBackend();
+    reportPlatformBackend(commandLinePlatform);
 
     cullfinch::app::CompositionRoot::Options options;
     options.dataDirectory = parser.value(commandLine.dataDirectory);
