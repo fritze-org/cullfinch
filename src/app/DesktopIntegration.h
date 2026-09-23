@@ -72,8 +72,10 @@ void pruneUnreachableIconThemePaths();
 /// The platform the command line asks Qt for, or a null QString if it asks for none.
 ///
 /// Read the way QGuiApplication reads it: `-platform <spec>` or `--platform <spec>`, the last one
-/// winning, and a trailing `-platform` with nothing after it ignored. Must run before the
-/// QApplication is constructed, because Qt removes the option from argv as it consumes it.
+/// winning, a trailing `-platform` with nothing after it ignored, and the value of Qt's other
+/// options -- `-platformtheme -platform xcb` sets a theme -- never mistaken for one. Must run
+/// before the QApplication is constructed, because Qt removes the option from argv as it consumes
+/// it.
 [[nodiscard]] QString platformRequestedOnCommandLine(std::span<char* const> arguments);
 
 /// Whether the platform backend Qt selected is a fallback worth warning about.

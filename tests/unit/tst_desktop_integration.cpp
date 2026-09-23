@@ -205,6 +205,10 @@ void TestDesktopIntegration::aFallbackListStillReportsTheFallback() {
     QVERIFY(platformFallbackDeservesWarning(xcb, true, QStringLiteral("wayland;xcb"), QString()));
     // Putting xcb first is asking for it.
     QVERIFY(!platformFallbackDeservesWarning(xcb, true, QString(), QStringLiteral("xcb;wayland")));
+    // Qt drops empty entries, so this asks for xcb first too.
+    QVERIFY(!platformFallbackDeservesWarning(xcb, true, QString(), QStringLiteral(";xcb")));
+    // An empty plugin name is not made up from the options after it.
+    QVERIFY(platformFallbackDeservesWarning(xcb, true, QString(), QStringLiteral(":xcb")));
 }
 
 void TestDesktopIntegration::theCommandLineOverridesTheEnvironment() {
@@ -239,6 +243,13 @@ void TestDesktopIntegration::platformIsReadFromTheCommandLineAsQtReadsIt() {
     QVERIFY(requestedBy({"-platform", "xcb"}).isNull());
     // An option that merely starts with the word is a different option.
     QVERIFY(requestedBy({"cullfinch", "-platformtheme", "xcb"}).isNull());
+
+    // Qt's other options take the next argument as their value, even when it is "-platform", so
+    // the platform named after it was never asked for. Believing it would hide the fallback.
+    QVERIFY(requestedBy({"cullfinch", "-platformtheme", "-platform", "xcb"}).isNull());
+    QVERIFY(requestedBy({"cullfinch", "--platformtheme", "-platform", "xcb"}).isNull());
+    QVERIFY(requestedBy({"cullfinch", "-qwindowtitle", "-platform", "xcb"}).isNull());
+    QCOMPARE(requestedBy({"cullfinch", "-platformtheme", "gtk3", "-platform", "xcb"}), xcb);
 }
 
 QTEST_MAIN(TestDesktopIntegration)
