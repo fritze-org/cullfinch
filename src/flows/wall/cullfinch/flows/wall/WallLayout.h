@@ -31,6 +31,11 @@ struct WallLayoutOptions {
     /// Aspect ratio assumed while an image's real size is still unknown, so
     /// tiles do not jump once decoding finishes.
     qreal placeholderAspect = 3.0 / 2.0;
+    /// When positive, cells are about this wide and the grid grows downwards
+    /// past the viewport, for a scroll area to show, instead of every tile
+    /// shrinking until all of them fit. Only the viewport's width is used then.
+    /// Zero keeps the fit-to-viewport search the comparison wall relies on.
+    qreal cellWidth = 0.0;
 };
 
 struct WallLayoutResult {
@@ -40,6 +45,10 @@ struct WallLayoutResult {
     /// The area of the smallest fitted image; the quantity the search
     /// maximises. Zero when nothing could be placed.
     qreal smallestImageArea = 0.0;
+    /// The area the grid needs, margins included. The viewport itself when the
+    /// grid is fitted into it; taller than the viewport when `cellWidth` asked
+    /// for tiles that do not all fit.
+    QSizeF contentSize{0.0, 0.0};
 };
 
 /// Deterministic equal-cell grid.
@@ -50,7 +59,8 @@ struct WallLayoutResult {
 /// across runs and platforms.
 ///
 /// Every candidate is placed: the wall never silently paginates or omits one.
-/// When the selection is large the tiles simply become smaller.
+/// When the selection is large the tiles simply become smaller -- unless the
+/// caller fixed a cell width, in which case the grid becomes taller instead.
 class WallLayout {
 public:
     [[nodiscard]] static WallLayoutResult compute(const QSizeF& viewport,

@@ -18,6 +18,9 @@ belongs with it.
 - **Compare a selection.** The **versus tree** shows two candidates at a time in a balanced
   bracket until one remains. The **image wall** shows every selected photo at once, fullscreen
   if you like, and removes the ones you click.
+- **Or just look.** `cullfinch-wall DIR` shows every photo in a folder on one wall, with a tile
+  size you can change (slider, Ctrl+wheel, Ctrl+`+`/`-`, Ctrl+0 to fit) and a grid that scrolls.
+  It has no session, no marks and no database, and cannot change a file.
 - **Eliminating is not deleting.** A comparison only builds a draft. Finishing it turns the
   decisions into collection-level deletion marks, which are undoable.
 - **Deleting is a separate, reviewed step.** *Review file operations* lists every physical file,

@@ -1,0 +1,13 @@
+[Desktop Entry]
+Type=Application
+Name=Cullfinch Wall
+GenericName=Photo wall viewer
+Comment=Show every photo in a folder on one wall, with adjustable tile size
+Icon=org.fritze.cullfinch
+Exec=cullfinch-wall %f
+Terminal=false
+Categories=Graphics;Photography;Viewer;
+MimeType=inode/directory;
+Keywords=photo;wall;grid;viewer;thumbnails;jpeg;
+StartupNotify=true
+StartupWMClass=org.fritze.cullfinch.wall

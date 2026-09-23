@@ -92,30 +92,6 @@ int runSmoke(cullfinch::ui::BrowserWindow* window, cullfinch::app::CompositionRo
 
 namespace {
 
-/// Report the backend actually in use, and say so plainly when it is not the
-/// one this platform is built around.
-///
-/// A Wayland session that silently ends up on XCB through XWayland looks
-/// identical to a working native run until something subtle misbehaves, so the
-/// fallback is diagnosed rather than hidden. It is reported, never overridden:
-/// an explicit `-platform` choice by the user is theirs to make.
-void reportPlatformBackend() {
-    const QString backend = QGuiApplication::platformName();
-    qInfo().noquote() << QStringLiteral("cullfinch %1, Qt %2, platform plugin '%3'")
-                             .arg(QStringLiteral(CULLFINCH_VERSION),
-                                  QString::fromLatin1(qVersion()), backend);
-
-    const bool waylandSession = qEnvironmentVariableIsSet("WAYLAND_DISPLAY");
-    if (waylandSession && backend != QLatin1String("wayland")) {
-        qWarning().noquote()
-            << QStringLiteral(
-                   "cullfinch: this is a Wayland session but Qt selected the '%1' backend. "
-                   "Rendering and scaling go through XWayland. Pass -platform wayland to "
-                   "require the native path, or -platform xcb to silence this.")
-                   .arg(backend);
-    }
-}
-
 /// Options shared by the console and GUI startup paths.
 struct CommandLine {
     QCommandLineParser parser;
@@ -200,7 +176,8 @@ int main(int argc, char* argv[]) {
     QCommandLineParser& parser = commandLine.parser;
     parser.process(application);
 
-    reportPlatformBackend();
+    cullfinch::app::reportPlatformBackend(QStringLiteral("cullfinch"),
+                                          QStringLiteral(CULLFINCH_VERSION));
 
     cullfinch::app::CompositionRoot::Options options;
     options.dataDirectory = parser.value(commandLine.dataDirectory);
