@@ -1,3 +1,12 @@
+# How both executables fit into the desktop they start on: portal dialogs, icon theme search paths
+# and the platform backend report. Its own library so the standalone wall viewer can share it
+# without the composition root, which knows about SQLite, sessions and Trash.
+cullfinch_add_library(
+  cullfinch_desktop
+  SOURCES DesktopIntegration.cpp
+  HEADERS DesktopIntegration.h
+  PUBLIC_DEPS Qt6::Gui)
+
 # Composition root and startup. It duplicates no business logic; its only job is to choose the
 # concrete adapters and register the flows with their views.
 #
@@ -5,10 +14,14 @@
 # injectable adapters, rather than re-implementing it.
 cullfinch_add_library(
   cullfinch_composition
-  SOURCES CompositionRoot.cpp DesktopIntegration.cpp
-  HEADERS CompositionRoot.h DesktopIntegration.h
-  PUBLIC_DEPS cullfinch::cullfinch_ui cullfinch::cullfinch_infrastructure
-              cullfinch::cullfinch_view_versus cullfinch::cullfinch_view_wall)
+  SOURCES CompositionRoot.cpp
+  HEADERS CompositionRoot.h
+  PUBLIC_DEPS
+    cullfinch::cullfinch_ui
+    cullfinch::cullfinch_infrastructure
+    cullfinch::cullfinch_view_versus
+    cullfinch::cullfinch_view_wall
+    cullfinch::cullfinch_desktop)
 
 target_include_directories(cullfinch_composition PUBLIC "${CMAKE_CURRENT_SOURCE_DIR}")
 

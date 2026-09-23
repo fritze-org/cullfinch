@@ -4,11 +4,15 @@
 #include <QCoreApplication>
 #include <QGuiApplication>
 #include <QJsonObject>
+#include <QMoveEvent>
 #include <QResizeEvent>
+#include <QShowEvent>
 #include <QStyleHints>
 #include <QVBoxLayout>
 
 #include <algorithm>
+#include <cmath>
+#include <utility>
 
 namespace cullfinch::views::wall {
 namespace {
@@ -16,6 +20,15 @@ namespace {
 QString tr(const char* text) {
     return QCoreApplication::translate("cullfinch", text);
 }
+
+/// How long a tile on a scrolled wall waits for its size to settle before
+/// decoding at the new size. Long enough to span the steps of a slider drag,
+/// short enough that the sharper image follows as soon as the drag stops.
+constexpr int kRefinementDelayMs = 150;
+
+/// The minimum ImageCanvas sets for itself, restored when a wall goes back to
+/// fitting its tiles.
+constexpr QSize kFittedTileMinimum(64, 64);
 
 /// True while any of these wall positions refers to this candidate, whether it
 /// survives there or is held as an eliminated placeholder.
@@ -68,6 +81,12 @@ void WallSurface::removeDepartedTiles() {
 void WallSurface::addTile(const domain::AssetId& id) {
     auto* tile = new ui::ImageCanvas(images_, this);
     tile->setObjectName(QStringLiteral("wallTile_") + id.toString());
+    // Held back before the photo is set, so a tile created off screen never
+    // asks for anything until it comes near the viewport.
+    if (tileWidth_ > 0) {
+        tile->setRefinementDelay(kRefinementDelayMs);
+        tile->setLoadingDeferred(true);
+    }
     tile->setPresentation(presentations_.value(id), revision_);
     tile->setCaption(presentations_.value(id).displayName);
     connect(tile, &ui::ImageCanvas::gestureArmed, this, [this, id, tile](const QPoint& at) {
@@ -175,6 +194,59 @@ void WallSurface::resizeEvent(QResizeEvent* event) {
     relayout();
 }
 
+void WallSurface::moveEvent(QMoveEvent* event) {
+    QWidget::moveEvent(event);
+    // A scroll area scrolls by moving this surface under its viewport.
+    updateDeferredLoading();
+}
+
+void WallSurface::showEvent(QShowEvent* event) {
+    QWidget::showEvent(event);
+    updateDeferredLoading();
+}
+
+void WallSurface::setTileWidth(int pixels) {
+    pixels = std::max(0, pixels);
+    if (pixels == tileWidth_) {
+        return;
+    }
+    tileWidth_ = pixels;
+    for (ui::ImageCanvas* tile : std::as_const(tiles_)) {
+        tile->setRefinementDelay(tileWidth_ > 0 ? kRefinementDelayMs : 0);
+    }
+    relayout();
+}
+
+QRect WallSurface::shownArea() const {
+    const QWidget* viewport = parentWidget();
+    if (viewport == nullptr) {
+        return rect();
+    }
+    return rect().intersected(QRect(mapFrom(viewport, QPoint(0, 0)), viewport->size()));
+}
+
+void WallSurface::updateDeferredLoading() {
+    if (tileWidth_ <= 0) {
+        // A fitted wall shows every tile, so every tile loads.
+        for (ui::ImageCanvas* tile : std::as_const(tiles_)) {
+            tile->setLoadingDeferred(false);
+        }
+        return;
+    }
+    // Hidden, nothing is shown yet: loading waits for the first real viewport
+    // rather than guessing one.
+    const QRect shown = isVisible() ? shownArea() : QRect();
+    if (shown.isEmpty()) {
+        return;
+    }
+    // A screen above and below as well, so scrolling at a normal pace finds
+    // the next photos already decoded.
+    const QRect ahead = shown.adjusted(0, -shown.height(), 0, shown.height());
+    for (ui::ImageCanvas* tile : std::as_const(tiles_)) {
+        tile->setLoadingDeferred(!ahead.intersects(tile->geometry()));
+    }
+}
+
 void WallSurface::recordAspect(const domain::AssetId& id) {
     if (aspects_.contains(id)) {
         return; // Recorded once per candidate, so the grid cannot oscillate.
@@ -213,14 +285,32 @@ void WallSurface::relayout() {
         items.append(item);
     }
 
+    flows::wall::WallLayoutOptions options;
+    options.cellWidth = tileWidth_;
     const flows::wall::WallLayoutResult layout =
-        flows::wall::WallLayout::compute(QSizeF(size()), items);
+        flows::wall::WallLayout::compute(QSizeF(size()), items, options);
     for (const flows::wall::LayoutCell& cell : layout.cells) {
         ui::ImageCanvas* tile = tiles_.value(cell.id, nullptr);
         if (tile != nullptr) {
+            // A fixed-width cell narrowed to fit a narrow window can be shorter
+            // than the canvas's own minimum, and Qt would then grow the tile
+            // over the row below. The fitted wall keeps the canvas's minimum.
+            tile->setMinimumSize(tileWidth_ > 0 ? QSize(1, 1) : kFittedTileMinimum);
             tile->setGeometry(cell.cellRect.toRect());
         }
     }
+
+    // A grid taller than the surface asks its scroll area for the room. The
+    // fitted grid must not keep a height an earlier tile width asked for --
+    // but only that height is this surface's to take back: a host that fixed
+    // the surface's size, as the comparison wall's hosts may, keeps it.
+    const int needed =
+        tileWidth_ > 0 ? std::max(0, static_cast<int>(std::ceil(layout.contentSize.height()))) : 0;
+    if (needed != requestedHeight_) {
+        requestedHeight_ = needed;
+        setMinimumHeight(needed);
+    }
+    updateDeferredLoading();
 }
 
 ui::ImageCanvas* WallSurface::tileFor(const domain::AssetId& id) const {

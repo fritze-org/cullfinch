@@ -47,6 +47,12 @@ void ImageCanvas::setPresentation(const AssetPresentation& presentation, quint64
     highlighted_ = false;
     rejected_ = false;
 
+    // Nothing asked for the previous photo is still wanted, at any size.
+    requestedPixels_ = QSize();
+    if (refinement_ != nullptr) {
+        refinement_->stop();
+    }
+
     // Sets this canvas's own state first: the loader reports readiness as it
     // takes the new source, and a host that answers that signal by asking what
     // is on screen must not be told about the photo that just left.
@@ -70,10 +76,48 @@ QSize ImageCanvas::fittedTargetPixels() const {
 }
 
 void ImageCanvas::requestFittedPreview() {
+    if (loadingDeferred_) {
+        return; // Asked for when the host releases the hold.
+    }
+    if (refinement_ != nullptr) {
+        refinement_->stop();
+    }
     // A larger widget needs more pixels; a later refinement must never swap
     // candidate identities, which is why the member id is part of the match the
     // loader makes.
-    preview_->requestFitted(fittedTargetPixels());
+    requestedPixels_ = fittedTargetPixels();
+    preview_->requestFitted(requestedPixels_);
+}
+
+void ImageCanvas::setLoadingDeferred(bool deferred) {
+    if (loadingDeferred_ == deferred) {
+        return; // Hosts re-apply this whenever they scroll.
+    }
+    loadingDeferred_ = deferred;
+    if (loadingDeferred_ || !preview_->hasSource() || requestedPixels_ == fittedTargetPixels()) {
+        return;
+    }
+    if (refinementDelayMs_ > 0 && !preview_->fitted().isNull()) {
+        // Back in view at a size it was resized to while held: the same wait
+        // as a resize in view, so a canvas scrolled past mid-drag does not ask
+        // for every intermediate size either.
+        refinement_->start(refinementDelayMs_);
+        return;
+    }
+    requestFittedPreview();
+}
+
+void ImageCanvas::setRefinementDelay(int milliseconds) {
+    refinementDelayMs_ = std::max(0, milliseconds);
+    if (refinementDelayMs_ > 0 && refinement_ == nullptr) {
+        refinement_ = new QTimer(this);
+        refinement_->setSingleShot(true);
+        connect(refinement_, &QTimer::timeout, this, [this]() {
+            if (preview_->hasSource()) {
+                requestFittedPreview();
+            }
+        });
+    }
 }
 
 void ImageCanvas::updateAccessibility() {
@@ -188,9 +232,15 @@ void ImageCanvas::resizeEvent(QResizeEvent* event) {
     // A resize between press and release means the photo under the pointer may
     // not be the one that was pressed.
     gesture_.armed = false;
-    if (preview_->hasSource()) {
-        requestFittedPreview();
+    if (!preview_->hasSource()) {
+        return;
     }
+    if (refinementDelayMs_ > 0 && !preview_->fitted().isNull()) {
+        // The preview on screen is scaled until the size stops changing.
+        refinement_->start(refinementDelayMs_);
+        return;
+    }
+    requestFittedPreview();
 }
 
 void ImageCanvas::paintEvent(QPaintEvent* event) {

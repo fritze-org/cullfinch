@@ -92,4 +92,19 @@ void pruneUnreachableIconThemePaths();
                                                    const QString& commandLinePlatform,
                                                    const QString& environmentPlatform);
 
+/// Report the backend actually in use, and say so plainly when it is not the
+/// one this platform is built around.
+///
+/// A Wayland session that silently ends up on XCB through XWayland looks
+/// identical to a working native run until something subtle misbehaves, so the
+/// fallback is diagnosed rather than hidden. It is reported, never overridden,
+/// and a backend the user named is not reported at all; see
+/// platformFallbackDeservesWarning().
+///
+/// @param program the executable's name, as the messages should call it.
+/// @param commandLinePlatform platformRequestedOnCommandLine(), read before the
+///        QApplication consumed it.
+void reportPlatformBackend(const QString& program, const QString& version,
+                           const QString& commandLinePlatform);
+
 } // namespace cullfinch::app

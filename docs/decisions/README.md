@@ -16,3 +16,4 @@ departs from it, and why.
 | [0008](0008-cpp23-language-standard.md) | The language standard is C++23, not the specified C++20 |
 | [0009](0009-visual-regression-references.md) | Visual regression references are committed, and keyed by rendering environment |
 | [0010](0010-preview-loader.md) | Decode bookkeeping lives in a `PreviewLoader`, not in `ImageCanvas` |
+| [0011](0011-standalone-wall-viewer.md) | The standalone wall viewer is a second executable that decides nothing |

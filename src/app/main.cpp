@@ -92,33 +92,6 @@ int runSmoke(cullfinch::ui::BrowserWindow* window, cullfinch::app::CompositionRo
 
 namespace {
 
-/// Report the backend actually in use, and say so plainly when it is not the
-/// one this platform is built around.
-///
-/// A Wayland session that silently ends up on XCB through XWayland looks
-/// identical to a working native run until something subtle misbehaves, so the
-/// fallback is diagnosed rather than hidden. It is reported, never overridden,
-/// and a backend the user named -- with `-platform` or QT_QPA_PLATFORM -- is
-/// theirs to make and not reported at all; see platformFallbackDeservesWarning().
-void reportPlatformBackend(const QString& commandLinePlatform) {
-    const QString backend = QGuiApplication::platformName();
-    qInfo().noquote() << QStringLiteral("cullfinch %1, Qt %2, platform plugin '%3'")
-                             .arg(QStringLiteral(CULLFINCH_VERSION),
-                                  QString::fromLatin1(qVersion()), backend);
-
-    if (cullfinch::app::platformFallbackDeservesWarning(
-            backend, qEnvironmentVariableIsSet("WAYLAND_DISPLAY"), commandLinePlatform,
-            qEnvironmentVariable("QT_QPA_PLATFORM"))) {
-        qWarning().noquote()
-            << QStringLiteral(
-                   "cullfinch: this is a Wayland session but Qt selected the '%1' backend. "
-                   "Rendering and scaling go through XWayland. Pass -platform wayland to "
-                   "require the native path, or choose XCB explicitly (-platform xcb or "
-                   "QT_QPA_PLATFORM=xcb) to silence this.")
-                   .arg(backend);
-    }
-}
-
 /// Options shared by the console and GUI startup paths.
 struct CommandLine {
     QCommandLineParser parser;
@@ -208,7 +181,8 @@ int main(int argc, char* argv[]) {
     QCommandLineParser& parser = commandLine.parser;
     parser.process(application);
 
-    reportPlatformBackend(commandLinePlatform);
+    cullfinch::app::reportPlatformBackend(QStringLiteral("cullfinch"),
+                                          QStringLiteral(CULLFINCH_VERSION), commandLinePlatform);
 
     cullfinch::app::CompositionRoot::Options options;
     options.dataDirectory = parser.value(commandLine.dataDirectory);

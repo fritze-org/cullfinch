@@ -1,7 +1,9 @@
 // SPDX-License-Identifier: GPL-3.0-or-later
 #include <DesktopIntegration.h>
 
+#include <QDebug>
 #include <QDir>
+#include <QGuiApplication>
 #include <QIcon>
 #include <QLatin1String>
 #include <QString>
@@ -121,6 +123,25 @@ bool platformFallbackDeservesWarning(const QString& backend, bool waylandSession
     const QString firstChoice = requested.section(QLatin1Char(';'), 0, 0, QString::SectionSkipEmpty)
                                     .section(QLatin1Char(':'), 0, 0);
     return firstChoice.isEmpty() || firstChoice.compare(backend, Qt::CaseInsensitive) != 0;
+}
+
+void reportPlatformBackend(const QString& program, const QString& version,
+                           const QString& commandLinePlatform) {
+    const QString backend = QGuiApplication::platformName();
+    qInfo().noquote() << QStringLiteral("%1 %2, Qt %3, platform plugin '%4'")
+                             .arg(program, version, QString::fromLatin1(qVersion()), backend);
+
+    if (platformFallbackDeservesWarning(backend, qEnvironmentVariableIsSet("WAYLAND_DISPLAY"),
+                                        commandLinePlatform,
+                                        qEnvironmentVariable("QT_QPA_PLATFORM"))) {
+        qWarning().noquote()
+            << QStringLiteral(
+                   "%1: this is a Wayland session but Qt selected the '%2' backend. "
+                   "Rendering and scaling go through XWayland. Pass -platform wayland to "
+                   "require the native path, or choose XCB explicitly (-platform xcb or "
+                   "QT_QPA_PLATFORM=xcb) to silence this.")
+                   .arg(program, backend);
+    }
 }
 
 } // namespace cullfinch::app
