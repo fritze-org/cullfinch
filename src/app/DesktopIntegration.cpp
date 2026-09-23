@@ -125,14 +125,18 @@ bool platformFallbackDeservesWarning(const QString& backend, bool waylandSession
     return firstChoice.isEmpty() || firstChoice.compare(backend, Qt::CaseInsensitive) != 0;
 }
 
-void reportPlatformBackend(const QString& program, const QString& version,
-                           const QString& commandLinePlatform) {
+DesktopStartup::DesktopStartup(std::span<char* const> arguments)
+    : commandLinePlatform_(platformRequestedOnCommandLine(arguments)) {
+    preferPortalDialogs();
+}
+
+void DesktopStartup::reportBackend(const QString& program, const QString& version) const {
     const QString backend = QGuiApplication::platformName();
     qInfo().noquote() << QStringLiteral("%1 %2, Qt %3, platform plugin '%4'")
                              .arg(program, version, QString::fromLatin1(qVersion()), backend);
 
     if (platformFallbackDeservesWarning(backend, qEnvironmentVariableIsSet("WAYLAND_DISPLAY"),
-                                        commandLinePlatform,
+                                        commandLinePlatform_,
                                         qEnvironmentVariable("QT_QPA_PLATFORM"))) {
         qWarning().noquote()
             << QStringLiteral(

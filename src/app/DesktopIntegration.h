@@ -92,19 +92,30 @@ void pruneUnreachableIconThemePaths();
                                                    const QString& commandLinePlatform,
                                                    const QString& environmentPlatform);
 
-/// Report the backend actually in use, and say so plainly when it is not the
-/// one this platform is built around.
+/// The startup steps that must happen before the QApplication exists, and what they learn.
 ///
-/// A Wayland session that silently ends up on XCB through XWayland looks
-/// identical to a working native run until something subtle misbehaves, so the
-/// fallback is diagnosed rather than hidden. It is reported, never overridden,
-/// and a backend the user named is not reported at all; see
-/// platformFallbackDeservesWarning().
-///
-/// @param program the executable's name, as the messages should call it.
-/// @param commandLinePlatform platformRequestedOnCommandLine(), read before the
-///        QApplication consumed it.
-void reportPlatformBackend(const QString& program, const QString& version,
-                           const QString& commandLinePlatform);
+/// Construct it immediately before the QApplication. It reads the platform the command line asks
+/// for, which Qt removes from argv as it consumes it, and applies preferPortalDialogs(), which Qt
+/// reads as it starts. Holding the request here keeps each executable's main() from having to
+/// remember that ordering.
+class DesktopStartup {
+public:
+    explicit DesktopStartup(std::span<char* const> arguments);
+
+    /// Report the backend actually in use, and say so plainly when it is not the
+    /// one this platform is built around.
+    ///
+    /// A Wayland session that silently ends up on XCB through XWayland looks
+    /// identical to a working native run until something subtle misbehaves, so the
+    /// fallback is diagnosed rather than hidden. It is reported, never overridden,
+    /// and a backend the user named is not reported at all; see
+    /// platformFallbackDeservesWarning().
+    ///
+    /// @param program the executable's name, as the messages should call it.
+    void reportBackend(const QString& program, const QString& version) const;
+
+private:
+    QString commandLinePlatform_;
+};
 
 } // namespace cullfinch::app

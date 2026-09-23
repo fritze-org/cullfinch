@@ -157,12 +157,7 @@ int main(int argc, char* argv[]) {
         return 0;
     }
 
-    // Read before QApplication, which removes -platform from argv as it
-    // consumes it; afterwards nothing can tell the user asked.
-    const QString commandLinePlatform =
-        cullfinch::app::platformRequestedOnCommandLine({argv, static_cast<std::size_t>(argc)});
-
-    cullfinch::app::preferPortalDialogs();
+    const cullfinch::app::DesktopStartup desktop({argv, static_cast<std::size_t>(argc)});
     QApplication application(argc, argv);
     setApplicationIdentity();
     cullfinch::app::pruneUnreachableIconThemePaths();
@@ -181,8 +176,7 @@ int main(int argc, char* argv[]) {
     QCommandLineParser& parser = commandLine.parser;
     parser.process(application);
 
-    cullfinch::app::reportPlatformBackend(QStringLiteral("cullfinch"),
-                                          QStringLiteral(CULLFINCH_VERSION), commandLinePlatform);
+    desktop.reportBackend(QStringLiteral("cullfinch"), QStringLiteral(CULLFINCH_VERSION));
 
     cullfinch::app::CompositionRoot::Options options;
     options.dataDirectory = parser.value(commandLine.dataDirectory);
