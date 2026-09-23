@@ -59,6 +59,7 @@ add_subdirectory(src/ui)
 add_subdirectory(src/views/versus)
 add_subdirectory(src/views/wall)
 add_subdirectory(src/app)
+add_subdirectory(src/viewer)
 
 if(CULLFINCH_BUILD_TESTING)
   enable_testing()

@@ -8,6 +8,7 @@
 #include <QPointF>
 #include <QRectF>
 #include <QSize>
+#include <QTimer>
 #include <QWidget>
 
 namespace cullfinch::ui {
@@ -69,6 +70,26 @@ public:
     /// Extra text drawn under the photo, such as "JPG + 1 RAW".
     void setCaption(const QString& caption);
 
+    /// Hold back decode requests while `deferred`.
+    ///
+    /// A host showing more photos than fit on screen -- the standalone wall,
+    /// scrolled -- asks only for the ones somebody can see, rather than
+    /// decoding a whole directory up front. Releasing the hold asks for a
+    /// preview at the current size unless one was already asked for.
+    void setLoadingDeferred(bool deferred);
+    [[nodiscard]] bool isLoadingDeferred() const { return loadingDeferred_; }
+
+    /// Wait this long after the last resize before asking for pixels at the
+    /// new size, while a preview is already on screen. Meanwhile the preview
+    /// already on screen is scaled.
+    ///
+    /// Zero, the default, asks on every resize. A host that resizes all of its
+    /// canvases continuously -- a tile-size slider being dragged -- would
+    /// otherwise queue a decode per canvas per step, each at a size nobody
+    /// looks at for longer than a frame. A canvas with nothing on screen yet
+    /// always asks at once: there is nothing to scale in the meantime.
+    void setRefinementDelay(int milliseconds);
+
 signals:
     /// A primary-button press that could become an elimination, with the
     /// pointer position in this widget's coordinates. Hosts bind the gesture
@@ -99,6 +120,13 @@ private:
     void updateAccessibility();
 
     PreviewLoader* preview_ = nullptr;
+    /// Created on first use: only hosts that set a refinement delay need one.
+    QTimer* refinement_ = nullptr;
+    int refinementDelayMs_ = 0;
+    bool loadingDeferred_ = false;
+    /// The size the current photo was last asked for, so releasing a deferred
+    /// load does not ask again for what is already on its way.
+    QSize requestedPixels_;
     AssetPresentation presentation_;
     QString caption_;
 

@@ -1,7 +1,9 @@
 // SPDX-License-Identifier: GPL-3.0-or-later
 #include <DesktopIntegration.h>
 
+#include <QDebug>
 #include <QDir>
+#include <QGuiApplication>
 #include <QIcon>
 #include <QLatin1String>
 #include <QString>
@@ -61,6 +63,22 @@ void pruneUnreachableIconThemePaths() {
     }
     QIcon::setThemeSearchPaths(reachable);
 #endif
+}
+
+void reportPlatformBackend(const QString& program, const QString& version) {
+    const QString backend = QGuiApplication::platformName();
+    qInfo().noquote() << QStringLiteral("%1 %2, Qt %3, platform plugin '%4'")
+                             .arg(program, version, QString::fromLatin1(qVersion()), backend);
+
+    const bool waylandSession = qEnvironmentVariableIsSet("WAYLAND_DISPLAY");
+    if (waylandSession && backend != QLatin1String("wayland")) {
+        qWarning().noquote()
+            << QStringLiteral(
+                   "%1: this is a Wayland session but Qt selected the '%2' backend. "
+                   "Rendering and scaling go through XWayland. Pass -platform wayland to "
+                   "require the native path, or -platform xcb to silence this.")
+                   .arg(program, backend);
+    }
 }
 
 } // namespace cullfinch::app

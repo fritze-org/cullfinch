@@ -85,7 +85,7 @@ cullfinch_add_test(
 cullfinch_add_test(
   tst_desktop_integration
   SOURCES unit/tst_desktop_integration.cpp
-  DEPS cullfinch::cullfinch_composition
+  DEPS cullfinch::cullfinch_desktop
   LABELS unit PLATFORM offscreen)
 
 # ------------------------------------------------------------ integration ----
@@ -176,6 +176,16 @@ cullfinch_add_test(
   DEPS cullfinch::cullfinch_composition cullfinch::cullfinch_testsupport
   LABELS gui
   TIMEOUT 300)
+
+# The standalone wall viewer against an image service that answers on command: whether a tile
+# decodes is the whole point of a tile size that can scroll most photos off screen, and only a fake
+# can say what was asked for and when.
+cullfinch_add_test(
+  tst_wall_viewer
+  SOURCES gui/tst_wall_viewer.cpp gui/GuiFixture.h
+  DEPS cullfinch::cullfinch_viewer cullfinch::cullfinch_composition cullfinch::cullfinch_testsupport
+  LABELS gui
+  TIMEOUT 120)
 
 # ----------------------------------------------------------------- visual ----
 # Renders the production views offscreen and compares the pixels against checked-in references.

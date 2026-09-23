@@ -40,15 +40,32 @@ public:
     [[nodiscard]] QList<domain::AssetId> order() const;
     [[nodiscard]] quint64 layoutRevision() const { return revision_; }
 
+    /// Cells about `pixels` wide, in a grid that grows downwards for a scroll
+    /// area to show, instead of every tile shrinking until all of them fit.
+    ///
+    /// Zero, the default, fits every candidate into the surface: the comparison
+    /// wall's behaviour, where nothing may be scrolled out of sight. With a
+    /// width set, only tiles on or near the screen decode, and a tile that is
+    /// resized again waits for the size to settle before decoding again.
+    void setTileWidth(int pixels);
+    [[nodiscard]] int tileWidth() const { return tileWidth_; }
+
 signals:
     /// Carries the layout revision the gesture began against.
     void eliminateRequested(const cullfinch::domain::AssetId& id, quint64 layoutRevision);
 
 protected:
     void resizeEvent(QResizeEvent* event) override;
+    void moveEvent(QMoveEvent* event) override;
+    void showEvent(QShowEvent* event) override;
 
 private:
     void relayout();
+    /// Release the decode hold on tiles near the part of the surface a scroll
+    /// area shows, and keep it on the rest.
+    void updateDeferredLoading();
+    /// The part of this surface its parent shows, in surface coordinates.
+    [[nodiscard]] QRect shownArea() const;
     void recordAspect(const domain::AssetId& id);
     [[nodiscard]] bool acceptGesture(const domain::AssetId& id, const QPoint& pointer);
     /// Remember where tiles that are about to leave used to be, so a repeat
@@ -70,6 +87,9 @@ private:
     /// "resize the cell" and "re-fit the image".
     QHash<domain::AssetId, QSizeF> aspects_;
     quint64 revision_ = 0;
+    int tileWidth_ = 0;
+    /// The minimum height this surface last asked for on its grid's behalf.
+    int requestedHeight_ = 0;
 
     /// Where a tile used to be, and when it vanished. Repeat clicks inside that
     /// region are swallowed for the platform double-click interval.

@@ -1,6 +1,7 @@
 // SPDX-License-Identifier: GPL-3.0-or-later
 #include <cullfinch/testsupport/TempCollection.h>
 
+#include <QDir>
 #include <QFileInfo>
 #include <QProcess>
 #include <QProcessEnvironment>
@@ -21,8 +22,16 @@ private slots:
     void initTestCase();
     void reportsItsVersion();
     void completesASmokeRunAgainstARealJpeg();
+    void theWallViewerReportsItsVersion();
+    void theWallViewerCompletesASmokeRunAgainstARealJpeg();
 
 private:
+    /// The standalone wall viewer the same package installs next to the
+    /// application. Found from the application's path rather than named by the
+    /// workflow, so a package that forgets it fails here instead of being
+    /// tested without it.
+    [[nodiscard]] QString wallViewerBinary() const;
+
     [[nodiscard]] static QProcessEnvironment cleanEnvironment(const QString& dataDirectory,
                                                               const QString& cacheDirectory);
 
@@ -114,6 +123,66 @@ void TestPackagedApplication::completesASmokeRunAgainstARealJpeg() {
 
     // And it must have done so on the backend this job is testing. An installed
     // package rescued by XWayland passes every other assertion here.
+    const QString expected = qEnvironmentVariable("CULLFINCH_EXPECTED_PLATFORM");
+    if (!expected.isEmpty()) {
+        QVERIFY2(
+            output.contains(QStringLiteral("smoke: platform=") + expected),
+            qPrintable(
+                QStringLiteral("expected backend '%1'; output was:\n%2").arg(expected, output)));
+    }
+}
+
+QString TestPackagedApplication::wallViewerBinary() const {
+#if defined(Q_OS_MACOS)
+    // <prefix>/cullfinch.app/Contents/MacOS/cullfinch, beside which the
+    // viewer is a bundle of its own.
+    QDir prefix = QFileInfo(binary_).absoluteDir();
+    prefix.cd(QStringLiteral("../../.."));
+    return prefix.filePath(QStringLiteral("cullfinch-wall.app/Contents/MacOS/cullfinch-wall"));
+#else
+    return QFileInfo(binary_).absoluteDir().filePath(QStringLiteral("cullfinch-wall"));
+#endif
+}
+
+void TestPackagedApplication::theWallViewerReportsItsVersion() {
+    const QString viewer = wallViewerBinary();
+    QVERIFY2(QFileInfo(viewer).isExecutable(), qPrintable(viewer));
+
+    QTemporaryDir data;
+    QTemporaryDir cache;
+    QProcess process;
+    process.setProcessEnvironment(cleanEnvironment(data.path(), cache.path()));
+    process.start(viewer, {QStringLiteral("--version")});
+    QVERIFY2(process.waitForFinished(60000), "the packaged wall viewer did not start");
+    QCOMPARE(process.exitCode(), 0);
+    QVERIFY(QString::fromUtf8(process.readAllStandardOutput())
+                .contains(QStringLiteral("cullfinch-wall")));
+}
+
+void TestPackagedApplication::theWallViewerCompletesASmokeRunAgainstARealJpeg() {
+    const QString viewer = wallViewerBinary();
+    QVERIFY2(QFileInfo(viewer).isExecutable(), qPrintable(viewer));
+
+    TempCollection collection;
+    QVERIFY(collection.isValid());
+    for (int index = 1; index <= 3; ++index) {
+        QVERIFY(!collection.addJpeg(QStringLiteral("IMG_%1.JPG").arg(index)).isEmpty());
+    }
+
+    QTemporaryDir data;
+    QTemporaryDir cache;
+    QProcess process;
+    process.setProcessEnvironment(cleanEnvironment(data.path(), cache.path()));
+    process.start(viewer, {QStringLiteral("--smoke"), collection.path()});
+
+    QVERIFY2(process.waitForFinished(120000), "the wall viewer's smoke run did not finish");
+    const QString output = QString::fromUtf8(process.readAllStandardOutput()) +
+                           QString::fromUtf8(process.readAllStandardError());
+    QVERIFY2(process.exitCode() == 0, qPrintable(output));
+    // A real JPEG decoded through the deployed image plugin, in a window on
+    // the deployed platform plugin.
+    QVERIFY2(output.contains(QStringLiteral("smoke: ok")), qPrintable(output));
+
     const QString expected = qEnvironmentVariable("CULLFINCH_EXPECTED_PLATFORM");
     if (!expected.isEmpty()) {
         QVERIFY2(

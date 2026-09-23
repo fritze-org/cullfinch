@@ -31,6 +31,11 @@ private slots:
     void handlesMixedPortraitAndLandscape();
     void isDeterministic();
     void degradesGracefullyOnATinyViewport();
+    void fitsTheViewportUnlessACellWidthIsAsked();
+    void aCellWidthFillsTheRowAndGrowsDownwards_data();
+    void aCellWidthFillsTheRowAndGrowsDownwards();
+    void aCellWiderThanTheViewportIsNarrowedToFit();
+    void aCellWidthKeepsImagesWholeAndInOrder();
 };
 
 void TestWallLayout::placesEveryCandidate_data() {
@@ -141,6 +146,116 @@ void TestWallLayout::degradesGracefullyOnATinyViewport() {
     }
     QVERIFY(WallLayout::compute(QSizeF(0, 0), items(3, QSizeF(10, 10))).cells.isEmpty());
     QVERIFY(WallLayout::compute(QSizeF(100, 100), {}).cells.isEmpty());
+}
+
+void TestWallLayout::fitsTheViewportUnlessACellWidthIsAsked() {
+    // The comparison wall never sets a cell width, and must lay out exactly as
+    // it always has: everything inside the viewport, however small.
+    const QSizeF viewport(1200, 800);
+    const WallLayoutResult fitted = WallLayout::compute(viewport, items(60, QSizeF(3000, 2000)));
+    QCOMPARE(fitted.contentSize, viewport);
+    const QRectF bounds(QPointF(0, 0), viewport);
+    for (const LayoutCell& cell : fitted.cells) {
+        QVERIFY(bounds.contains(cell.cellRect));
+    }
+
+    WallLayoutOptions options;
+    options.cellWidth = 240.0;
+    const WallLayoutResult fixed =
+        WallLayout::compute(viewport, items(60, QSizeF(3000, 2000)), options);
+    QCOMPARE(fixed.cells.size(), 60);
+    QVERIFY2(fixed.contentSize.height() > viewport.height(),
+             "sixty 240-pixel tiles cannot fit in 800 pixels; the grid has to grow instead");
+    QCOMPARE(fixed.contentSize.width(), viewport.width());
+}
+
+void TestWallLayout::aCellWidthFillsTheRowAndGrowsDownwards_data() {
+    QTest::addColumn<qreal>("viewportWidth");
+    QTest::addColumn<qreal>("cellWidth");
+    QTest::addColumn<int>("count");
+    QTest::addColumn<int>("columns");
+
+    // (width - 2 * margin + spacing) / (cell + spacing), rounded down.
+    QTest::newRow("exact") << qreal(1016) << qreal(240) << 10 << 4;
+    QTest::newRow("slack stretches the cells") << qreal(1100) << qreal(240) << 10 << 4;
+    QTest::newRow("fewer photos than columns") << qreal(1016) << qreal(240) << 3 << 4;
+    QTest::newRow("small tiles") << qreal(1016) << qreal(96) << 100 << 9;
+}
+
+void TestWallLayout::aCellWidthFillsTheRowAndGrowsDownwards() {
+    QFETCH(qreal, viewportWidth);
+    QFETCH(qreal, cellWidth);
+    QFETCH(int, count);
+    QFETCH(int, columns);
+
+    WallLayoutOptions options;
+    options.cellWidth = cellWidth;
+    // The height is irrelevant once a cell width is set; zero proves it.
+    const WallLayoutResult layout =
+        WallLayout::compute(QSizeF(viewportWidth, 0), items(count, QSizeF(3000, 2000)), options);
+
+    QCOMPARE(layout.columns, columns);
+    QCOMPARE(layout.rows, (count + columns - 1) / columns);
+    QCOMPARE(static_cast<int>(layout.cells.size()), count);
+
+    const LayoutCell& first = layout.cells.constFirst();
+    QVERIFY2(first.cellRect.width() >= cellWidth - 0.001, "a cell came out narrower than asked");
+    QCOMPARE(first.cellRect.topLeft(), QPointF(options.margin, options.margin));
+
+    // A full row reaches the right margin exactly, with no ragged gap.
+    const qreal rowRight =
+        first.cellRect.x() + (columns * first.cellRect.width()) + ((columns - 1) * options.spacing);
+    QVERIFY(qAbs(rowRight - (viewportWidth - options.margin)) < 0.001);
+
+    // Every cell is inside the content area the caller is told to scroll over.
+    const QRectF content(QPointF(0, 0), layout.contentSize);
+    for (const LayoutCell& cell : layout.cells) {
+        QVERIFY(content.contains(cell.cellRect));
+    }
+    const LayoutCell& last = layout.cells.constLast();
+    QVERIFY(qAbs(layout.contentSize.height() - (last.cellRect.bottom() + options.margin)) < 0.001);
+}
+
+void TestWallLayout::aCellWiderThanTheViewportIsNarrowedToFit() {
+    WallLayoutOptions options;
+    options.cellWidth = 2000.0;
+    const WallLayoutResult layout =
+        WallLayout::compute(QSizeF(600, 400), items(3, QSizeF(3000, 2000)), options);
+
+    // One column, never a grid that has to scroll sideways.
+    QCOMPARE(layout.columns, 1);
+    QCOMPARE(layout.rows, 3);
+    for (const LayoutCell& cell : layout.cells) {
+        QVERIFY(cell.cellRect.right() <= 600.0 - options.margin + 0.001);
+    }
+
+    QVERIFY(WallLayout::compute(QSizeF(4, 400), items(3, QSizeF(10, 10)), options).cells.isEmpty());
+    QVERIFY(WallLayout::compute(QSizeF(600, 400), {}, options).cells.isEmpty());
+}
+
+void TestWallLayout::aCellWidthKeepsImagesWholeAndInOrder() {
+    QList<LayoutItem> mixed;
+    for (int index = 0; index < 9; ++index) {
+        mixed.append(LayoutItem{AssetId(QStringLiteral("a%1").arg(index)),
+                                (index % 3 == 0) ? QSizeF(3000, 4000) : QSizeF(4000, 3000)});
+    }
+
+    WallLayoutOptions options;
+    options.cellWidth = 180.0;
+    const WallLayoutResult first = WallLayout::compute(QSizeF(900, 300), mixed, options);
+    const WallLayoutResult second = WallLayout::compute(QSizeF(900, 300), mixed, options);
+
+    QCOMPARE(first.cells.size(), mixed.size());
+    for (int index = 0; index < mixed.size(); ++index) {
+        const LayoutCell& cell = first.cells.at(index);
+        QCOMPARE(cell.id, mixed.at(index).id);
+        QCOMPARE(cell.cellRect, second.cells.at(index).cellRect);
+        QVERIFY(cell.cellRect.contains(cell.imageRect));
+        const qreal expected =
+            mixed.at(index).imageSize.width() / mixed.at(index).imageSize.height();
+        QVERIFY(qAbs((cell.imageRect.width() / cell.imageRect.height()) - expected) < 0.001);
+    }
+    QVERIFY(first.smallestImageArea > 0.0);
 }
 
 QTEST_APPLESS_MAIN(TestWallLayout)

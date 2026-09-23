@@ -4,7 +4,7 @@
 # install tree; this directory only installs the platform metadata that has to travel with the
 # application.
 if(CMAKE_SYSTEM_NAME STREQUAL "Linux")
-  install(FILES linux/org.fritze.cullfinch.desktop
+  install(FILES linux/org.fritze.cullfinch.desktop linux/org.fritze.cullfinch.wall.desktop
           DESTINATION ${CMAKE_INSTALL_DATAROOTDIR}/applications)
   install(FILES linux/org.fritze.cullfinch.metainfo.xml
           DESTINATION ${CMAKE_INSTALL_DATAROOTDIR}/metainfo)
