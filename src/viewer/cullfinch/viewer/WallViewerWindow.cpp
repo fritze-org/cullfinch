@@ -53,8 +53,12 @@ WallViewerWindow::WallViewerWindow(application::IImageService& images, const QSt
                                    const DirectoryPhotos& photos, int tileWidth, QWidget* parent)
     : QWidget(parent) {
     setObjectName(QStringLiteral("wallViewerWindow"));
-    setWindowTitle(tr("%1 — %n photo(s)", nullptr, static_cast<int>(photos.photos.size()))
-                       .arg(QDir(directory).dirName()));
+    // The title names what the count covers: the same number means something
+    // else for a folder than for a whole tree below it.
+    const QString scope = photos.recursive ? tr("%1 and subfolders").arg(QDir(directory).dirName())
+                                           : QDir(directory).dirName();
+    setWindowTitle(
+        tr("%1 — %n photo(s)", nullptr, static_cast<int>(photos.photos.size())).arg(scope));
 
     auto* layout = new QVBoxLayout(this);
     layout->setContentsMargins(0, 0, 0, 0);
@@ -80,7 +84,10 @@ WallViewerWindow::WallViewerWindow(application::IImageService& images, const QSt
     scroll_->viewport()->installEventFilter(this);
     layout->addWidget(scroll_, 1);
 
-    emptyLabel_ = new QLabel(tr("There are no photos in this directory."), this);
+    emptyLabel_ =
+        new QLabel(photos.recursive ? tr("There are no photos in this directory or below it.")
+                                    : tr("There are no photos in this directory."),
+                   this);
     emptyLabel_->setObjectName(QStringLiteral("viewerEmptyLabel"));
     emptyLabel_->setAlignment(Qt::AlignCenter);
     layout->addWidget(emptyLabel_, 1);
