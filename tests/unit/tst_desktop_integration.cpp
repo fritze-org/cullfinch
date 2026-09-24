@@ -2,7 +2,9 @@
 #include <DesktopIntegration.h>
 
 #include <QDir>
+#include <QGuiApplication>
 #include <QIcon>
+#include <QRegularExpression>
 #include <QTest>
 
 #include <vector>
@@ -11,36 +13,36 @@ using namespace cullfinch::app;
 
 namespace {
 
-/// Restores QT_QPA_PLATFORMTHEME, whatever the test did to it. The variable is
-/// process-wide and read by Qt at startup, so a test that left it set would be
-/// changing the environment of every test that follows it in this binary.
-class ScopedPlatformTheme {
+/// Sets an environment variable for one scope and restores it exactly afterwards; a null value
+/// unsets it. The variables these tests touch are process-wide and read by Qt at startup, so a test
+/// that left one set would be changing the environment of every test that follows it in this
+/// binary.
+class ScopedEnvironmentVariable {
 public:
-    explicit ScopedPlatformTheme(const QByteArray& value)
-        : present_(qEnvironmentVariableIsSet(kName)), previous_(qgetenv(kName)) {
+    ScopedEnvironmentVariable(const char* name, const QByteArray& value)
+        : name_(name), present_(qEnvironmentVariableIsSet(name)), previous_(qgetenv(name)) {
         if (value.isNull()) {
-            qunsetenv(kName);
+            qunsetenv(name_);
         } else {
-            qputenv(kName, value);
+            qputenv(name_, value);
         }
     }
 
-    ~ScopedPlatformTheme() {
+    ~ScopedEnvironmentVariable() {
         if (present_) {
-            qputenv(kName, previous_);
+            qputenv(name_, previous_);
         } else {
-            qunsetenv(kName);
+            qunsetenv(name_);
         }
     }
 
-    ScopedPlatformTheme(const ScopedPlatformTheme&) = delete;
-    ScopedPlatformTheme& operator=(const ScopedPlatformTheme&) = delete;
-    ScopedPlatformTheme(ScopedPlatformTheme&&) = delete;
-    ScopedPlatformTheme& operator=(ScopedPlatformTheme&&) = delete;
+    ScopedEnvironmentVariable(const ScopedEnvironmentVariable&) = delete;
+    ScopedEnvironmentVariable& operator=(const ScopedEnvironmentVariable&) = delete;
+    ScopedEnvironmentVariable(ScopedEnvironmentVariable&&) = delete;
+    ScopedEnvironmentVariable& operator=(ScopedEnvironmentVariable&&) = delete;
 
 private:
-    static constexpr const char* kName = "QT_QPA_PLATFORMTHEME";
-
+    const char* name_;
     bool present_;
     QByteArray previous_;
 };
@@ -73,6 +75,18 @@ QString requestedBy(std::vector<QByteArray> words) {
     return platformRequestedOnCommandLine(argv);
 }
 
+/// The warning the backend report prints for a fallback, whatever the backend under test is.
+QRegularExpression fallbackWarning() {
+    return QRegularExpression(
+        QStringLiteral("Qt selected the '%1' backend.*choose XCB explicitly")
+            .arg(QRegularExpression::escape(QGuiApplication::platformName())));
+}
+
+/// The line every report starts with, which both startup cases print and neither is about.
+void ignoreBackendLine() {
+    QTest::ignoreMessage(QtInfoMsg, QRegularExpression(QStringLiteral("^tst \\S+, Qt ")));
+}
+
 } // namespace
 
 class TestDesktopIntegration : public QObject {
@@ -93,6 +107,9 @@ private slots:
     void theCommandLineOverridesTheEnvironment();
     void nativeWaylandOrNoWaylandSessionIsNeverReported();
     void platformIsReadFromTheCommandLineAsQtReadsIt();
+
+    void aStartupThatAskedForNothingReportsTheFallback();
+    void aStartupGivenTheBackendOnItsCommandLineStaysQuiet();
 };
 
 void TestDesktopIntegration::anUnsetPlatformThemeAsksForThePortal() {
@@ -115,12 +132,12 @@ void TestDesktopIntegration::portalPreferenceIsAppliedOnlyWhereNothingIsConfigur
     QSKIP("the platform theme plugin this chooses exists only on Linux");
 #else
     {
-        const ScopedPlatformTheme theme{QByteArray()};
+        const ScopedEnvironmentVariable theme{"QT_QPA_PLATFORMTHEME", QByteArray()};
         preferPortalDialogs();
         QCOMPARE(qgetenv("QT_QPA_PLATFORMTHEME"), QByteArrayLiteral("xdgdesktopportal"));
     }
     {
-        const ScopedPlatformTheme theme{QByteArrayLiteral("gtk3")};
+        const ScopedEnvironmentVariable theme{"QT_QPA_PLATFORMTHEME", QByteArrayLiteral("gtk3")};
         preferPortalDialogs();
         QCOMPARE(qgetenv("QT_QPA_PLATFORMTHEME"), QByteArrayLiteral("gtk3"));
     }
@@ -250,6 +267,48 @@ void TestDesktopIntegration::platformIsReadFromTheCommandLineAsQtReadsIt() {
     QVERIFY(requestedBy({"cullfinch", "--platformtheme", "-platform", "xcb"}).isNull());
     QVERIFY(requestedBy({"cullfinch", "-qwindowtitle", "-platform", "xcb"}).isNull());
     QCOMPARE(requestedBy({"cullfinch", "-platformtheme", "gtk3", "-platform", "xcb"}), xcb);
+}
+
+void TestDesktopIntegration::aStartupThatAskedForNothingReportsTheFallback() {
+    // The suite's own backend is not wayland, so in a Wayland session it stands in for the XCB
+    // fallback. Nothing requested it, which is the case the report exists for.
+    const ScopedEnvironmentVariable session{"WAYLAND_DISPLAY", QByteArrayLiteral("wayland-test")};
+    const ScopedEnvironmentVariable platform{"QT_QPA_PLATFORM", QByteArray()};
+    const ScopedEnvironmentVariable theme{"QT_QPA_PLATFORMTHEME", QByteArray()};
+
+    std::vector<QByteArray> words{"tst"};
+    std::vector<char*> argv{words.front().data()};
+    const DesktopStartup desktop{argv};
+#ifdef Q_OS_LINUX
+    // Constructing it is also what asks for portal dialogs, before the QApplication would read it.
+    QCOMPARE(qgetenv("QT_QPA_PLATFORMTHEME"), QByteArrayLiteral("xdgdesktopportal"));
+#endif
+
+    ignoreBackendLine();
+    QTest::ignoreMessage(QtWarningMsg, fallbackWarning());
+    desktop.reportBackend(QStringLiteral("tst"), QStringLiteral("0"));
+}
+
+void TestDesktopIntegration::aStartupGivenTheBackendOnItsCommandLineStaysQuiet() {
+    // The same session, but the backend was named on the command line. What the constructor read
+    // from argv is what the report later decides with -- after the QApplication would have
+    // removed it -- so this is the one place the two halves are seen working together.
+    const ScopedEnvironmentVariable session{"WAYLAND_DISPLAY", QByteArrayLiteral("wayland-test")};
+    const ScopedEnvironmentVariable platform{"QT_QPA_PLATFORM", QByteArray()};
+    const ScopedEnvironmentVariable theme{"QT_QPA_PLATFORMTHEME", QByteArray()};
+
+    std::vector<QByteArray> words{"tst", "-platform",
+                                  QGuiApplication::platformName().toLocal8Bit()};
+    std::vector<char*> argv;
+    argv.reserve(words.size());
+    for (QByteArray& word : words) {
+        argv.push_back(word.data());
+    }
+    const DesktopStartup desktop{argv};
+
+    ignoreBackendLine();
+    QTest::failOnWarning(fallbackWarning());
+    desktop.reportBackend(QStringLiteral("tst"), QStringLiteral("0"));
 }
 
 QTEST_MAIN(TestDesktopIntegration)
