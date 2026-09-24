@@ -12,6 +12,8 @@
 #include <QLabel>
 #include <QPushButton>
 #include <QRect>
+#include <QSet>
+#include <QTimer>
 #include <QWidget>
 
 namespace cullfinch::views::wall {
@@ -62,10 +64,30 @@ protected:
 private:
     void relayout();
     /// Release the decode hold on tiles near the part of the surface a scroll
-    /// area shows, and keep it on the rest.
-    void updateDeferredLoading();
+    /// area shows, take back the pixels of tiles a long way from it, and let
+    /// the rest of the directory pre-load behind them.
+    void updateLoadingWindow();
+    /// Let a few more tiles beyond the shown band decode, nearest first.
+    ///
+    /// Everything somebody can see is asked for first and the background work
+    /// is paced, because the image service decodes in request order: it has no
+    /// priority queue, so a directory dropped on it at once would put the tile
+    /// under the scrollbar behind a thousand nobody is looking at.
+    void pumpPrefetch();
+    /// Ask for a pump on the next turn of the event loop.
+    ///
+    /// Never inline from a preview's own signal: the pump releases holds,
+    /// which makes requests, which can answer from cache and signal straight
+    /// back into it. Coalescing also makes a burst of arrivals cost one pass.
+    void schedulePump();
+    /// True while a tile somebody can see is still waiting for its pixels.
+    /// A tile with no preview file, or one whose decode failed, is never
+    /// waiting: it would otherwise hold the background work up for ever.
+    [[nodiscard]] bool shownTilesAreWaiting(const QRect& eager) const;
     /// The part of this surface its parent shows, in surface coordinates.
     [[nodiscard]] QRect shownArea() const;
+    /// `shown` grown by that many of its own heights, up and down.
+    [[nodiscard]] static QRect bandAround(const QRect& shown, int screens);
     void recordAspect(const domain::AssetId& id);
     [[nodiscard]] bool acceptGesture(const domain::AssetId& id, const QPoint& pointer);
     /// Remember where tiles that are about to leave used to be, so a repeat
@@ -86,6 +108,18 @@ private:
     /// exactly once per tile lets the grid settle without oscillating between
     /// "resize the cell" and "re-fit the image".
     QHash<domain::AssetId, QSizeF> aspects_;
+    /// Candidates whose decode has been asked for at the current tile width,
+    /// whether because they were on screen or because the pre-loader reached
+    /// them. A tile that decoded and then gave its pixels back for being far
+    /// away is still in here, or the pre-loader would pick it up again and the
+    /// two would decode and release for ever.
+    QSet<domain::AssetId> requested_;
+    /// Candidates the pre-loader is waiting for an answer about. Separate from
+    /// `requested_` because a tile that gave its pixels back is still asked
+    /// for and is no longer awaited.
+    QSet<domain::AssetId> prefetching_;
+    /// Created on first use: only a wall with a tile width pre-loads.
+    QTimer* pump_ = nullptr;
     quint64 revision_ = 0;
     int tileWidth_ = 0;
     /// The minimum height this surface last asked for on its grid's behalf.
