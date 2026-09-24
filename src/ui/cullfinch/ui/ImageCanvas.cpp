@@ -107,6 +107,26 @@ void ImageCanvas::setLoadingDeferred(bool deferred) {
     requestFittedPreview();
 }
 
+void ImageCanvas::releasePixels() {
+    if (inspecting_) {
+        return; // Somebody is looking at this one at 100%.
+    }
+    if (preview_->hasError()) {
+        // Nothing decoded, so nothing to reclaim -- and forgetting the size it
+        // was asked for would turn every scroll past an unreadable file into
+        // another failing decode. Today it is asked for exactly once.
+        return;
+    }
+    if (refinement_ != nullptr) {
+        refinement_->stop();
+    }
+    // Forgotten along with the pixels, so lifting the hold asks again instead
+    // of deciding that what it wants is already on its way.
+    requestedPixels_ = QSize();
+    preview_->release();
+    update();
+}
+
 void ImageCanvas::setRefinementDelay(int milliseconds) {
     refinementDelayMs_ = std::max(0, milliseconds);
     if (refinementDelayMs_ > 0 && refinement_ == nullptr) {
