@@ -22,8 +22,12 @@ qint64 FakeImageService::memoryBudgetBytes() const {
     return budget_;
 }
 
+void FakeImageService::setMemoryUsedBytes(qint64 bytes) {
+    used_ = bytes;
+}
+
 qint64 FakeImageService::memoryUsedBytes() const {
-    return 0;
+    return used_;
 }
 
 application::ImageResult FakeImageService::answerFor(qsizetype index) const {

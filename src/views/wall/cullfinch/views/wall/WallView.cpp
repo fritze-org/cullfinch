@@ -12,6 +12,8 @@
 
 #include <algorithm>
 #include <cmath>
+#include <cstdlib>
+#include <limits>
 #include <utility>
 
 namespace cullfinch::views::wall {
@@ -29,6 +31,23 @@ constexpr int kRefinementDelayMs = 150;
 /// The minimum ImageCanvas sets for itself, restored when a wall goes back to
 /// fitting its tiles.
 constexpr QSize kFittedTileMinimum(64, 64);
+
+/// Screens above and below the viewport whose tiles decode straight away, so
+/// scrolling at a normal pace finds the next photos already there.
+constexpr int kEagerScreens = 1;
+/// Screens above and below whose tiles keep the pixels they decoded. Wider
+/// than the eager band, so scrolling back a little does not throw away what it
+/// has just been looking at.
+constexpr int kRetainScreens = 3;
+/// Background decodes outstanding at once. The service runs at most four
+/// decode workers and answers in request order, so a tile that scrolls into
+/// view waits behind at most one round of these.
+constexpr int kPrefetchInFlight = 4;
+/// Pre-loading stops at this percentage of the image service's byte budget.
+/// Past it, another background decode only evicts one somebody is closer to
+/// needing, and the wall would spend the rest of the session churning the
+/// cache instead of filling it.
+constexpr qint64 kPrefetchBudgetPercent = 80;
 
 /// True while any of these wall positions refers to this candidate, whether it
 /// survives there or is held as an eliminated placeholder.
@@ -73,6 +92,8 @@ void WallSurface::removeDepartedTiles() {
     const QList<domain::AssetId> existing = tiles_.keys();
     for (const domain::AssetId& id : existing) {
         if (!holdsCandidate(positions_, id)) {
+            requested_.remove(id);
+            prefetching_.remove(id);
             tiles_.take(id)->deleteLater();
         }
     }
@@ -123,6 +144,13 @@ void WallSurface::addTile(const domain::AssetId& id) {
             recordAspect(id);
         }
     });
+    // Whatever a tile's decode ends as -- pixels, a failure, or pixels given
+    // back -- it is no longer one the pre-loader is waiting for. A failure has
+    // to count too, or one unreadable file would hold the queue up for good.
+    connect(tile->preview(), &ui::PreviewLoader::changed, this, [this, id]() {
+        prefetching_.remove(id);
+        schedulePump();
+    });
     tile->show();
     tiles_.insert(id, tile);
 }
@@ -151,6 +179,10 @@ void WallSurface::setCandidates(const QList<flows::wall::WallSlot>& positions,
                 known.previewMemberId.isValid()) {
                 placed->setPresentation(known, revision_);
                 placed->setCaption(known.displayName);
+                // A tile that was holding a place now holds a photo, and
+                // nothing has been asked for on its behalf yet.
+                requested_.remove(slot.id);
+                prefetching_.remove(slot.id);
             }
         }
         // An eliminated candidate keeps its cell in fixed-position mode, shown
@@ -197,12 +229,12 @@ void WallSurface::resizeEvent(QResizeEvent* event) {
 void WallSurface::moveEvent(QMoveEvent* event) {
     QWidget::moveEvent(event);
     // A scroll area scrolls by moving this surface under its viewport.
-    updateDeferredLoading();
+    updateLoadingWindow();
 }
 
 void WallSurface::showEvent(QShowEvent* event) {
     QWidget::showEvent(event);
-    updateDeferredLoading();
+    updateLoadingWindow();
 }
 
 void WallSurface::setTileWidth(int pixels) {
@@ -211,6 +243,10 @@ void WallSurface::setTileWidth(int pixels) {
         return;
     }
     tileWidth_ = pixels;
+    // Every cell is a different size now, so every decode is stale and every
+    // photo is worth pre-loading again.
+    requested_.clear();
+    prefetching_.clear();
     for (ui::ImageCanvas* tile : std::as_const(tiles_)) {
         tile->setRefinementDelay(tileWidth_ > 0 ? kRefinementDelayMs : 0);
     }
@@ -225,9 +261,15 @@ QRect WallSurface::shownArea() const {
     return rect().intersected(QRect(mapFrom(viewport, QPoint(0, 0)), viewport->size()));
 }
 
-void WallSurface::updateDeferredLoading() {
+QRect WallSurface::bandAround(const QRect& shown, int screens) {
+    const int reach = screens * shown.height();
+    return shown.adjusted(0, -reach, 0, reach);
+}
+
+void WallSurface::updateLoadingWindow() {
     if (tileWidth_ <= 0) {
-        // A fitted wall shows every tile, so every tile loads.
+        // A fitted wall shows every tile, so every tile loads and nothing is
+        // ever out of sight to pre-load or to give back.
         for (ui::ImageCanvas* tile : std::as_const(tiles_)) {
             tile->setLoadingDeferred(false);
         }
@@ -239,11 +281,125 @@ void WallSurface::updateDeferredLoading() {
     if (shown.isEmpty()) {
         return;
     }
-    // A screen above and below as well, so scrolling at a normal pace finds
-    // the next photos already decoded.
-    const QRect ahead = shown.adjusted(0, -shown.height(), 0, shown.height());
+
+    const QRect eager = bandAround(shown, kEagerScreens);
+    const QRect retained = bandAround(shown, kRetainScreens);
+    for (auto entry = tiles_.cbegin(); entry != tiles_.cend(); ++entry) {
+        ui::ImageCanvas* tile = entry.value();
+        const QRect cell = tile->geometry();
+        if (eager.intersects(cell)) {
+            // Asked for because somebody can see it, which is still asking:
+            // the pre-loader must not pick it up again after it scrolls away
+            // and gives its pixels back.
+            requested_.insert(entry.key());
+            tile->setLoadingDeferred(false);
+            continue;
+        }
+        // Out of the band somebody is about to scroll into. It may still hold
+        // pixels the pre-loader decoded for it; they are kept while it is near
+        // enough that scrolling back would want them, and handed back beyond
+        // that so a pre-loaded directory does not accumulate in the tiles. The
+        // image service's cache is what remembers the decode.
+        tile->setLoadingDeferred(true);
+        if (!retained.intersects(cell)) {
+            tile->releasePixels();
+        }
+    }
+
+    schedulePump();
+}
+
+void WallSurface::schedulePump() {
+    if (tileWidth_ <= 0) {
+        return;
+    }
+    if (pump_ == nullptr) {
+        pump_ = new QTimer(this);
+        pump_->setSingleShot(true);
+        connect(pump_, &QTimer::timeout, this, &WallSurface::pumpPrefetch);
+    }
+    // Zero, not immediate: the pump releases holds, a released hold asks for
+    // an image, and an image the service already holds answers straight back
+    // into the signal this was called from.
+    pump_->start(0);
+}
+
+bool WallSurface::shownTilesAreWaiting(const QRect& eager) const {
     for (ui::ImageCanvas* tile : std::as_const(tiles_)) {
-        tile->setLoadingDeferred(!ahead.intersects(tile->geometry()));
+        if (!eager.intersects(tile->geometry()) || tile->isLoadingDeferred()) {
+            continue;
+        }
+        const ui::PreviewLoader* preview = tile->preview();
+        // A photo with no preview file, and one whose decode failed, are never
+        // going to become ready. Waiting for them would stop the wall
+        // pre-loading anything else for the rest of the session.
+        if (!preview->hasSource() || preview->hasError() || preview->isReady()) {
+            continue;
+        }
+        return true;
+    }
+    return false;
+}
+
+void WallSurface::pumpPrefetch() {
+    if (tileWidth_ <= 0 || !isVisible()) {
+        return;
+    }
+    const QRect shown = shownArea();
+    if (shown.isEmpty()) {
+        return;
+    }
+    // Everything somebody can see comes first. The image service decodes in
+    // the order it is asked, so a background decode started now is one the
+    // next visible tile has to wait behind.
+    if (shownTilesAreWaiting(bandAround(shown, kEagerScreens))) {
+        return;
+    }
+    // Filling a cache that is already full only evicts an image somebody is
+    // closer to needing, so on a directory larger than the budget the
+    // background work stops here for good. What is on screen is unaffected: it
+    // never comes through this pump. Note that giving a far tile's pixels back
+    // does not lower this figure -- the service's cache still holds the
+    // decode, which is exactly why coming back is cheap -- so a release never
+    // starts the pre-loader up again either. A budget of zero is a service
+    // that does not say, and is not a reason to stop.
+    if (const qint64 budget = images_.memoryBudgetBytes();
+        budget > 0 && images_.memoryUsedBytes() * 100 >= budget * kPrefetchBudgetPercent) {
+        return;
+    }
+
+    // At most one round per pass, however fast the answers come back: a
+    // service answering from its cache could otherwise walk the whole
+    // directory inside this loop.
+    const int middle = shown.center().y();
+    for (int released = 0; released < kPrefetchInFlight && prefetching_.size() < kPrefetchInFlight;
+         ++released) {
+        domain::AssetId nearest;
+        int closest = std::numeric_limits<int>::max();
+        // Display order, not hash order: a whole row is the same distance
+        // away, and which of its tiles is asked for first should not depend on
+        // where a hash happened to put them.
+        for (const flows::wall::WallSlot& slot : positions_) {
+            const ui::ImageCanvas* tile = tiles_.value(slot.id, nullptr);
+            if (tile == nullptr || requested_.contains(slot.id) || !tile->preview()->hasSource()) {
+                continue;
+            }
+            const QRect cell = tile->geometry();
+            if (const int distance =
+                    std::abs(std::clamp(middle, cell.top(), cell.bottom()) - middle);
+                distance < closest) {
+                closest = distance;
+                nearest = slot.id;
+            }
+        }
+        if (!nearest.isValid()) {
+            return; // The whole directory has been asked for.
+        }
+        // Recorded before the hold is lifted: lifting it can answer from the
+        // cache synchronously, and the answer clears `prefetching_`.
+        requested_.insert(nearest);
+        prefetching_.insert(nearest);
+        tiles_.value(nearest)->setLoadingDeferred(false);
     }
 }
 
@@ -260,6 +416,15 @@ void WallSurface::recordAspect(const domain::AssetId& id) {
         return;
     }
     aspects_.insert(id, drawn.size());
+    if (tileWidth_ > 0) {
+        // A fixed-width grid's cells are all one size, derived from the tile
+        // width and the placeholder aspect alone, so a real aspect cannot move
+        // anything. Relaying out for each arriving preview would be a whole
+        // grid's worth of work per photo, which is what a wall pre-loading a
+        // whole directory would spend all its time doing. The aspect is still
+        // recorded: switching back to Fit needs it.
+        return;
+    }
     relayout();
 }
 
@@ -310,7 +475,7 @@ void WallSurface::relayout() {
         requestedHeight_ = needed;
         setMinimumHeight(needed);
     }
-    updateDeferredLoading();
+    updateLoadingWindow();
 }
 
 ui::ImageCanvas* WallSurface::tileFor(const domain::AssetId& id) const {
