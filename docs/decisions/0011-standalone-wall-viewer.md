@@ -35,6 +35,11 @@ next to `cullfinch`. It reuses the libraries above and owns nothing that persist
   preview is already on screen, a resized tile waits for the size to settle
   (`ImageCanvas::setRefinementDelay`) before decoding at the new size. Both default to the old
   behaviour.
+- **One directory, or the tree below it on request.** `--recursive` hands the scanner the same
+  flag the browser's recursive scan uses, so pairing stays inside a directory and two photos with
+  one filename in different subfolders stay two photos. It is a per-invocation switch and is not
+  remembered: a wall over a tree of unknown size is something to ask for. Captions become paths,
+  because that is what tells those two photos apart.
 - **Shared startup code.** Portal dialogs, icon-theme pruning and the platform-backend report move
   from `src/app/main.cpp` into a small `cullfinch_desktop` library, so both executables diagnose an
   XWayland fallback the same way ([decision 0007](0007-wayland-primary-linux-backend.md)).
