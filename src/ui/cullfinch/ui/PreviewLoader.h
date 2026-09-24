@@ -44,6 +44,23 @@ public:
     /// needs.
     void requestFullResolution();
 
+    /// Gives the decoded pixels back, keeping the source.
+    ///
+    /// For a host showing far more photos than fit on screen: a tile scrolled
+    /// a long way out of sight would otherwise hold its image for the rest of
+    /// the session, so a wall that pre-loads a whole directory would grow
+    /// without bound. The decode itself is not lost -- the image service
+    /// caches it -- so coming back asks for pixels that are already there.
+    ///
+    /// Requests in flight are disowned rather than cancelled, for the reason
+    /// `setSource` disowns them and for one more: a decode already under way
+    /// still lands in the service's cache, which is precisely where a released
+    /// tile wants it.
+    ///
+    /// Readiness drops, so a host that gates a decision on it must not call
+    /// this for a photo somebody could be deciding about.
+    void release();
+
     /// Clears a reported error and asks again.
     ///
     /// @return false when there was no error to retry, so a host can leave the
