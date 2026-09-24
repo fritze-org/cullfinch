@@ -157,7 +157,7 @@ int main(int argc, char* argv[]) {
         return 0;
     }
 
-    cullfinch::app::preferPortalDialogs();
+    const cullfinch::app::DesktopStartup desktop({argv, static_cast<std::size_t>(argc)});
     QApplication application(argc, argv);
     setApplicationIdentity();
     cullfinch::app::pruneUnreachableIconThemePaths();
@@ -176,8 +176,7 @@ int main(int argc, char* argv[]) {
     QCommandLineParser& parser = commandLine.parser;
     parser.process(application);
 
-    cullfinch::app::reportPlatformBackend(QStringLiteral("cullfinch"),
-                                          QStringLiteral(CULLFINCH_VERSION));
+    desktop.reportBackend(QStringLiteral("cullfinch"), QStringLiteral(CULLFINCH_VERSION));
 
     cullfinch::app::CompositionRoot::Options options;
     options.dataDirectory = parser.value(commandLine.dataDirectory);
