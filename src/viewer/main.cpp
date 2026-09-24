@@ -68,6 +68,8 @@ int runSmoke(const cullfinch::viewer::DirectoryPhotos& photos,
 
 struct CommandLine {
     QCommandLineParser parser;
+    QCommandLineOption recursive{{QStringLiteral("r"), QStringLiteral("recursive")},
+                                 tr("Also show photos in subdirectories.")};
     QCommandLineOption smoke{QStringLiteral("smoke"),
                              tr("Run a non-interactive package verification and exit.")};
 
@@ -79,6 +81,7 @@ struct CommandLine {
         parser.addVersionOption();
         parser.addPositionalArgument(QStringLiteral("directory"),
                                      tr("Directory of photos to show. Asked for when omitted."));
+        parser.addOption(recursive);
         parser.addOption(smoke);
     }
 };
@@ -129,6 +132,10 @@ int main(int argc, char* argv[]) {
     CommandLine commandLine;
     commandLine.parser.process(application);
     const bool smoke = commandLine.parser.isSet(commandLine.smoke);
+    // Per invocation, and deliberately not remembered: a recursive wall over a
+    // tree of unknown size is something to ask for, never something a viewer
+    // does again on its own because it did once.
+    const bool recursive = commandLine.parser.isSet(commandLine.recursive);
 
     cullfinch::app::reportPlatformBackend(QStringLiteral("cullfinch-wall"),
                                           QStringLiteral(CULLFINCH_VERSION));
@@ -148,7 +155,7 @@ int main(int argc, char* argv[]) {
     }
 
     const cullfinch::viewer::DirectoryPhotos photos =
-        cullfinch::viewer::loadDirectoryPhotos(directory);
+        cullfinch::viewer::loadDirectoryPhotos(directory, recursive);
     if (!photos.error.isEmpty()) {
         if (smoke) {
             QTextStream(stdout) << "smoke: failed - " << photos.error << Qt::endl;

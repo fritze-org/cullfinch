@@ -116,6 +116,22 @@ These were all found the expensive way. Most cost a full CI round.
   geometry use `guitests::settleWindowSize()`, which waits for the size to hold.
 - **Wayland cannot place its own windows.** Restore size and window state, never a desktop position,
   and treat fullscreen transitions as asynchronous.
+- **`displayName` is a path, not a filename, once a scan is recursive.** It is
+  `relativeDirectory + '/' + stem`, so sorting assets by it interleaves directory trees. The
+  resolver already returns them ordered by relative directory and then by natural stem, and that
+  is the order to show; re-sorting on the name undoes it. Pairing is per directory for the same
+  reason, so `a/IMG_1` and `b/IMG_1` are two photos, never one photo with a companion. Only a
+  recursive scope sees this — the browser's recursive scan and `cullfinch-wall --recursive`.
+- **Releasing a preview's pixels drops its readiness.** `ImageCanvas::releasePixels` exists so a
+  host showing far more photos than fit on screen does not keep every image it has scrolled past;
+  the photo, its native size and any reported error stay, and only the pixels go. The comparison
+  wall and the versus panes gate decision input on readiness, so only a host that decides nothing
+  may call it — the standalone wall does, they must not.
+- **The image service has no priority queue.** It answers in request order, so a host that
+  pre-loads has to pace itself behind what is on screen: a directory handed over at once puts the
+  tile under the scrollbar behind a thousand nobody is looking at. `WallSurface` pre-loads only
+  while no visible tile is waiting, keeps four decodes outstanding at most, and stops at a share of
+  the byte budget, past which another decode only evicts one somebody is closer to needing.
 - **`ComparisonShell` takes presentations at construction** because it renders state immediately; a
   view handed an empty map latches onto empty panes.
 - **A visual regression reference is an expectation, not an artifact.** Re-recording with

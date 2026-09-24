@@ -2,21 +2,19 @@
 #include <cullfinch/viewer/DirectoryPhotos.h>
 
 #include <cullfinch/domain/AssociationPolicy.h>
-#include <cullfinch/domain/NaturalOrder.h>
 #include <cullfinch/infrastructure/DirectoryScanner.h>
 
 #include <QDir>
 
-#include <algorithm>
-
 namespace cullfinch::viewer {
 
-DirectoryPhotos loadDirectoryPhotos(const QString& directory) {
+DirectoryPhotos loadDirectoryPhotos(const QString& directory, bool recursive) {
     DirectoryPhotos result;
+    result.recursive = recursive;
     const QString root = QDir(directory).absolutePath();
 
     const QList<domain::DiscoveredFile> files =
-        infrastructure::DirectoryScanner::enumerate(root, false, &result.error);
+        infrastructure::DirectoryScanner::enumerate(root, recursive, &result.error);
     if (!result.error.isEmpty()) {
         return result;
     }
@@ -27,6 +25,10 @@ DirectoryPhotos loadDirectoryPhotos(const QString& directory) {
     const domain::AssociationResult grouped = domain::StemAssociationResolver{}.resolve(
         collection, files, domain::AssociationConfig::defaults(), true);
 
+    // The resolver returns its assets ordered by relative directory and then by
+    // natural stem, which is the order to show them in: a subdirectory's photos
+    // belong together. Re-sorting on the display name would interleave trees,
+    // because the name a caption shows is a path once subdirectories are in.
     for (const domain::PhotoAsset& asset : grouped.assets) {
         // Anything with a preview is shown, ambiguous pairings and symlinks
         // included: those make a photo unsafe to move, not unsafe to look at.
@@ -36,11 +38,6 @@ DirectoryPhotos loadDirectoryPhotos(const QString& directory) {
         }
         result.photos.append(ui::AssetPresentation::from(asset));
     }
-
-    std::ranges::stable_sort(
-        result.photos, [](const ui::AssetPresentation& lhs, const ui::AssetPresentation& rhs) {
-            return domain::naturalLess(lhs.displayName, rhs.displayName);
-        });
     return result;
 }
 
