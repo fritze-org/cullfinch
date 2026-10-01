@@ -16,7 +16,7 @@ tooling = [
   "shellcheck-py==0.11.0.1",
   "actionlint-py-kjanat==1.13.0.41",
   "cmakelang==0.6.13",
-  "ruff==0.16.6",
+  "ruff==0.16.9",
 ]
 
 [tool.uv]
