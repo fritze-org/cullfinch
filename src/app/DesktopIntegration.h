@@ -5,6 +5,8 @@
 #include <QString>
 #include <QStringList>
 
+#include <span>
+
 /// Startup-time adjustments to how the desktop environment is used. These are
 /// decisions about the *environment* Cullfinch runs in, not about Cullfinch,
 /// which is why they live beside the composition root rather than in a widget.
@@ -67,15 +69,53 @@ void preferPortalDialogs();
 /// QApplication that populates the paths. Linux only.
 void pruneUnreachableIconThemePaths();
 
-/// Report the backend actually in use, and say so plainly when it is not the
-/// one this platform is built around.
+/// The platform the command line asks Qt for, or a null QString if it asks for none.
 ///
-/// A Wayland session that silently ends up on XCB through XWayland looks
-/// identical to a working native run until something subtle misbehaves, so the
-/// fallback is diagnosed rather than hidden. It is reported, never overridden:
-/// an explicit `-platform` choice by the user is theirs to make.
+/// Read the way QGuiApplication reads it: `-platform <spec>` or `--platform <spec>`, the last one
+/// winning, a trailing `-platform` with nothing after it ignored, and the value of Qt's other
+/// options -- `-platformtheme -platform xcb` sets a theme -- never mistaken for one. Must run
+/// before the QApplication is constructed, because Qt removes the option from argv as it consumes
+/// it.
+[[nodiscard]] QString platformRequestedOnCommandLine(std::span<char* const> arguments);
+
+/// Whether the platform backend Qt selected is a fallback worth warning about.
 ///
-/// @param program the executable's name, as the messages should call it.
-void reportPlatformBackend(const QString& program, const QString& version);
+/// A Wayland session that ends up on XCB through XWayland looks identical to a working native run
+/// until something subtle misbehaves (decision 0007), so that is reported. A backend the user
+/// named is theirs to choose and is not. The command line overrides QT_QPA_PLATFORM, as it does
+/// in Qt.
+///
+/// This takes the requested *value* and not merely whether one was given. A request is a
+/// `;`-separated fallback list, and `wayland;xcb` landing on `xcb` is exactly the silent fallback
+/// this exists to report. So only a first entry naming the backend in use counts as a choice.
+[[nodiscard]] bool platformFallbackDeservesWarning(const QString& backend, bool waylandSession,
+                                                   const QString& commandLinePlatform,
+                                                   const QString& environmentPlatform);
+
+/// The startup steps that must happen before the QApplication exists, and what they learn.
+///
+/// Construct it immediately before the QApplication. It reads the platform the command line asks
+/// for, which Qt removes from argv as it consumes it, and applies preferPortalDialogs(), which Qt
+/// reads as it starts. Holding the request here keeps each executable's main() from having to
+/// remember that ordering.
+class DesktopStartup {
+public:
+    explicit DesktopStartup(std::span<char* const> arguments);
+
+    /// Report the backend actually in use, and say so plainly when it is not the
+    /// one this platform is built around.
+    ///
+    /// A Wayland session that silently ends up on XCB through XWayland looks
+    /// identical to a working native run until something subtle misbehaves, so the
+    /// fallback is diagnosed rather than hidden. It is reported, never overridden,
+    /// and a backend the user named is not reported at all; see
+    /// platformFallbackDeservesWarning().
+    ///
+    /// @param program the executable's name, as the messages should call it.
+    void reportBackend(const QString& program, const QString& version) const;
+
+private:
+    QString commandLinePlatform_;
+};
 
 } // namespace cullfinch::app
