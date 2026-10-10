@@ -42,21 +42,32 @@ end_session() {
     # shell's group, and with it the caller. Fall back to the pid alone.
     if [[ -z "${group}" || -z "${cullfinch_own_group}" ||
         "${group}" == "${cullfinch_own_group}" ]]; then
-        kill "${pid}" 2>/dev/null || true
-        wait "${pid}" 2>/dev/null || true
-        return 0
+        end_and_reap "${pid}" "${pid}"
+    else
+        end_and_reap "-${group}" "${pid}"
     fi
+}
 
-    kill -TERM -- "-${group}" 2>/dev/null || true
-    wait "${pid}" 2>/dev/null || true
-
-    # An activated service is under no obligation to honour SIGTERM promptly.
-    # Wait for the group to empty, then insist: a straggler here is exactly the
-    # leak this function exists to prevent.
-    local _
+# end_and_reap <target> <pid>
+#
+# Send SIGTERM to <target>, a pid or a negated process group, and reap <pid>
+# once it is gone.
+#
+# Polling comes before `wait`, never after: `wait` has no timeout, so a process
+# that ignored SIGTERM would hang the helper there and the SIGKILL below would
+# never be sent. An activated service is under no obligation to honour SIGTERM
+# promptly, and a straggler here is exactly the leak this file exists to
+# prevent, so after a bounded wait it gets SIGKILL instead.
+end_and_reap() {
+    local target="$1" pid="$2" _
+    kill -TERM -- "${target}" 2>/dev/null || true
     for _ in $(seq 1 30); do
-        kill -0 -- "-${group}" 2>/dev/null || return 0
+        if ! kill -0 -- "${target}" 2>/dev/null; then
+            wait "${pid}" 2>/dev/null || true
+            return 0
+        fi
         sleep 0.1
     done
-    kill -KILL -- "-${group}" 2>/dev/null || true
+    kill -KILL -- "${target}" 2>/dev/null || true
+    wait "${pid}" 2>/dev/null || true
 }
