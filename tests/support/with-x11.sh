@@ -28,21 +28,32 @@ display=":${display_number}"
 xvfb_pid=""
 wm_pid=""
 
+# Ending the session's processes is subtler than killing two pids; the shared
+# helper beside this file explains why and provides end_session(). An Xvfb and
+# openbox pair from an interrupted run was found still alive a week later,
+# which is what this closes here.
+# shellcheck source=tests/support/session-processes.sh
+source "$(dirname "${BASH_SOURCE[0]}")/session-processes.sh"
+
 cleanup() {
     local status=$?
-    for pid in "${wm_pid}" "${xvfb_pid}"; do
-        if [[ -n "${pid}" ]] && kill -0 "${pid}" 2>/dev/null; then
-            kill "${pid}" 2>/dev/null || true
-            wait "${pid}" 2>/dev/null || true
-        fi
-    done
+    # The window manager first, so it is not left talking to a display that
+    # has already gone.
+    end_session "${wm_pid}"
+    end_session "${xvfb_pid}"
     rm -rf "${session_root}"
     return ${status}
 }
 trap cleanup EXIT INT TERM
 
+# `set -m` puts each of these in a process group of its own, so anything they
+# fork is ended with them rather than outliving the session. Job control is
+# switched straight back off: the test command runs in the foreground and has
+# no business being handed a terminal.
+set -m
 Xvfb "${display}" -screen 0 "${CULLFINCH_X11_RESOLUTION}" -nolisten tcp &
 xvfb_pid=$!
+set +m
 
 export DISPLAY="${display}"
 unset WAYLAND_DISPLAY
@@ -63,8 +74,10 @@ if ! xdpyinfo -display "${display}" >/dev/null 2>&1; then
 fi
 
 # Fullscreen transitions need a cooperating window manager.
+set -m
 openbox --sm-disable &
 wm_pid=$!
+set +m
 
 deadline=$((SECONDS + CULLFINCH_X11_TIMEOUT))
 while ((SECONDS < deadline)); do

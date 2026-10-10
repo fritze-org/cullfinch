@@ -126,6 +126,19 @@ cullfinch_add_test(
   LABELS "integration;native-trash-adjacent" PLATFORM offscreen
   TIMEOUT 300)
 
+# The one suite that uses the platform's real Trash, and so the only place infrastructure::
+# QtTrashAdapter and the "the reported Trash path still holds the group" assumption are checked
+# against an actual operating system rather than against a double that satisfies them by
+# construction. Opt-in: it does nothing unless CULLFINCH_NATIVE_TRASH_TESTS=1 is set, because it
+# writes into the Trash of whoever runs it. It removes only the paths it was handed back, and never
+# enumerates or empties anything else. Its own label, so no preset or job picks it up by accident.
+cullfinch_add_test(
+  tst_native_trash
+  SOURCES integration/tst_native_trash.cpp
+  DEPS cullfinch::cullfinch_infrastructure
+  LABELS native-trash PLATFORM offscreen
+  TIMEOUT 300)
+
 # Recovery after an actual process death, rather than after a journal snapshot replayed in-process.
 # The suite spawns cullfinch_crash_helper, which kills itself at a named journal write, and then
 # opens the same database. It runs in every row that runs the integration suites, sanitizers

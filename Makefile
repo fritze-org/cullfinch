@@ -1,7 +1,7 @@
 # Thin wrappers around the documented developer commands. CMake remains the
 # build implementation; this file must not duplicate its dependency graph.
 
-UV     := uv run --frozen --group tooling
+UV     := uv run --frozen --no-build --group tooling
 PRESET ?= dev
 
 .DEFAULT_GOAL := help
@@ -13,7 +13,7 @@ help: ## Show the available targets
 		| awk 'BEGIN {FS = ":.*?## "}; {printf "  \033[36m%-16s\033[0m %s\n", $$1, $$2}'
 
 hooks: ## Install the pinned tooling environment and Git hooks
-	uv sync --locked --group tooling
+	uv sync --locked --no-build --group tooling
 	$(UV) pre-commit install --install-hooks
 
 lint: ## Run the complete pre-commit suite against all tracked files
