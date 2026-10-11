@@ -5,10 +5,11 @@
 # and the developer reviews and stages the result; in CI any modification is a
 # failure with a downloadable diff. CI never commits formatting changes.
 #
-# Onboarding:
-#   uv sync --locked --group tooling
-#   uv run --frozen --group tooling pre-commit install --install-hooks
-#   uv run --frozen --group tooling pre-commit run --all-files
+# Onboarding (--no-build is what CI uses: wheels only, so no source
+# distribution's setup code runs while installing the tooling):
+#   uv sync --locked --no-build --group tooling
+#   uv run --frozen --no-build --group tooling pre-commit install --install-hooks
+#   uv run --frozen --no-build --group tooling pre-commit run --all-files
 minimum_pre_commit_version: '4.0.0'
 default_install_hook_types: [pre-commit, commit-msg]
 fail_fast: false
