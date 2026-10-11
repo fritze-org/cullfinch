@@ -42,9 +42,16 @@ public:
     /// to, and which photo and which generation it was asked for.
     [[nodiscard]] application::ImageResult answerFor(qsizetype index) const;
 
+    /// What this service reports as in use, for the cases about a host that
+    /// stops asking as the budget fills. A real service works this out from
+    /// what it has cached and what it is decoding; there is nothing here to
+    /// work it out from, so a case says.
+    void setMemoryUsedBytes(qint64 bytes);
+
 private:
     QList<application::ImageRequest> requests_;
     qint64 budget_ = 0;
+    qint64 used_ = 0;
 };
 
 } // namespace cullfinch::testsupport

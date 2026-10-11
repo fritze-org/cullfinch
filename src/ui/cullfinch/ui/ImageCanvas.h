@@ -79,6 +79,21 @@ public:
     void setLoadingDeferred(bool deferred);
     [[nodiscard]] bool isLoadingDeferred() const { return loadingDeferred_; }
 
+    /// Gives the decoded pixels back, keeping the photo.
+    ///
+    /// The counterpart to holding a decode back: a host showing far more
+    /// photos than fit on screen -- the standalone wall, pre-loading a whole
+    /// directory -- would otherwise keep every image it has ever scrolled
+    /// past. What it draws until the pixels return is the same placeholder it
+    /// drew before they first arrived, and lifting the hold asks again, which
+    /// the image service usually answers from its cache.
+    ///
+    /// Readiness drops with the pixels, so a host that gates decision input on
+    /// readiness -- the comparison wall and the versus panes do -- must not
+    /// call this for a photo somebody could be deciding about. A photo being
+    /// inspected keeps its pixels whatever the host asks.
+    void releasePixels();
+
     /// Wait this long after the last resize before asking for pixels at the
     /// new size, while a preview is already on screen. Meanwhile the preview
     /// already on screen is scaled.

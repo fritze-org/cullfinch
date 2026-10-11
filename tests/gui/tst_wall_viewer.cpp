@@ -91,6 +91,7 @@ private slots:
     void cleanup();
 
     void aDirectoryIsGroupedLikeTheBrowserGroupsIt();
+    void subdirectoriesAreEnteredOnlyWhenAsked();
     void anUnreadableDirectoryIsReportedNotShownEmpty();
     void anEmptyDirectorySaysSo();
     void aFittedWallShowsEveryPhotoWithoutScrolling();
@@ -177,6 +178,47 @@ void TestWallViewer::aDirectoryIsGroupedLikeTheBrowserGroupsIt() {
         return;
     }
     QVERIFY(window_->findChild<QLabel*>(QStringLiteral("viewerHiddenCount")) != nullptr);
+}
+
+void TestWallViewer::subdirectoriesAreEnteredOnlyWhenAsked() {
+    testsupport::TempCollection collection;
+    QVERIFY(collection.isValid());
+    QVERIFY(!collection.addJpeg(QStringLiteral("IMG_2.JPG")).isEmpty());
+    QVERIFY(collection.addDirectory(QStringLiteral("nested")));
+    QVERIFY(!collection.addJpeg(QStringLiteral("nested/IMG_1.JPG")).isEmpty());
+    // The same stem as the root's photo, one directory down. Pairing is per
+    // directory, so this is a RAW-only photo of its own and must not become the
+    // root photo's companion.
+    QVERIFY(!collection.addRaw(QStringLiteral("nested/IMG_2.RAF")).isEmpty());
+    QVERIFY(collection.addDirectory(QStringLiteral("nested/deeper")));
+    QVERIFY(!collection.addJpeg(QStringLiteral("nested/deeper/IMG_2.JPG")).isEmpty());
+
+    const viewer::DirectoryPhotos flat = viewer::loadDirectoryPhotos(collection.path());
+    QVERIFY2(flat.error.isEmpty(), qPrintable(flat.error));
+    QVERIFY(!flat.recursive);
+    QCOMPARE(flat.photos.size(), 1);
+    QCOMPARE(flat.withoutPreview, 0);
+
+    const viewer::DirectoryPhotos deep = viewer::loadDirectoryPhotos(collection.path(), true);
+    QVERIFY2(deep.error.isEmpty(), qPrintable(deep.error));
+    QVERIFY(deep.recursive);
+
+    // Every directory below the root, deepest included, ordered by directory
+    // first and then by natural stem: a subdirectory's photos stay together
+    // rather than interleaving with the root's. The caption names the path,
+    // which is what tells two photos with one filename apart.
+    QCOMPARE(deep.photos.size(), 3);
+    QCOMPARE(deep.photos.at(0).displayName, QStringLiteral("IMG_2"));
+    QCOMPARE(deep.photos.at(0).rawCount, 0);
+    QCOMPARE(deep.photos.at(1).displayName, QStringLiteral("nested/IMG_1"));
+    QCOMPARE(deep.photos.at(2).displayName, QStringLiteral("nested/deeper/IMG_2"));
+    QCOMPARE(deep.withoutPreview, 1);
+
+    show(deep, 0);
+    if (QTest::currentTestFailed()) {
+        return;
+    }
+    QCOMPARE(window_->surface()->order().size(), 3);
 }
 
 void TestWallViewer::anUnreadableDirectoryIsReportedNotShownEmpty() {

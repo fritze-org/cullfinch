@@ -36,6 +36,35 @@ void PreviewLoader::setSource(const AssetPresentation& presentation, quint64 gen
     Q_EMIT changed();
 }
 
+void PreviewLoader::release() {
+    if (fitted_.isNull() && full_.isNull() && !ready_ && !fullResolutionReady_) {
+        return; // Nothing held, so nothing to report either.
+    }
+    const bool wasReady = ready_;
+    // The source, its fingerprint, its native size and any reported error stay:
+    // what this loader shows has not changed, only whether the pixels for it
+    // are in memory. The native size in particular is what keeps a host's
+    // layout still while the image is away, and a failure that was reported is
+    // still true.
+    fitted_ = QImage();
+    full_ = QImage();
+    ready_ = false;
+    fullResolutionReady_ = false;
+    // Disowned, not cancelled: an answer for either of these describes pixels
+    // this loader has just given up, and a decode already running still warms
+    // the service's cache for when the photo comes back.
+    fitRequestId_ = 0;
+    fullRequestId_ = 0;
+
+    if (wasReady) {
+        // Only when there was readiness to lose: a host that gates anything on
+        // it must not be told a photo stopped being decidable when it never
+        // started.
+        Q_EMIT readinessChanged(false);
+    }
+    Q_EMIT changed();
+}
+
 application::ImageRequest PreviewLoader::requestFor(application::ImageRequestClass kind) const {
     // The identity every answer is matched against: a refinement that arrives
     // after the source changed must be recognisable as belonging to the photo
