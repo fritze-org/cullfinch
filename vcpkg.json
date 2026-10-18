@@ -25,6 +25,13 @@
         "widgets",
         "zstd"
       ]
+    },
+    {
+      "name": "exiv2",
+      "default-features": false,
+      "features": [
+        "xmp"
+      ]
     }
   ],
   "features": {

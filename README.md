@@ -22,6 +22,12 @@ belongs with it.
   size you can change (slider, Ctrl+wheel, Ctrl+`+`/`-`, Ctrl+0 to fit) and a grid that scrolls.
   `-r`/`--recursive` takes in the subfolders too, captioning each photo with its path. It has no
   session, no marks and no database, and cannot change a file.
+- **Or crop.** `cullfinch-crop DIR` shows each photo in a folder in turn: drag a rectangle, press
+  Enter to save it and move on, Space to skip, ← to go back. Number keys pick the shape (1 the
+  photo's own, then 3:2, 4:3, 1:1, 16:9, free) and R turns it. The crop is written beside the
+  photo as `NAME.crop.jpg` with its metadata, and into the Camera Raw sidecar `NAME.xmp` for a RAW
+  companion; the original is never changed. A second run picks up where the first stopped;
+  `--redo` shows every photo again.
 - **Eliminating is not deleting.** A comparison only builds a draft. Finishing it turns the
   decisions into collection-level deletion marks, which are undoable.
 - **Deleting is a separate, reviewed step.** *Review file operations* lists every physical file,

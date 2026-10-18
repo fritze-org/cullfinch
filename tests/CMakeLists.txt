@@ -56,6 +56,13 @@ cullfinch_add_test(
   DEPS cullfinch::cullfinch_flow_wall
   LABELS unit PLATFORM offscreen)
 
+# The crop tool's rectangle arithmetic: shapes, drags, rounding and the EXIF orientation table.
+cullfinch_add_test(
+  tst_crop_geometry
+  SOURCES unit/tst_crop_geometry.cpp
+  DEPS cullfinch::cullfinch_cropper
+  LABELS unit PLATFORM offscreen)
+
 cullfinch_add_test(
   tst_flow_registry
   SOURCES unit/tst_flow_registry.cpp unit/ConformanceFlow.h
@@ -95,6 +102,17 @@ cullfinch_add_test(
   tst_directory_scanner
   SOURCES integration/tst_directory_scanner.cpp
   DEPS cullfinch::cullfinch_infrastructure cullfinch::cullfinch_testsupport
+  LABELS integration PLATFORM offscreen
+  TIMEOUT 300)
+
+# What the crop tool reads and writes, on real files: which photos a run covers, the cropped JPG and
+# its metadata, and the Camera Raw sidecar. The suite reads and plants metadata with exiv2 itself,
+# so it finds the package as the tool does.
+find_package(exiv2 CONFIG REQUIRED)
+cullfinch_add_test(
+  tst_crop_files
+  SOURCES integration/tst_crop_files.cpp
+  DEPS cullfinch::cullfinch_cropper cullfinch::cullfinch_testsupport Exiv2::exiv2lib
   LABELS integration PLATFORM offscreen
   TIMEOUT 300)
 
@@ -197,6 +215,16 @@ cullfinch_add_test(
   tst_wall_viewer
   SOURCES gui/tst_wall_viewer.cpp gui/GuiFixture.h
   DEPS cullfinch::cullfinch_viewer cullfinch::cullfinch_composition cullfinch::cullfinch_testsupport
+  LABELS gui
+  TIMEOUT 120)
+
+# The crop tool's window against an image service that answers on command and a writer that only
+# records what it was asked to write.
+cullfinch_add_test(
+  tst_crop_tool
+  SOURCES gui/tst_crop_tool.cpp gui/GuiFixture.h
+  DEPS cullfinch::cullfinch_cropper cullfinch::cullfinch_composition
+       cullfinch::cullfinch_testsupport
   LABELS gui
   TIMEOUT 120)
 
