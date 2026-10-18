@@ -81,6 +81,32 @@ std::pair<double, double> span(double fixed, double moving, double length) {
     return {moving >= fixed ? fixed : fixed - length, length};
 }
 
+/// Where displayed point (u, v) is found in the stored pixels under EXIF
+/// orientation `orientation`. The displayed image is the stored one after the
+/// transform the tag names, so this is that transform's inverse.
+QPointF storedPoint(const QPointF& point, int orientation) {
+    const double u = point.x();
+    const double v = point.y();
+    switch (orientation) {
+    case 2: // Mirrored horizontally.
+        return {1.0 - u, v};
+    case 3: // Rotated 180 degrees.
+        return {1.0 - u, 1.0 - v};
+    case 4: // Mirrored vertically.
+        return {u, 1.0 - v};
+    case 5: // Transposed.
+        return {v, u};
+    case 6: // Shown rotated 90 degrees clockwise.
+        return {v, 1.0 - u};
+    case 7: // Transversed.
+        return {1.0 - v, 1.0 - u};
+    case 8: // Shown rotated 90 degrees counter-clockwise.
+        return {1.0 - v, u};
+    default:
+        return point;
+    }
+}
+
 } // namespace
 
 std::optional<AspectPreset> presetForDigit(int digit) {
@@ -108,27 +134,28 @@ double pixelRatio(AspectChoice choice, const QSizeF& image) {
         return 0.0;
     }
     double ratio = 0.0;
+    using enum AspectPreset;
     switch (choice.preset) {
-    case AspectPreset::Original:
+    case Original:
         ratio = image.width() / image.height();
         break;
-    case AspectPreset::ThreeTwo:
+    case ThreeTwo:
         ratio = 3.0 / 2.0;
         break;
-    case AspectPreset::FourThree:
+    case FourThree:
         ratio = 4.0 / 3.0;
         break;
-    case AspectPreset::Square:
+    case Square:
         ratio = 1.0;
         break;
-    case AspectPreset::SixteenNine:
+    case SixteenNine:
         ratio = 16.0 / 9.0;
         break;
-    case AspectPreset::Free:
+    case Free:
         return 0.0;
     }
     // A named shape follows the photo: 3:2 on a portrait photo is 2:3.
-    if (choice.preset != AspectPreset::Original && image.height() > image.width()) {
+    if (choice.preset != Original && image.height() > image.width()) {
         ratio = 1.0 / ratio;
     }
     return choice.swapped ? 1.0 / ratio : ratio;
@@ -211,22 +238,23 @@ QRectF adjustRect(const QRectF& start, Handle handle, const QPointF& delta, doub
     const QRectF from = toPixelSpace(start, image);
     const QPointF shift(delta.x() * image.width(), delta.y() * image.height());
 
+    using enum Handle;
     switch (handle) {
-    case Handle::None:
+    case None:
         return start;
-    case Handle::Move:
+    case Move:
         return toNormalised(shiftInside(from.translated(shift), image), image);
-    case Handle::TopLeft:
+    case TopLeft:
         return dragRect(start.bottomRight(), start.topLeft() + delta, ratio, image);
-    case Handle::TopRight:
+    case TopRight:
         return dragRect(start.bottomLeft(), start.topRight() + delta, ratio, image);
-    case Handle::BottomLeft:
+    case BottomLeft:
         return dragRect(start.topRight(), start.bottomLeft() + delta, ratio, image);
-    case Handle::BottomRight:
+    case BottomRight:
         return dragRect(start.topLeft(), start.bottomRight() + delta, ratio, image);
-    case Handle::Left:
-    case Handle::Right: {
-        const bool left = handle == Handle::Left;
+    case Left:
+    case Right: {
+        const bool left = handle == Left;
         const double fixed = left ? from.right() : from.left();
         const double moving =
             std::clamp((left ? from.left() : from.right()) + shift.x(), 0.0, image.width());
@@ -244,9 +272,9 @@ QRectF adjustRect(const QRectF& start, Handle handle, const QPointF& delta, doub
         const double y = ratio > 0.0 ? middle - height / 2.0 : from.top();
         return toNormalised(shiftInside(QRectF(x, y, w, height), image), image);
     }
-    case Handle::Top:
-    case Handle::Bottom: {
-        const bool top = handle == Handle::Top;
+    case Top:
+    case Bottom: {
+        const bool top = handle == Top;
         const double fixed = top ? from.bottom() : from.top();
         const double moving =
             std::clamp((top ? from.top() : from.bottom()) + shift.y(), 0.0, image.height());
@@ -281,32 +309,9 @@ QRect toPixels(const QRectF& rect, const QSize& size) {
 }
 
 QRectF toStoredFrame(const QRectF& rect, int orientation) {
-    // Where displayed point (u, v) is found in the stored pixels, for each
-    // EXIF orientation. The displayed image is the stored one after the
-    // transform the tag names, so this is that transform's inverse.
-    const auto stored = [orientation](const QPointF& point) -> QPointF {
-        const double u = point.x();
-        const double v = point.y();
-        switch (orientation) {
-        case 2: // Mirrored horizontally.
-            return {1.0 - u, v};
-        case 3: // Rotated 180 degrees.
-            return {1.0 - u, 1.0 - v};
-        case 4: // Mirrored vertically.
-            return {u, 1.0 - v};
-        case 5: // Transposed.
-            return {v, u};
-        case 6: // Shown rotated 90 degrees clockwise.
-            return {v, 1.0 - u};
-        case 7: // Transversed.
-            return {1.0 - v, 1.0 - u};
-        case 8: // Shown rotated 90 degrees counter-clockwise.
-            return {1.0 - v, u};
-        default:
-            return point;
-        }
-    };
-    return QRectF(stored(rect.topLeft()), stored(rect.bottomRight())).normalized();
+    return QRectF(storedPoint(rect.topLeft(), orientation),
+                  storedPoint(rect.bottomRight(), orientation))
+        .normalized();
 }
 
 } // namespace cullfinch::cropper

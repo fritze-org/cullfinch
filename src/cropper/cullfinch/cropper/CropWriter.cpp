@@ -131,6 +131,24 @@ QString writeJpegCrop(const QString& sourcePath, const QRectF& rect) {
 
     QImageReader reader(sourcePath);
     reader.setAutoTransform(true); // The crop was drawn on the upright photo.
+
+    // The crop needs every pixel, under the same allocation limit as 100%
+    // inspection -- QtImageService sets it, and it is process-wide, so it is
+    // read here rather than raised. A photo past it still previews, because
+    // previews decode scaled; without this check its save would fail as
+    // "could not be read", which says nothing about why.
+    const QSize native = reader.size();
+    const qint64 limitBytes = static_cast<qint64>(QImageReader::allocationLimit()) * 1024 * 1024;
+    if (native.isValid() && limitBytes > 0 &&
+        static_cast<qint64>(native.width()) * native.height() * 4 > limitBytes) {
+        return tr("'%1' is %2 × %3 pixels, more than the %4 MB a decoded photo may use; it "
+                  "cannot be cropped here.")
+            .arg(sourcePath)
+            .arg(native.width())
+            .arg(native.height())
+            .arg(QImageReader::allocationLimit());
+    }
+
     const QImage image = reader.read();
     if (image.isNull()) {
         return tr("'%1' could not be read: %2").arg(sourcePath, reader.errorString());

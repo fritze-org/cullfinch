@@ -37,7 +37,7 @@ public:
     /// this run, shown again on the way back; without one the crop starts as
     /// the largest of the current aspect.
     void setPhoto(const ui::AssetPresentation& presentation, quint64 generation,
-                  std::optional<QRectF> remembered = std::nullopt);
+                  const std::optional<QRectF>& remembered = std::nullopt);
 
     [[nodiscard]] ui::PreviewLoader* preview() const { return preview_; }
     [[nodiscard]] bool isReady() const { return preview_->isReady(); }

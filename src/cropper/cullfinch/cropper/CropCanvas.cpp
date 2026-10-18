@@ -49,7 +49,7 @@ CropCanvas::CropCanvas(application::IImageService& images, QWidget* parent)
 }
 
 void CropCanvas::setPhoto(const ui::AssetPresentation& presentation, quint64 generation,
-                          std::optional<QRectF> remembered) {
+                          const std::optional<QRectF>& remembered) {
     drag_ = {};
     refinement_->stop();
     preview_->setSource(presentation, generation);
@@ -268,27 +268,28 @@ QPointF CropCanvas::toNormalised(const QPointF& position) const {
 }
 
 void CropCanvas::updateCursor(Handle handle) {
+    using enum Handle;
     switch (handle) {
-    case Handle::None:
+    case None:
         setCursor(isReady() ? Qt::CrossCursor : Qt::ArrowCursor);
         break;
-    case Handle::Move:
+    case Move:
         setCursor(Qt::SizeAllCursor);
         break;
-    case Handle::Left:
-    case Handle::Right:
+    case Left:
+    case Right:
         setCursor(Qt::SizeHorCursor);
         break;
-    case Handle::Top:
-    case Handle::Bottom:
+    case Top:
+    case Bottom:
         setCursor(Qt::SizeVerCursor);
         break;
-    case Handle::TopLeft:
-    case Handle::BottomRight:
+    case TopLeft:
+    case BottomRight:
         setCursor(Qt::SizeFDiagCursor);
         break;
-    case Handle::TopRight:
-    case Handle::BottomLeft:
+    case TopRight:
+    case BottomLeft:
         setCursor(Qt::SizeBDiagCursor);
         break;
     }

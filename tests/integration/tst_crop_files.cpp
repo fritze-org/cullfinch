@@ -147,6 +147,7 @@ private slots:
 
     void theCropIsWrittenBesideTheUntouchedOriginal();
     void aSecondCropReplacesTheFirst();
+    void aPhotoPastTheAllocationLimitIsRefusedByName();
     void metadataTravelsWithTheCropTurnedUpright();
     void theStoredFrameMatchesWhatTheDecoderShows_data();
     void theStoredFrameMatchesWhatTheDecoderShows();
@@ -253,6 +254,24 @@ void TestCropFiles::aSecondCropReplacesTheFirst() {
     // The original's extension is kept as it is spelt.
     const QString output = collection.filePath(QStringLiteral("IMG_1.crop.JPG"));
     QCOMPARE(QImageReader(output).size(), QSize(50, 50));
+    QVERIFY(noPartialFiles(collection.path()));
+}
+
+void TestCropFiles::aPhotoPastTheAllocationLimitIsRefusedByName() {
+    testsupport::TempCollection collection;
+    QVERIFY(collection.isValid());
+    const QString source = collection.filePath(QStringLiteral("IMG_1.jpg"));
+    // 4 MB decoded, against a limit of 1 MB.
+    QVERIFY(writeJpeg(halves(QSize(1024, 1024)), source));
+
+    const int previous = QImageReader::allocationLimit();
+    QImageReader::setAllocationLimit(1);
+    const QString error = writeJpegCrop(source, QRectF(0.0, 0.0, 0.5, 0.5));
+    QImageReader::setAllocationLimit(previous);
+
+    // The reason, not "could not be read".
+    QVERIFY2(error.contains(QStringLiteral("1024 × 1024")), qPrintable(error));
+    QVERIFY(!QFileInfo::exists(cropOutputPath(source)));
     QVERIFY(noPartialFiles(collection.path()));
 }
 
