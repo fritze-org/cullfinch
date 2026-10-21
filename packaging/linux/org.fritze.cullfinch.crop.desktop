@@ -1,0 +1,13 @@
+[Desktop Entry]
+Type=Application
+Name=Cullfinch Crop
+GenericName=Photo cropper
+Comment=Crop every photo in a folder, one after another, without changing the originals
+Icon=org.fritze.cullfinch
+Exec=cullfinch-crop %f
+Terminal=false
+Categories=Graphics;Photography;
+MimeType=inode/directory;
+Keywords=photo;crop;jpeg;raw;xmp;
+StartupNotify=true
+StartupWMClass=org.fritze.cullfinch.crop

@@ -60,6 +60,7 @@ add_subdirectory(src/views/versus)
 add_subdirectory(src/views/wall)
 add_subdirectory(src/app)
 add_subdirectory(src/viewer)
+add_subdirectory(src/cropper)
 
 if(CULLFINCH_BUILD_TESTING)
   enable_testing()

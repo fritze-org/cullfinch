@@ -59,6 +59,7 @@ ui/            browser, shared comparison shell, image widgets
 views/*/       one view per flow, paired by a stable string id
 app/           composition root; the only place that knows every concrete adapter
 viewer/        standalone wall viewer (cullfinch-wall): scanner + wall surface, no session
+cropper/       standalone crop tool (cullfinch-crop): writes NAME.crop.jpg and NAME.xmp, never an original
 ```
 
 Three ideas carry most of the design:

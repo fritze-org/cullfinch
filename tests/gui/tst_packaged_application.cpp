@@ -24,13 +24,20 @@ private slots:
     void completesASmokeRunAgainstARealJpeg();
     void theWallViewerReportsItsVersion();
     void theWallViewerCompletesASmokeRunAgainstARealJpeg();
+    void theCropToolReportsItsVersion();
+    void theCropToolCompletesASmokeRunAgainstARealJpeg();
 
 private:
-    /// The standalone wall viewer the same package installs next to the
-    /// application. Found from the application's path rather than named by the
-    /// workflow, so a package that forgets it fails here instead of being
-    /// tested without it.
-    [[nodiscard]] QString wallViewerBinary() const;
+    /// A standalone tool the same package installs next to the application,
+    /// such as `cullfinch-wall`. Found from the application's path rather than
+    /// named by the workflow, so a package that forgets one fails here instead
+    /// of being tested without it.
+    [[nodiscard]] QString companionBinary(const QString& name) const;
+    /// `--version` of a companion answers with its own name.
+    void checkCompanionVersion(const QString& name);
+    /// `--smoke` of a companion decodes a real JPEG through the deployed
+    /// plugins, in a window on the deployed platform plugin.
+    void checkCompanionSmoke(const QString& name);
 
     [[nodiscard]] static QProcessEnvironment cleanEnvironment(const QString& dataDirectory,
                                                               const QString& cacheDirectory);
@@ -132,36 +139,35 @@ void TestPackagedApplication::completesASmokeRunAgainstARealJpeg() {
     }
 }
 
-QString TestPackagedApplication::wallViewerBinary() const {
+QString TestPackagedApplication::companionBinary(const QString& name) const {
 #if defined(Q_OS_MACOS)
-    // <prefix>/cullfinch.app/Contents/MacOS/cullfinch, beside which the
-    // viewer is a bundle of its own.
+    // <prefix>/cullfinch.app/Contents/MacOS/cullfinch, beside which each
+    // companion is a bundle of its own.
     QDir prefix = QFileInfo(binary_).absoluteDir();
     prefix.cd(QStringLiteral("../../.."));
-    return prefix.filePath(QStringLiteral("cullfinch-wall.app/Contents/MacOS/cullfinch-wall"));
+    return prefix.filePath(name + QStringLiteral(".app/Contents/MacOS/") + name);
 #else
-    return QFileInfo(binary_).absoluteDir().filePath(QStringLiteral("cullfinch-wall"));
+    return QFileInfo(binary_).absoluteDir().filePath(name);
 #endif
 }
 
-void TestPackagedApplication::theWallViewerReportsItsVersion() {
-    const QString viewer = wallViewerBinary();
-    QVERIFY2(QFileInfo(viewer).isExecutable(), qPrintable(viewer));
+void TestPackagedApplication::checkCompanionVersion(const QString& name) {
+    const QString companion = companionBinary(name);
+    QVERIFY2(QFileInfo(companion).isExecutable(), qPrintable(companion));
 
     QTemporaryDir data;
     QTemporaryDir cache;
     QProcess process;
     process.setProcessEnvironment(cleanEnvironment(data.path(), cache.path()));
-    process.start(viewer, {QStringLiteral("--version")});
-    QVERIFY2(process.waitForFinished(60000), "the packaged wall viewer did not start");
+    process.start(companion, {QStringLiteral("--version")});
+    QVERIFY2(process.waitForFinished(60000), qPrintable(name + QStringLiteral(" did not start")));
     QCOMPARE(process.exitCode(), 0);
-    QVERIFY(QString::fromUtf8(process.readAllStandardOutput())
-                .contains(QStringLiteral("cullfinch-wall")));
+    QVERIFY(QString::fromUtf8(process.readAllStandardOutput()).contains(name));
 }
 
-void TestPackagedApplication::theWallViewerCompletesASmokeRunAgainstARealJpeg() {
-    const QString viewer = wallViewerBinary();
-    QVERIFY2(QFileInfo(viewer).isExecutable(), qPrintable(viewer));
+void TestPackagedApplication::checkCompanionSmoke(const QString& name) {
+    const QString companion = companionBinary(name);
+    QVERIFY2(QFileInfo(companion).isExecutable(), qPrintable(companion));
 
     TempCollection collection;
     QVERIFY(collection.isValid());
@@ -173,9 +179,10 @@ void TestPackagedApplication::theWallViewerCompletesASmokeRunAgainstARealJpeg() 
     QTemporaryDir cache;
     QProcess process;
     process.setProcessEnvironment(cleanEnvironment(data.path(), cache.path()));
-    process.start(viewer, {QStringLiteral("--smoke"), collection.path()});
+    process.start(companion, {QStringLiteral("--smoke"), collection.path()});
 
-    QVERIFY2(process.waitForFinished(120000), "the wall viewer's smoke run did not finish");
+    QVERIFY2(process.waitForFinished(120000),
+             qPrintable(name + QStringLiteral("'s smoke run did not finish")));
     const QString output = QString::fromUtf8(process.readAllStandardOutput()) +
                            QString::fromUtf8(process.readAllStandardError());
     QVERIFY2(process.exitCode() == 0, qPrintable(output));
@@ -190,6 +197,24 @@ void TestPackagedApplication::theWallViewerCompletesASmokeRunAgainstARealJpeg() 
             qPrintable(
                 QStringLiteral("expected backend '%1'; output was:\n%2").arg(expected, output)));
     }
+}
+
+void TestPackagedApplication::theWallViewerReportsItsVersion() {
+    checkCompanionVersion(QStringLiteral("cullfinch-wall"));
+}
+
+void TestPackagedApplication::theWallViewerCompletesASmokeRunAgainstARealJpeg() {
+    checkCompanionSmoke(QStringLiteral("cullfinch-wall"));
+}
+
+void TestPackagedApplication::theCropToolReportsItsVersion() {
+    checkCompanionVersion(QStringLiteral("cullfinch-crop"));
+}
+
+void TestPackagedApplication::theCropToolCompletesASmokeRunAgainstARealJpeg() {
+    // The crop tool also links the metadata library, which the deployment
+    // has to carry along: a package without it does not start at all.
+    checkCompanionSmoke(QStringLiteral("cullfinch-crop"));
 }
 
 QTEST_MAIN(TestPackagedApplication)

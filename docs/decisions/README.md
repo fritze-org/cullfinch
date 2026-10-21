@@ -17,3 +17,4 @@ departs from it, and why.
 | [0009](0009-visual-regression-references.md) | Visual regression references are committed, and keyed by rendering environment |
 | [0010](0010-preview-loader.md) | Decode bookkeeping lives in a `PreviewLoader`, not in `ImageCanvas` |
 | [0011](0011-standalone-wall-viewer.md) | The standalone wall viewer is a second executable that decides nothing |
+| [0012](0012-standalone-crop-tool.md) | The crop tool is a third executable, and writes only new files beside a photo |

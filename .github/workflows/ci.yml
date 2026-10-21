@@ -40,7 +40,7 @@ env:
   # major but, mirroring only tagged releases, will not always agree with
   # either channel on the patch digit.
   CULLFINCH_LLVM_MAJOR: '23'
-  CULLFINCH_LLVM_VERSION_APT: '23.1.2'
+  CULLFINCH_LLVM_VERSION_APT: '23.1.4'
   CULLFINCH_LLVM_VERSION_BREW: '23.1.0'
   # apt.llvm.org serves llvm.sh from a mutable path, and both LLVM install
   # steps below run it as root. These name the same script byte for byte --
