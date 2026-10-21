@@ -105,6 +105,7 @@ private slots:
     void escapeStartsTheCropOver();
     void passingTheLastPhotoClosesTheWindow();
     void aFailedWriteKeepsTheWindowOpen();
+    void aWriteThatFailsWhileClosingKeepsTheWindowOpen();
 
 private:
     void show(int count);
@@ -345,6 +346,26 @@ void TestCropTool::aFailedWriteKeepsTheWindowOpen() {
     sendKey(window_.get(), Qt::Key_Left);
     deliverEverything();
     QVERIFY(isWholeImage(window_->canvas()->cropRect()));
+}
+
+void TestCropTool::aWriteThatFailsWhileClosingKeepsTheWindowOpen() {
+    show(2);
+    if (QTest::currentTestFailed()) {
+        return;
+    }
+    log_->failWith = QStringLiteral("disk full");
+    deliverEverything();
+    drag(window_->canvas(), onPhoto(0.2, 0.2), onPhoto(0.6, 0.6));
+    sendKey(window_.get(), Qt::Key_Return);
+
+    // Closed while the write is still outstanding: waiting for it is what
+    // brings the failure in, and the window must not go before it is seen.
+    QVERIFY(!window_->close());
+    QVERIFY(window_->isVisible());
+    QCOMPARE(window_->failures(), QStringList{QStringLiteral("disk full")});
+
+    // Nothing is pending any more, so the next attempt to leave goes through.
+    QVERIFY(window_->close());
 }
 
 QTEST_MAIN(TestCropTool)

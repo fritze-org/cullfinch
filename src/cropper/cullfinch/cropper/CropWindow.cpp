@@ -168,7 +168,15 @@ void CropWindow::closeEvent(QCloseEvent* event) {
         message_->setText(tr("Writing %n crop(s)…", nullptr, pending_));
         message_->repaint();
     }
+    const qsizetype failuresBefore = failures_.size();
     waitForSaves();
+    if (failures_.size() > failuresBefore) {
+        // A write failed while the window was closing: keep the error on
+        // screen rather than let anyone leave believing the crop exists. A
+        // second close finds nothing pending and goes through.
+        event->ignore();
+        return;
+    }
     event->accept();
 }
 
