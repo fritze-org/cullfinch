@@ -7,6 +7,8 @@
 #include <QFileInfo>
 #include <QStandardPaths>
 
+#include <tuple>
+
 namespace cullfinch::infrastructure {
 
 namespace {
@@ -25,15 +27,16 @@ namespace {
 void ensureHomeTrashParentExists() {
 #if defined(Q_OS_UNIX) && !defined(Q_OS_DARWIN)
     const QString dataHome = QStandardPaths::writableLocation(QStandardPaths::GenericDataLocation);
-    if (dataHome.isEmpty() || QFileInfo::exists(dataHome)) {
+    if (QFileInfo::exists(dataHome)) {
         return;
     }
     // mkpath() creates the missing ancestors with the process umask; the leaf
-    // is tightened afterwards to the 0700 the specification asks for.
-    if (QDir().mkpath(dataHome)) {
-        QFile::setPermissions(dataHome, QFileDevice::ReadOwner | QFileDevice::WriteOwner |
-                                            QFileDevice::ExeOwner);
-    }
+    // is tightened afterwards to the 0700 the specification asks for. Neither
+    // result is checked: if the directory could not be made, setting its
+    // permissions fails too, and Qt's own move reports the failure.
+    std::ignore = QDir().mkpath(dataHome);
+    std::ignore = QFile::setPermissions(dataHome, QFileDevice::ReadOwner | QFileDevice::WriteOwner |
+                                                      QFileDevice::ExeOwner);
 #endif
 }
 
