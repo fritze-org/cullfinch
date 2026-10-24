@@ -2,11 +2,13 @@
 //
 // The only suite that asks the platform's real Trash for anything.
 //
-// Every other suite uses FakeTrashAdapter, which leaves two things unverified:
-// infrastructure::QtTrashAdapter itself, and the assumption recovery is built
-// on -- that when the platform reports a Trash path, that path still holds the
-// group directory, manifest and all. Neither can be checked against a double,
-// because the double is what implements them correctly by construction.
+// Every other suite uses FakeTrashAdapter or, in tst_trash_adapter, a Trash
+// redirected into a temporary directory. That leaves two things unverified:
+// infrastructure::QtTrashAdapter against the Trash people actually use, and
+// the assumption recovery is built on -- that when the platform reports a
+// Trash path, that path still holds the group directory, manifest and all.
+// Neither can be checked against a double, because the double is what
+// implements them correctly by construction.
 //
 // Opt-in, because it writes into the Trash of whoever runs it:
 //
@@ -34,7 +36,6 @@
 #include <QDir>
 #include <QFile>
 #include <QFileInfo>
-#include <QScopeGuard>
 #include <QString>
 #include <QStringList>
 #include <QTest>
@@ -176,7 +177,6 @@ private slots:
     void initTestCase();
     void refusesAPathThatIsNotThere();
     void trashesADirectoryWholeAndReportsWhereItWent();
-    void createsAMissingDataHomeBeforeTrashing();
     void recoveryConfirmsTheOutcomeFromTheReportedPath();
     void cleanupTestCase();
 
@@ -269,48 +269,6 @@ void TestNativeTrash::trashesADirectoryWholeAndReportsWhereItWent() {
                  .size(),
              manifest.size());
     QVERIFY(QFileInfo::exists(QDir(resultingPath).absoluteFilePath(QStringLiteral("A.RAF"))));
-}
-
-/// A fresh account has no $XDG_DATA_HOME yet, and Qt's freedesktop Trash only
-/// creates the last path component: without the adapter making the data home
-/// first, the move fails with "Bad file descriptor". That is how a GitHub
-/// runner, which has no ~/.local/share, failed this suite.
-///
-/// The data home is pointed inside the fixture, so the Trash this case
-/// creates is removed with it and nobody's real Trash is involved.
-void TestNativeTrash::createsAMissingDataHomeBeforeTrashing() {
-#if !defined(Q_OS_UNIX) || defined(Q_OS_DARWIN)
-    QSKIP("$XDG_DATA_HOME only decides where the Trash is on freedesktop platforms.");
-#else
-    const NativeFixture fixture;
-    QVERIFY(fixture.isValid());
-
-    const QString dataHome = fixture.filePath(QStringLiteral("never-made/share"));
-    QVERIFY(!QFileInfo::exists(dataHome));
-
-    const QByteArray previous = qgetenv("XDG_DATA_HOME");
-    const bool hadPrevious = qEnvironmentVariableIsSet("XDG_DATA_HOME");
-    qputenv("XDG_DATA_HOME", QFile::encodeName(dataHome));
-    const auto restore = qScopeGuard([&] {
-        if (hadPrevious) {
-            qputenv("XDG_DATA_HOME", previous);
-        } else {
-            qunsetenv("XDG_DATA_HOME");
-        }
-    });
-
-    QVERIFY(QDir(fixture.path()).mkpath(QStringLiteral("group")));
-    const QString group = fixture.filePath(QStringLiteral("group"));
-    QVERIFY(fixture.write(QStringLiteral("group/A.RAF"), QByteArrayLiteral("RAWDATA")));
-
-    infrastructure::QtTrashAdapter adapter;
-    QString resultingPath;
-    QString error;
-    QVERIFY2(adapter.moveToTrash(group, &resultingPath, &error), qPrintable(error));
-    QVERIFY(!QFileInfo::exists(group));
-    QCOMPARE(resultingPath, QDir(dataHome).absoluteFilePath(QStringLiteral("Trash/files/group")));
-    QVERIFY(QFileInfo::exists(QDir(resultingPath).absoluteFilePath(QStringLiteral("A.RAF"))));
-#endif
 }
 
 /// The assumption recovery is built on, checked end to end against the real
