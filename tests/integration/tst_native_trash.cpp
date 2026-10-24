@@ -2,11 +2,13 @@
 //
 // The only suite that asks the platform's real Trash for anything.
 //
-// Every other suite uses FakeTrashAdapter, which leaves two things unverified:
-// infrastructure::QtTrashAdapter itself, and the assumption recovery is built
-// on -- that when the platform reports a Trash path, that path still holds the
-// group directory, manifest and all. Neither can be checked against a double,
-// because the double is what implements them correctly by construction.
+// Every other suite uses FakeTrashAdapter or, in tst_trash_adapter, a Trash
+// redirected into a temporary directory. That leaves two things unverified:
+// infrastructure::QtTrashAdapter against the Trash people actually use, and
+// the assumption recovery is built on -- that when the platform reports a
+// Trash path, that path still holds the group directory, manifest and all.
+// Neither can be checked against a double, because the double is what
+// implements them correctly by construction.
 //
 // Opt-in, because it writes into the Trash of whoever runs it:
 //

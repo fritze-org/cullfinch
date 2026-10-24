@@ -144,6 +144,16 @@ cullfinch_add_test(
   LABELS "integration;native-trash-adjacent" PLATFORM offscreen
   TIMEOUT 300)
 
+# QtTrashAdapter against the real platform code with $XDG_DATA_HOME pointed into a temporary
+# directory, so the Trash it writes is its own and goes with that directory. Unlike tst_native_trash
+# it needs no opt-in and runs wherever the integration suites do; on macOS it skips.
+cullfinch_add_test(
+  tst_trash_adapter
+  SOURCES integration/tst_trash_adapter.cpp
+  DEPS cullfinch::cullfinch_infrastructure
+  LABELS "integration;native-trash-adjacent" PLATFORM offscreen
+  TIMEOUT 120)
+
 # The one suite that uses the platform's real Trash, and so the only place infrastructure::
 # QtTrashAdapter and the "the reported Trash path still holds the group" assumption are checked
 # against an actual operating system rather than against a double that satisfies them by
